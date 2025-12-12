@@ -30,12 +30,19 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     """Create database tables on startup (safe for Railway)."""
+    print("🚀 Starting Gel Invent API...")
+    print(f"Railway Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'Not set')}")
+    print(f"Database URL set: {'Yes' if os.getenv('DATABASE_URL') else 'No'}")
+    
     try:
+        print("Creating/verifying database tables...")
         Base.metadata.create_all(bind=engine)
         print("✅ Database tables created/verified successfully")
     except Exception as e:
         print(f"⚠️ Warning: Could not create tables: {e}")
         # Don't crash - tables might already exist
+    
+    print("✅ Application started successfully!")
 
 
 @app.get("/health")
