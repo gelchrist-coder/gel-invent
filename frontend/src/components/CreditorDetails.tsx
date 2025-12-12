@@ -360,7 +360,7 @@ function DebtModal({ creditorId, creditorName, onClose, onSuccess }: DebtModalPr
   const fetchProducts = async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/products/", {
+      const response = await fetch(`${API_BASE}/products/`, {
         headers: {
           "Authorization": `Bearer ${token}`,
         },
@@ -417,7 +417,7 @@ function DebtModal({ creditorId, creditorName, onClose, onSuccess }: DebtModalPr
       const token = localStorage.getItem("token");
       
       // Create the sale with credit payment method
-      const response = await fetch(`${API_BASE}/sales", {
+      const response = await fetch(`${API_BASE}/sales`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -677,7 +677,7 @@ function TransactionModal({ creditorId, creditorName, transactionType, onClose, 
 
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/creditors/transactions", {
+      const response = await fetch(`${API_BASE}/creditors/transactions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

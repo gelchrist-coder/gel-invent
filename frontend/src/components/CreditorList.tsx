@@ -32,7 +32,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
     try {
       setLoading(true);
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/creditors/", {
+      const response = await fetch(`${API_BASE}/creditors/`, {
         headers: {
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json"

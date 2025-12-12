@@ -34,7 +34,7 @@ export default function UserManagement() {
   const loadEmployees = async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/employees/", {
+      const response = await fetch(`${API_BASE}/employees/`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -63,7 +63,7 @@ export default function UserManagement() {
 
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/employees/", {
+      const response = await fetch(`${API_BASE}/employees/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
