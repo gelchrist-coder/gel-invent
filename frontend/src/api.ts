@@ -1,6 +1,9 @@
 import { NewMovement, NewProduct, NewSale, Product, Sale, StockMovement } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+
+// Export for use in other components
+export { API_BASE };
 
 type StockMovementResponse = Omit<StockMovement, "change"> & { change: string | number };
 

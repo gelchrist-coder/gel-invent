@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { API_BASE } from "../api";
 
 interface SalesDashboard {
   today: { count: number; total: number };
@@ -69,10 +70,8 @@ interface CreditorsSummary {
     name: string;
     phone: string | null;
     total_debt: number;
-  }>;
+  };
 }
-
-const API_BASE = "http://localhost:8000";
 
 export default function Reports() {
   // Check if current user is Admin

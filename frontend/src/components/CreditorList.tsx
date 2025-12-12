@@ -1,3 +1,4 @@
+import { API_BASE } from "../api";
 import { useState, useEffect } from "react";
 
 interface Creditor {
@@ -31,7 +32,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
     try {
       setLoading(true);
       const token = localStorage.getItem("token");
-      const response = await fetch("http://127.0.0.1:8000/creditors/", {
+      const response = await fetch(`${API_BASE}/creditors/", {
         headers: {
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json"

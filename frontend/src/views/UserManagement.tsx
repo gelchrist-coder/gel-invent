@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { API_BASE } from "../api";
 
 type Employee = {
   id: number;
@@ -33,7 +34,7 @@ export default function UserManagement() {
   const loadEmployees = async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch("http://127.0.0.1:8000/employees/", {
+      const response = await fetch(`${API_BASE}/employees/", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -62,7 +63,7 @@ export default function UserManagement() {
 
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch("http://127.0.0.1:8000/employees/", {
+      const response = await fetch(`${API_BASE}/employees/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -88,7 +89,7 @@ export default function UserManagement() {
   const handleToggleActive = async (employeeId: number, currentStatus: boolean) => {
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(`http://127.0.0.1:8000/employees/${employeeId}`, {
+      const response = await fetch(`${API_BASE}/employees/${employeeId}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",

@@ -1,3 +1,4 @@
+import { API_BASE } from "../api";
 import { useState, useEffect } from "react";
 
 interface Transaction {
@@ -359,7 +360,7 @@ function DebtModal({ creditorId, creditorName, onClose, onSuccess }: DebtModalPr
   const fetchProducts = async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch("http://127.0.0.1:8000/products/", {
+      const response = await fetch(`${API_BASE}/products/", {
         headers: {
           "Authorization": `Bearer ${token}`,
         },
@@ -416,7 +417,7 @@ function DebtModal({ creditorId, creditorName, onClose, onSuccess }: DebtModalPr
       const token = localStorage.getItem("token");
       
       // Create the sale with credit payment method
-      const response = await fetch("http://127.0.0.1:8000/sales", {
+      const response = await fetch(`${API_BASE}/sales", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -676,7 +677,7 @@ function TransactionModal({ creditorId, creditorName, transactionType, onClose, 
 
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch("http://127.0.0.1:8000/creditors/transactions", {
+      const response = await fetch(`${API_BASE}/creditors/transactions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

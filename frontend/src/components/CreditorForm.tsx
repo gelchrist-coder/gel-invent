@@ -1,3 +1,4 @@
+import { API_BASE } from "../api";
 import { useState } from "react";
 
 interface CreditorFormProps {
@@ -37,7 +38,7 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
       const token = localStorage.getItem("token");
       const url = creditor
         ? `http://127.0.0.1:8000/creditors/${creditor.id}`
-        : "http://127.0.0.1:8000/creditors/";
+        : `${API_BASE}/creditors/";
       
       const response = await fetch(url, {
         method: creditor ? "PUT" : "POST",

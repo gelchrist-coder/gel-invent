@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { API_BASE } from "../api";
 
 type LoginProps = {
   onLogin: (email: string, password: string) => void;
@@ -46,7 +47,7 @@ export default function Login({ onLogin }: LoginProps) {
         }
 
         // Call signup API
-        const signupResponse = await fetch("http://127.0.0.1:8000/auth/signup", {
+        const signupResponse = await fetch(`${API_BASE}/auth/signup`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -69,7 +70,7 @@ export default function Login({ onLogin }: LoginProps) {
         loginFormData.append("username", formData.email);
         loginFormData.append("password", formData.password);
 
-        const loginResponse = await fetch("http://127.0.0.1:8000/auth/login", {
+        const loginResponse = await fetch(`${API_BASE}/auth/login`, {
           method: "POST",
           body: loginFormData,
         });
@@ -84,7 +85,7 @@ export default function Login({ onLogin }: LoginProps) {
         localStorage.setItem("token", loginData.access_token);
 
         // Get user info
-        const userResponse = await fetch("http://127.0.0.1:8000/auth/me", {
+        const userResponse = await fetch(`${API_BASE}/auth/me`, {
           headers: { Authorization: `Bearer ${loginData.access_token}` },
         });
 
@@ -120,7 +121,7 @@ export default function Login({ onLogin }: LoginProps) {
         loginFormData.append("username", formData.email);
         loginFormData.append("password", formData.password);
 
-        const loginResponse = await fetch("http://127.0.0.1:8000/auth/login", {
+        const loginResponse = await fetch(`${API_BASE}/auth/login`, {
           method: "POST",
           body: loginFormData,
         });
@@ -136,7 +137,7 @@ export default function Login({ onLogin }: LoginProps) {
         localStorage.setItem("token", loginData.access_token);
 
         // Get user info
-        const userResponse = await fetch("http://127.0.0.1:8000/auth/me", {
+        const userResponse = await fetch(`${API_BASE}/auth/me`, {
           headers: { Authorization: `Bearer ${loginData.access_token}` },
         });
 
