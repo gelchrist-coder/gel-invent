@@ -1,6 +1,9 @@
 import { NewMovement, NewProduct, NewSale, Product, Sale, StockMovement } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+// Use HTTPS Railway URL in production, localhost in development
+const API_BASE = import.meta.env.VITE_API_URL 
+  || import.meta.env.VITE_API_BASE 
+  || (import.meta.env.PROD ? "https://gel-invent-production.up.railway.app" : "http://127.0.0.1:8000");
 
 // Export for use in other components
 export { API_BASE };
