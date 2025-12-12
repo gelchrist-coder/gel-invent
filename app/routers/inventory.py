@@ -1,0 +1,191 @@
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select, func, and_
+from sqlalchemy.orm import Session
+
+from ..database import get_db
+from ..models import Product, StockMovement, Sale, User
+from ..auth import get_current_active_user
+from app.utils.tenant import get_tenant_user_ids
+
+router = APIRouter(prefix="/inventory", tags=["inventory"])
+
+
+@router.get("/analytics")
+def get_inventory_analytics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get comprehensive inventory analytics including:
+    - Stock levels by location
+    - Low stock alerts
+    - Expiring products
+    - Movement summary
+    - Stock value
+    """
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    
+    # Get all products with their stock levels
+    products = db.scalars(select(Product).where(Product.user_id.in_(tenant_user_ids))).all()
+    
+    # Calculate stock for each product by location
+    stock_by_location = {}
+    low_stock_products = []
+    expiring_batches = []
+    total_stock_value = Decimal(0)
+    
+    today = datetime.now().date()
+    
+    for product in products:
+        movements = db.scalars(
+            select(StockMovement)
+            .where(and_(StockMovement.product_id == product.id, StockMovement.user_id.in_(tenant_user_ids)))
+            .order_by(StockMovement.created_at.desc())
+        ).all()
+        
+        # Calculate total stock
+        total_stock = sum(m.change for m in movements)
+        
+        # Calculate stock by location
+        location_stock = {}
+        for movement in movements:
+            loc = movement.location or "Main Store"
+            location_stock[loc] = location_stock.get(loc, Decimal(0)) + movement.change
+        
+        # Stock value
+        if product.cost_price and total_stock > 0:
+            total_stock_value += product.cost_price * total_stock
+        
+        # Low stock check (threshold: 10 units)
+        if total_stock < 10:
+            low_stock_products.append({
+                "id": product.id,
+                "name": product.name,
+                "sku": product.sku,
+                "current_stock": float(total_stock),
+                "threshold": 10,
+                "category": product.category,
+            })
+        
+        # Expiring batches
+        for movement in movements:
+            if movement.expiry_date and movement.change > 0:  # Only positive movements (stock in)
+                # Calculate remaining stock for this batch
+                batch_stock = movement.change
+                
+                # Check if batch is expiring
+                days_to_expiry = (movement.expiry_date - today).days
+                
+                if days_to_expiry <= 90 and batch_stock > 0:
+                    expiring_batches.append({
+                        "product_id": product.id,
+                        "product_name": product.name,
+                        "sku": product.sku,
+                        "batch_number": movement.batch_number,
+                        "quantity": float(batch_stock),
+                        "expiry_date": movement.expiry_date.isoformat(),
+                        "days_to_expiry": days_to_expiry,
+                        "status": "expired" if days_to_expiry < 0 else "expiring_soon" if days_to_expiry <= 7 else "expiring_30" if days_to_expiry <= 30 else "expiring_90",
+                        "location": movement.location or "Main Store",
+                    })
+        
+        # Add to location breakdown
+        for loc, qty in location_stock.items():
+            if loc not in stock_by_location:
+                stock_by_location[loc] = {
+                    "location": loc,
+                    "products": 0,
+                    "total_units": 0,
+                    "value": 0,
+                }
+            stock_by_location[loc]["products"] += 1
+            stock_by_location[loc]["total_units"] += float(qty)
+            if product.cost_price:
+                stock_by_location[loc]["value"] += float(product.cost_price * qty)
+    
+    # Movement summary (last 30 days)
+    thirty_days_ago = datetime.now() - timedelta(days=30)
+    recent_movements = db.scalars(
+        select(StockMovement)
+        .where(and_(StockMovement.created_at >= thirty_days_ago, StockMovement.user_id.in_(tenant_user_ids)))
+    ).all()
+    
+    movement_summary = {
+        "stock_in": 0,
+        "stock_out": 0,
+        "adjustments": 0,
+        "sales": 0,
+    }
+    
+    for movement in recent_movements:
+        if movement.change > 0:
+            if movement.reason in ["Initial Stock", "New Stock", "Stock Transfer In", "Restock"]:
+                movement_summary["stock_in"] += float(movement.change)
+            elif movement.reason == "Stock Count":
+                movement_summary["adjustments"] += float(movement.change)
+        else:
+            if movement.reason == "Sale":
+                movement_summary["sales"] += float(abs(movement.change))
+            else:
+                movement_summary["stock_out"] += float(abs(movement.change))
+    
+    return {
+        "stock_by_location": list(stock_by_location.values()),
+        "low_stock_alerts": low_stock_products,
+        "expiring_products": sorted(expiring_batches, key=lambda x: x["days_to_expiry"]),
+        "movement_summary": movement_summary,
+        "total_stock_value": float(total_stock_value),
+        "total_products": len(products),
+    }
+
+
+@router.get("/movements")
+def get_all_movements(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    location: str | None = Query(None),
+    reason: str | None = Query(None),
+    days: int = Query(30, ge=1, le=365),
+):
+    """
+    Get all stock movements with optional filters.
+    """
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    query = select(StockMovement).join(Product)
+    
+    # Filter by date and user
+    since_date = datetime.now() - timedelta(days=days)
+    query = query.where(and_(StockMovement.created_at >= since_date, StockMovement.user_id.in_(tenant_user_ids), Product.user_id.in_(tenant_user_ids)))
+    
+    # Filter by location
+    if location:
+        query = query.where(StockMovement.location == location)
+    
+    # Filter by reason
+    if reason:
+        query = query.where(StockMovement.reason == reason)
+    
+    query = query.order_by(StockMovement.created_at.desc())
+    
+    movements = db.scalars(query).all()
+    
+    result = []
+    for movement in movements:
+        product = db.scalar(select(Product).where(and_(Product.id == movement.product_id, Product.user_id.in_(tenant_user_ids))))
+        result.append({
+            "id": movement.id,
+            "product_id": movement.product_id,
+            "product_name": product.name if product else "Unknown",
+            "product_sku": product.sku if product else "N/A",
+            "change": float(movement.change),
+            "reason": movement.reason,
+            "batch_number": movement.batch_number,
+            "expiry_date": movement.expiry_date.isoformat() if movement.expiry_date else None,
+            "location": movement.location or "Main Store",
+            "created_at": movement.created_at.isoformat(),
+        })
+    
+    return result

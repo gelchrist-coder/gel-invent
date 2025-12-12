@@ -1,0 +1,159 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+:root {
+  font-family: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #0b1021;
+  background: radial-gradient(circle at 20% 20%, #f0f4ff, #ffffff 25%),
+    radial-gradient(circle at 80% 0%, #f6f9ff, #ffffff 30%), #ffffff;
+  min-height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #f7f9ff;
+}
+
+a {
+  color: inherit;
+}
+
+.app-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #e6e9f2;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(17, 24, 39, 0.06);
+}
+
+.button {
+  background: linear-gradient(120deg, #1f7aff, #8246ff);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.12s ease;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px rgba(31, 122, 255, 0.25);
+}
+
+.input, .textarea, .select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d8dce8;
+  background: #f9fbff;
+  font-size: 14px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+  color: #1a2235;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.section-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid #edf0f7;
+  font-size: 14px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #eef4ff;
+  color: #1f4ad7;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.product-card {
+  border: 1px solid #e7eaf3;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.08s ease;
+}
+
+.product-card:hover {
+  border-color: #c8d4ff;
+  box-shadow: 0 12px 30px rgba(31, 74, 215, 0.12);
+  transform: translateY(-1px);
+}
+
+.product-card.active {
+  border-color: #1f7aff;
+  box-shadow: 0 14px 30px rgba(31, 122, 255, 0.18);
+}
+
+.kpi {
+  display: grid;
+  gap: 6px;
+}
+
+.kpi-label {
+  color: #4a5368;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.kpi-value {
+  font-size: 26px;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    padding: 20px 16px 48px;
+  }
+}

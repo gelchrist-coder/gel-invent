@@ -1,0 +1,169 @@
+import { useState, useRef, useEffect } from "react";
+
+type Props = {
+  userName?: string;
+  userRole?: string;
+  businessName?: string;
+  onLogout?: () => void;
+};
+
+export default function TopBar({ userName = "User", userRole = "Admin", businessName = "Gel Invent", onLogout }: Props) {
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+
+    if (showDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showDropdown]);
+
+  return (
+    <header
+      style={{
+        height: 70,
+        background: "#ffffff",
+        borderBottom: "1px solid #e6e9f2",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "0 32px",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+        position: "sticky",
+        top: 0,
+        zIndex: 100,
+      }}
+    >
+      {/* Left spacer */}
+      <div style={{ flex: 1 }} />
+
+      {/* Center - Business Name */}
+      <div style={{ flex: 1, textAlign: "center" }}>
+        <h1
+          style={{
+            margin: 0,
+            fontSize: 22,
+            fontWeight: 700,
+            background: "linear-gradient(120deg, #1f7aff, #8246ff)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+            letterSpacing: "-0.5px",
+          }}
+        >
+          {businessName}
+        </h1>
+      </div>
+
+      {/* Right - User Info */}
+      <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
+        <div style={{ position: "relative" }} ref={dropdownRef}>
+          <div
+            onClick={() => setShowDropdown(!showDropdown)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "8px 16px 8px 8px",
+              background: "#f9fbff",
+              borderRadius: 999,
+              border: "1px solid #e6e9f2",
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#f0f5ff";
+              e.currentTarget.style.borderColor = "#1f7aff";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "#f9fbff";
+              e.currentTarget.style.borderColor = "#e6e9f2";
+            }}
+          >
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: "50%",
+                background: "linear-gradient(135deg, #1f7aff, #8246ff)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: 700,
+                fontSize: 16,
+                color: "#fff",
+                boxShadow: "0 4px 12px rgba(31, 122, 255, 0.3)",
+              }}
+            >
+              {userName.charAt(0).toUpperCase()}
+            </div>
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontWeight: 600, fontSize: 14, color: "#0b1021" }}>{userName}</div>
+              <div style={{ fontSize: 12, color: "#5f6475" }}>{userRole}</div>
+            </div>
+            <div style={{ marginLeft: 4, fontSize: 12, color: "#5f6475" }}>
+              {showDropdown ? "▲" : "▼"}
+            </div>
+          </div>
+
+          {/* Dropdown Menu */}
+          {showDropdown && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 8px)",
+                right: 0,
+                background: "#ffffff",
+                borderRadius: 12,
+                border: "1px solid #e6e9f2",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                minWidth: 200,
+                overflow: "hidden",
+                zIndex: 1000,
+              }}
+            >
+              {onLogout && (
+                <button
+                  onClick={() => {
+                    setShowDropdown(false);
+                    onLogout();
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "12px 16px",
+                    background: "transparent",
+                    border: "none",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontSize: 14,
+                    fontWeight: 500,
+                    color: "#ef4444",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    transition: "background 0.2s",
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "#fef2f2"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                >
+                  <span style={{ fontSize: 16 }}>🚪</span>
+                  Logout
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
