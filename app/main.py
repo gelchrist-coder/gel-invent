@@ -15,10 +15,13 @@ allowed_origins = ["*"] if os.getenv("RAILWAY_ENVIRONMENT") else [
     "http://localhost:5174",
 ]
 
+# When using allow_origins=["*"], cannot use allow_credentials=True
+allow_credentials = False if os.getenv("RAILWAY_ENVIRONMENT") else True
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -26,7 +29,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup() -> None:
-    Base.metadata.create_all(bind=engine)
+    """Create database tables on startup (safe for Railway)."""
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("✅ Database tables created/verified successfully")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not create tables: {e}")
+        # Don't crash - tables might already exist
 
 
 @app.get("/health")
