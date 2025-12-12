@@ -8,12 +8,14 @@ from .routers import products, sales, inventory, revenue, creditors, reports, au
 app = FastAPI(title="Gel Invent API", version="0.1.0")
 
 # Allow all origins in production (Railway), specific origins in development
-allowed_origins = ["*"] if os.getenv("RAILWAY_ENVIRONMENT") else [
+allowed_origins = [
+    "https://gel-invent.vercel.app",
+    "https://*.vercel.app",
     "http://127.0.0.1:5173",
     "http://localhost:5173",
     "http://127.0.0.1:5174",
     "http://localhost:5174",
-]
+] if not os.getenv("RAILWAY_ENVIRONMENT") else ["*"]
 
 # When using allow_origins=["*"], cannot use allow_credentials=True
 allow_credentials = False if os.getenv("RAILWAY_ENVIRONMENT") else True
