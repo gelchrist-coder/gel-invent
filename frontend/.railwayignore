@@ -1,4 +1,0 @@
-# Railway ignore file
-node_modules/
-.git/
-dist/
