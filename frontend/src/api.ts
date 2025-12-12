@@ -1,6 +1,6 @@
 import { NewMovement, NewProduct, NewSale, Product, Sale, StockMovement } from "./types";
 
-// Force HTTPS Railway backend in production
+// Railway backend URL - production deployment v2.0
 const API_BASE = "https://gel-invent-production.up.railway.app";
 
 // Export for use in other components
