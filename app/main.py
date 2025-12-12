@@ -30,7 +30,7 @@ app.add_middleware(
 
 
 @app.on_event("startup")
-def on_startup() -> None:
+async def on_startup() -> None:
     """Create database tables on startup (safe for Railway)."""
     print("🚀 Starting Gel Invent API...")
     print(f"Railway Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'Not set')}")
@@ -44,18 +44,19 @@ def on_startup() -> None:
         print(f"⚠️ Warning: Could not create tables: {e}")
         # Don't crash - tables might already exist
     
-    print("✅ Application started successfully!")
-
-
-@app.get("/health")
-def health_check() -> dict[str, str]:
-    """Lightweight health probe endpoint."""
-    return {"status": "ok"}
+    print("✅ Application started and ready to accept requests!")
 
 
 @app.get("/")
-def root() -> dict[str, str]:
-    return {"message": "Gel Invent API"}
+async def root() -> dict[str, str]:
+    """Root endpoint - also serves as health check."""
+    return {"message": "Gel Invent API", "status": "healthy"}
+
+
+@app.get("/health")
+async def health_check() -> dict[str, str]:
+    """Lightweight health probe endpoint."""
+    return {"status": "healthy"}
 
 
 app.include_router(auth.router)
