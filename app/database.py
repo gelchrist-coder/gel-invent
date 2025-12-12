@@ -46,6 +46,12 @@ engine = create_engine(
     echo=False,
     future=True,
     pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
+    pool_recycle=3600,
+    connect_args={
+        "connect_timeout": 10,
+    } if "postgresql" in DATABASE_URL else {},
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 

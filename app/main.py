@@ -32,18 +32,25 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup() -> None:
     """Create database tables on startup (safe for Railway)."""
+    import asyncio
+    
     print("🚀 Starting Gel Invent API...")
     print(f"Railway Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'Not set')}")
     print(f"Database URL set: {'Yes' if os.getenv('DATABASE_URL') else 'No'}")
     
-    try:
-        print("Creating/verifying database tables...")
-        Base.metadata.create_all(bind=engine)
-        print("✅ Database tables created/verified successfully")
-    except Exception as e:
-        print(f"⚠️ Warning: Could not create tables: {e}")
-        # Don't crash - tables might already exist
+    # Run table creation in background to not block startup
+    async def create_tables():
+        try:
+            await asyncio.sleep(1)  # Small delay to let server start
+            print("Creating/verifying database tables...")
+            Base.metadata.create_all(bind=engine)
+            print("✅ Database tables created/verified successfully")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not create tables: {e}")
+            # Don't crash - tables might already exist
     
+    # Start table creation in background
+    asyncio.create_task(create_tables())
     print("✅ Application started and ready to accept requests!")
 
 
