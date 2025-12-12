@@ -17,8 +17,15 @@ export default function Dashboard({ onNavigate }: Props) {
   const currentUser = localStorage.getItem("user");
   const userRole = currentUser ? JSON.parse(currentUser).role : null;
   const isAdmin = userRole === "Admin";
+  const token = localStorage.getItem("token");
 
   useEffect(() => {
+    // Only fetch products if authenticated
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
     const loadData = async () => {
       try {
         const data = await fetchProducts();
@@ -28,11 +35,12 @@ export default function Dashboard({ onNavigate }: Props) {
       }
     };
     loadData();
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     const loadDashboard = async () => {
-      if (!isAdmin) {
+      // Only fetch dashboard if authenticated and admin
+      if (!token || !isAdmin) {
         setDashboardLoading(false);
         return;
       }
@@ -46,7 +54,7 @@ export default function Dashboard({ onNavigate }: Props) {
       }
     };
     loadDashboard();
-  }, [isAdmin]);
+  }, [token, isAdmin]);
 
   // Top products from dashboard data
   const topProducts = dashboardData?.top_products || [];
