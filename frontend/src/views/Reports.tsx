@@ -70,7 +70,7 @@ interface CreditorsSummary {
     name: string;
     phone: string | null;
     total_debt: number;
-  };
+  }>;
 }
 
 export default function Reports() {
