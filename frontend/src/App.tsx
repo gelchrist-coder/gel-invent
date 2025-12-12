@@ -91,6 +91,11 @@ export default function App() {
   }, [currentUserId]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setLoadingProducts(false);
+      return;
+    }
+    
     const run = async () => {
       setLoadingProducts(true);
       try {
@@ -102,7 +107,7 @@ export default function App() {
       }
     };
     run();
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     const loadMovements = async () => {
