@@ -1,10 +1,7 @@
 import { NewMovement, NewProduct, NewSale, Product, Sale, StockMovement } from "./types";
 
-// PRODUCTION: Use HTTPS Railway backend URL
-// DEVELOPMENT: Use localhost
-const API_BASE = import.meta.env.VITE_API_URL 
-  || import.meta.env.VITE_API_BASE 
-  || (import.meta.env.PROD ? "https://gel-invent-production.up.railway.app" : "http://127.0.0.1:8000");
+// Force HTTPS Railway backend in production
+const API_BASE = "https://gel-invent-production.up.railway.app";
 
 // Export for use in other components
 export { API_BASE };
