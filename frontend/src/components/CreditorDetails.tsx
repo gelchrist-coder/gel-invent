@@ -42,7 +42,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
     try {
       setLoading(true);
       const token = localStorage.getItem("token");
-      const response = await fetch(`http://127.0.0.1:8000/creditors/${creditor.id}/transactions`, {
+      const response = await fetch(`${API_BASE}/creditors/${creditor.id}/transactions`, {
         headers: {
           "Authorization": `Bearer ${token}`,
         },

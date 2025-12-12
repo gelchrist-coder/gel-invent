@@ -37,8 +37,8 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
     try {
       const token = localStorage.getItem("token");
       const url = creditor
-        ? `http://127.0.0.1:8000/creditors/${creditor.id}`
-        : `${API_BASE}/creditors/";
+        ? `${API_BASE}/creditors/${creditor.id}`
+        : `${API_BASE}/creditors/`;
       
       const response = await fetch(url, {
         method: creditor ? "PUT" : "POST",
