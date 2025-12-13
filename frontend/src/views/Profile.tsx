@@ -1,4 +1,50 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+
+import { changePassword } from "../api";
+
+type PasswordInputProps = {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  autoComplete?: string;
+};
+
+function PasswordInput({ label, value, onChange, autoComplete }: PasswordInputProps) {
+  const [show, setShow] = useState(false);
+
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>{label}</span>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="input"
+          autoComplete={autoComplete}
+          style={{ flex: 1 }}
+        />
+        <button
+          type="button"
+          onClick={() => setShow((prev) => !prev)}
+          className="button"
+          style={{ background: "#6b7280", fontSize: 14, padding: "8px 12px" }}
+        >
+          {show ? "Hide" : "Show"}
+        </button>
+      </div>
+    </label>
+  );
+}
+
+function getPasswordRuleError(password: string): string | null {
+  if (password.length < 8) return "Password must be at least 8 characters";
+  if (!/[a-z]/.test(password)) return "Password must include a lowercase letter";
+  if (!/[A-Z]/.test(password)) return "Password must include an uppercase letter";
+  if (!/[0-9]/.test(password)) return "Password must include a number";
+  if (!/[^A-Za-z0-9]/.test(password)) return "Password must include a special character";
+  return null;
+}
 
 export default function Profile() {
   // Get user role from localStorage
@@ -36,6 +82,13 @@ export default function Profile() {
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+
   // Load saved settings from localStorage on mount
   useEffect(() => {
     const savedBusiness = localStorage.getItem("businessInfo");
@@ -70,6 +123,46 @@ export default function Profile() {
     setEditing(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
+  };
+
+  const openChangePassword = () => {
+    setChangePasswordError(null);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowChangePassword(true);
+  };
+
+  const submitChangePassword = async () => {
+    setChangePasswordError(null);
+
+    if (!currentPassword) {
+      setChangePasswordError("Please enter your current password");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setChangePasswordError("New password and confirmation do not match");
+      return;
+    }
+
+    const ruleError = getPasswordRuleError(newPassword);
+    if (ruleError) {
+      setChangePasswordError(ruleError);
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      await changePassword({ current_password: currentPassword, new_password: newPassword });
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
+    } catch (error) {
+      setChangePasswordError(error instanceof Error ? error.message : "Failed to change password");
+    } finally {
+      setChangingPassword(false);
+    }
   };
 
   return (
@@ -376,9 +469,106 @@ export default function Profile() {
                   fontSize: 14,
                   padding: "8px 16px",
                 }}
+                onClick={openChangePassword}
               >
                 Change Password
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showChangePassword && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+            padding: 16,
+          }}
+          onClick={() => (changingPassword ? null : setShowChangePassword(false))}
+        >
+          <div
+            className="card"
+            style={{ width: 520, maxWidth: "100%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 12px", color: "#1a2235" }}>
+              Change Password
+            </h2>
+
+            {changePasswordError && (
+              <div
+                style={{
+                  padding: 12,
+                  background: "#fee2e2",
+                  border: "1px solid #ef4444",
+                  borderRadius: 8,
+                  marginBottom: 12,
+                  color: "#991b1b",
+                  fontWeight: 500,
+                  fontSize: 13,
+                }}
+              >
+                {changePasswordError}
+              </div>
+            )}
+
+            <div style={{ display: "grid", gap: 14 }}>
+              <PasswordInput
+                label="Current Password"
+                value={currentPassword}
+                onChange={setCurrentPassword}
+                autoComplete="current-password"
+              />
+              <PasswordInput
+                label="New Password"
+                value={newPassword}
+                onChange={setNewPassword}
+                autoComplete="new-password"
+              />
+              <PasswordInput
+                label="Confirm New Password"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                autoComplete="new-password"
+              />
+
+              <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
+                Must be 8+ characters and include uppercase, lowercase, number, and special character.
+              </p>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowChangePassword(false)}
+                  style={{
+                    padding: "10px 20px",
+                    background: "transparent",
+                    border: "1px solid #d1d5db",
+                    borderRadius: 8,
+                    cursor: changingPassword ? "not-allowed" : "pointer",
+                    fontWeight: 600,
+                    opacity: changingPassword ? 0.6 : 1,
+                  }}
+                  disabled={changingPassword}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitChangePassword}
+                  className="button"
+                  style={{ background: "#1f7aff" }}
+                  disabled={changingPassword}
+                >
+                  {changingPassword ? "Updating..." : "Update Password"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

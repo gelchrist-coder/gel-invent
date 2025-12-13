@@ -62,6 +62,16 @@ export async function fetchMe(): Promise<AuthUser> {
   return jsonRequest<AuthUser>("/auth/me");
 }
 
+export async function changePassword(payload: {
+  current_password: string;
+  new_password: string;
+}): Promise<{ message: string }> {
+  return jsonRequest<{ message: string }>("/auth/password/change", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchProducts(): Promise<Product[]> {
   return jsonRequest<Product[]>("/products/");
 }

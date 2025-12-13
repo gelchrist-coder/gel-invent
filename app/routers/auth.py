@@ -109,6 +109,11 @@ class PasswordResetConfirm(BaseModel):
     new_password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 @router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     """Register a new user"""
@@ -242,3 +247,23 @@ def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(
     token.used_at = now
     db.commit()
     return {"message": "Password updated successfully"}
+
+
+@router.post("/password/change")
+def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Change password for the currently authenticated user."""
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+
+    rule_error = _password_rule_error(payload.new_password)
+    if rule_error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rule_error)
+
+    current_user.hashed_password = get_password_hash(payload.new_password)
+    db.add(current_user)
+    db.commit()
+    return {"message": "Password changed successfully"}
