@@ -241,9 +241,20 @@ export default function App() {
 
   const handleCreateProduct = async (payload: NewProduct, branchIdOverride?: number | null) => {
     const created = await createProduct(payload, branchIdOverride);
-    setProducts((prev) => [created, ...prev]);
+
+    // If admin created into a different branch, switch to it so the list matches.
+    if (userRole === "Admin" && branchIdOverride != null && branchIdOverride !== activeBranchId) {
+      setActiveBranchId(branchIdOverride);
+      localStorage.setItem("activeBranchId", String(branchIdOverride));
+      return;
+    }
+
+    const createdWithName = {
+      ...created,
+      created_by_name: created.created_by_name ?? userName,
+    };
+    setProducts((prev) => [createdWithName, ...prev]);
     setSelectedId(created.id);
-    setShowAddProduct(false);
   };
 
   const handleEditProduct = async (id: number, updates: Partial<Product>) => {
@@ -338,6 +349,7 @@ export default function App() {
                   </div>
                   <ProductForm
                     onCreate={handleCreateProduct}
+                    onCancel={() => setShowAddProduct(false)}
                     userRole={userRole}
                     branches={branches}
                     activeBranchId={activeBranchId}

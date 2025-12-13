@@ -381,7 +381,7 @@ export default function ProductForm({
                 </small>
               </label>
               <label>
-                Initial Location
+                Branch
                 {role === "Admin" && branches && branches.length > 0 ? (
                   <select
                     className="input"

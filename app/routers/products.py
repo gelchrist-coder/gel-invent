@@ -75,7 +75,9 @@ def create_product(
         )
         db.add(movement)
         db.commit()
-    
+
+    # Populate computed fields expected by the frontend.
+    product.created_by_name = current_user.name
     return product
 
 
@@ -227,6 +229,7 @@ def update_product(
     
     db.commit()
     db.refresh(product)
+    product.created_by_name = (db.query(models.User).filter(models.User.id == product.user_id).first() or current_user).name
     return product
 
 
