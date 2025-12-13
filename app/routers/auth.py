@@ -187,9 +187,28 @@ def login(
 
 
 @router.get("/me", response_model=UserResponse)
-def get_current_user_info(current_user: User = Depends(get_current_active_user)):
+def get_current_user_info(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
     """Get current user information"""
-    return _serialize_user(current_user)
+    # Employees should see the business categories configured by the owner.
+    categories = _parse_categories(getattr(current_user, "categories", None))
+    if not categories and current_user.role != "Admin" and current_user.created_by:
+        owner = db.query(User).filter(User.id == current_user.created_by).first()
+        if owner:
+            categories = _parse_categories(getattr(owner, "categories", None))
+
+    return UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        name=current_user.name,
+        role=current_user.role,
+        business_name=current_user.business_name,
+        categories=categories,
+        branch_id=getattr(current_user, "branch_id", None),
+        is_active=current_user.is_active,
+    )
 
 
 @router.post("/password-reset/request", response_model=PasswordResetRequestResponse)
