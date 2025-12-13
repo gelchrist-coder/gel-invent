@@ -34,19 +34,6 @@ type InventoryAnalytics = {
   total_products: number;
 };
 
-type MovementHistory = {
-  id: number;
-  product_id: number;
-  product_name: string;
-  product_sku: string;
-  change: number;
-  reason: string;
-  batch_number: string | null;
-  expiry_date: string | null;
-  location: string;
-  created_at: string;
-};
-
 type Props = {
   analytics: InventoryAnalytics;
 };

@@ -16,6 +16,9 @@ export type AuthUser = {
   is_active: boolean;
 };
 
+type JsonObject = Record<string, unknown>;
+type JsonArray = Record<string, unknown>[];
+
 type StockMovementResponse = Omit<StockMovement, "change"> & { change: string | number };
 
 async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
@@ -133,28 +136,28 @@ export async function deleteSale(saleId: number): Promise<void> {
 
 // Inventory API
 
-export async function fetchInventoryAnalytics(): Promise<any> {
-  return jsonRequest<any>("/inventory/analytics");
+export async function fetchInventoryAnalytics(): Promise<JsonObject> {
+  return jsonRequest<JsonObject>("/inventory/analytics");
 }
 
-export async function fetchAllMovements(days: number = 30, location?: string, reason?: string): Promise<any[]> {
+export async function fetchAllMovements(days: number = 30, location?: string, reason?: string): Promise<JsonArray> {
   const params = new URLSearchParams({ days: days.toString() });
   if (location) params.append("location", location);
   if (reason) params.append("reason", reason);
-  return jsonRequest<any[]>(`/inventory/movements?${params.toString()}`);
+  return jsonRequest<JsonArray>(`/inventory/movements?${params.toString()}`);
 }
 
 // Revenue API
 
-export async function fetchRevenueAnalytics(period: string = "30d", startDate?: string, endDate?: string): Promise<any> {
+export async function fetchRevenueAnalytics(period: string = "30d", startDate?: string, endDate?: string): Promise<JsonObject> {
   const params = new URLSearchParams({ period });
   if (startDate) params.append("start_date", startDate);
   if (endDate) params.append("end_date", endDate);
-  return jsonRequest<any>(`/revenue/analytics?${params.toString()}`);
+  return jsonRequest<JsonObject>(`/revenue/analytics?${params.toString()}`);
 }
 
 // Reports API
 
-export async function fetchSalesDashboard(): Promise<any> {
-  return jsonRequest<any>("/reports/sales-dashboard");
+export async function fetchSalesDashboard(): Promise<JsonObject> {
+  return jsonRequest<JsonObject>("/reports/sales-dashboard");
 }

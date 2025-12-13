@@ -1,14 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { createMovement, createProduct, deleteProduct, fetchMe, fetchMovements, fetchProducts, updateProduct } from "./api";
+import { createMovement, createProduct, deleteProduct, fetchMe, fetchProducts, updateProduct } from "./api";
 import Layout from "./components/Layout";
-import MovementForm from "./components/MovementForm";
-import MovementTable from "./components/MovementTable";
 import ProductForm from "./components/ProductForm";
 import ProductList from "./components/ProductList";
 import { useAppCategories } from "./categories";
-import { computeBalance } from "./state";
-import { NewMovement, NewProduct, Product, StockMovement } from "./types";
+import { NewProduct, Product } from "./types";
 import Creditors from "./views/Creditors";
 import Dashboard from "./views/Dashboard";
 import Inventory from "./views/Inventory";
@@ -24,9 +21,6 @@ export default function App() {
   const [activeView, setActiveView] = useState("dashboard");
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [movements, setMovements] = useState<StockMovement[]>([]);
-  const [loadingProducts, setLoadingProducts] = useState(true);
-  const [loadingMovements, setLoadingMovements] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterExpiry, setFilterExpiry] = useState("all");
@@ -126,49 +120,20 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthenticated) {
-      setLoadingProducts(false);
       return;
     }
     
     const run = async () => {
-      setLoadingProducts(true);
-      try {
-        const data = await fetchProducts();
-        setProducts(data);
-        setSelectedId((prev) => prev ?? (data[0]?.id ?? null));
-      } finally {
-        setLoadingProducts(false);
-      }
+      const data = await fetchProducts();
+      setProducts(data);
+      setSelectedId((prev) => prev ?? (data[0]?.id ?? null));
     };
     run();
   }, [isAuthenticated]);
 
-  useEffect(() => {
-    const loadMovements = async () => {
-      if (selectedId === null) {
-        setMovements([]);
-        return;
-      }
-      setLoadingMovements(true);
-      try {
-        const data = await fetchMovements(selectedId);
-        setMovements(data);
-      } finally {
-        setLoadingMovements(false);
-      }
-    };
 
-    loadMovements();
-  }, [selectedId]);
 
-  const selectedProduct = useMemo(
-    () => products.find((p) => p.id === selectedId) ?? null,
-    [products, selectedId],
-  );
-
-  const balance = useMemo(() => computeBalance(movements), [movements]);
-
-  const handleLogin = (email: string, password: string) => {
+  const handleLogin = (_email: string, _password: string) => {
     // In production, this would validate against a backend API
     // For now, we just set authentication to true
     setIsAuthenticated(true);
@@ -205,17 +170,6 @@ export default function App() {
 
   const handleStockAdjustment = async (productId: number, change: number, reason: string, expiry_date?: string, location?: string) => {
     await createMovement(productId, { change, reason, expiry_date: expiry_date || null, location: location || null });
-    // Refresh movements to show the new adjustment
-    if (selectedId === productId) {
-      const updated = await fetchMovements(productId);
-      setMovements(updated);
-    }
-  };
-
-  const handleCreateMovement = async (payload: NewMovement) => {
-    if (!selectedProduct) return;
-    const created = await createMovement(selectedProduct.id, payload);
-    setMovements((prev) => [created, ...prev]);
   };
 
   const renderView = () => {

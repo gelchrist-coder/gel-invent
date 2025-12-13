@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { API_BASE } from "../api";
 
 interface SalesDashboard {
@@ -85,14 +85,7 @@ export default function Reports() {
   const [creditorsData, setCreditorsData] = useState<CreditorsSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    // Only load data if user is Admin
-    if (isAdmin) {
-      loadData();
-    }
-  }, [activeTab, isAdmin]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
@@ -122,7 +115,14 @@ export default function Reports() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, creditorsData, inventoryData, salesData]);
+
+  useEffect(() => {
+    // Only load data if user is Admin
+    if (isAdmin) {
+      loadData();
+    }
+  }, [isAdmin, loadData]);
 
   const formatCurrency = (amount: number) => `GHS ${amount.toFixed(2)}`;
   const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString();
@@ -150,7 +150,6 @@ export default function Reports() {
   return (
     <div style={{ padding: 20 }}>
       <h1 style={{ marginBottom: 24, fontSize: 28, fontWeight: 700 }}>Reports</h1>
-
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 24, borderBottom: "2px solid #e5e7eb" }}>
         {(["sales", "inventory", "creditors"] as const).map((tab) => (

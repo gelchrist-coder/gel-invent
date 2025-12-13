@@ -73,7 +73,7 @@ def get_revenue_analytics(
     sales = db.scalars(sales_query).all()
     
     # Get losses/write-offs (stock movements with negative change for expired/damaged goods)
-    loss_reasons = ["Expired", "Damaged", "Lost", "Write-off", "Spoiled", "Destroyed"]
+    loss_reasons = ["Expired", "Damaged", "Lost", "Lost/Stolen", "Write-off", "Spoiled", "Destroyed"]
     losses_query = select(StockMovement).join(Product).where(
         StockMovement.created_at >= start,
         StockMovement.created_at <= end,
@@ -94,6 +94,44 @@ def get_revenue_analytics(
     payment_methods = {}
     product_revenue = {}
     daily_revenue = {}
+
+    def compute_returns_totals(range_start: datetime, range_end: datetime) -> tuple[Decimal, Decimal, Decimal]:
+        """Returns (revenue, cost, profit) for stock movements marked as Returned.*"""
+        returns_query = select(StockMovement).join(Product).where(
+            StockMovement.created_at >= range_start,
+            StockMovement.created_at <= range_end,
+            StockMovement.change > 0,
+            StockMovement.reason.like("Returned%"),
+            Product.user_id.in_(tenant_user_ids),
+        )
+        returns_movements = db.scalars(returns_query).all()
+
+        returns_revenue = Decimal(0)
+        returns_cost = Decimal(0)
+        returns_profit = Decimal(0)
+
+        for movement in returns_movements:
+            product = db.scalar(
+                select(Product).where(
+                    Product.id == movement.product_id,
+                    Product.user_id.in_(tenant_user_ids),
+                )
+            )
+            if not product:
+                continue
+
+            selling = Decimal(product.selling_price) if product.selling_price is not None else Decimal(0)
+            cost = Decimal(product.cost_price) if product.cost_price is not None else Decimal(0)
+
+            revenue_value = movement.change * selling
+            cost_value = movement.change * cost
+            profit_value = revenue_value - cost_value
+
+            returns_revenue += revenue_value
+            returns_cost += cost_value
+            returns_profit += profit_value
+
+        return returns_revenue, returns_cost, returns_profit
     
     for sale in sales:
         # Revenue
@@ -147,6 +185,39 @@ def get_revenue_analytics(
         # Daily revenue
         day_key = sale.created_at.strftime("%Y-%m-%d")
         daily_revenue[day_key] = daily_revenue.get(day_key, Decimal(0)) + sale.total_price
+
+    # Deduct returns from revenue using product selling_price
+    returns_revenue, returns_cost, returns_profit = compute_returns_totals(start, end)
+    if returns_revenue != 0:
+        total_revenue -= returns_revenue
+        cash_revenue -= returns_revenue
+        total_profit -= returns_profit
+        total_cost -= returns_cost
+        # Reflect on payment breakdown + daily trend (assume cash refund)
+        payment_methods["cash"] = payment_methods.get("cash", Decimal(0)) - returns_revenue
+
+        # Reduce daily revenue trend by day of the return movement
+        returns_movements_for_days = db.scalars(
+            select(StockMovement)
+            .where(
+                StockMovement.created_at >= start,
+                StockMovement.created_at <= end,
+                StockMovement.change > 0,
+                StockMovement.reason.like("Returned%"),
+                StockMovement.user_id.in_(tenant_user_ids),
+            )
+        ).all()
+        for movement in returns_movements_for_days:
+            product = db.scalar(
+                select(Product).where(
+                    Product.id == movement.product_id,
+                    Product.user_id.in_(tenant_user_ids),
+                )
+            )
+            if not product or product.selling_price is None:
+                continue
+            day_key = movement.created_at.strftime("%Y-%m-%d")
+            daily_revenue[day_key] = daily_revenue.get(day_key, Decimal(0)) - (movement.change * Decimal(product.selling_price))
     
     # Calculate losses from expired/damaged goods
     for loss in losses:
@@ -178,6 +249,9 @@ def get_revenue_analytics(
     )
     prev_sales = db.scalars(prev_sales_query).all()
     prev_revenue = sum(s.total_price for s in prev_sales)
+
+    prev_returns_revenue, _, _ = compute_returns_totals(prev_start, prev_end)
+    prev_revenue -= prev_returns_revenue
     
     revenue_growth = ((total_revenue - prev_revenue) / prev_revenue * 100) if prev_revenue > 0 else Decimal(0)
     

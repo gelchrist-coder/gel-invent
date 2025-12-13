@@ -1,9 +1,13 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { ComponentProps } from "react";
 import { fetchInventoryAnalytics, fetchAllMovements } from "../api";
 import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
 import LocationBreakdown from "../components/LocationBreakdown";
 import MovementHistory from "../components/MovementHistory";
+
+type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
+type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
 
 export default function Inventory() {
   // Check if current user is Admin
@@ -11,13 +15,13 @@ export default function Inventory() {
   const userRole = currentUser ? JSON.parse(currentUser).role : null;
   const isAdmin = userRole === "Admin";
 
-  const [analytics, setAnalytics] = useState<any>(null);
-  const [movements, setMovements] = useState<any[]>([]);
+  const [analytics, setAnalytics] = useState<InventoryAnalytics | null>(null);
+  const [movements, setMovements] = useState<MovementHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [movementDays, setMovementDays] = useState(30);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     // Only load data if user is Admin
     if (!isAdmin) return;
     
@@ -28,14 +32,14 @@ export default function Inventory() {
         fetchInventoryAnalytics(),
         fetchAllMovements(movementDays),
       ]);
-      setAnalytics(analyticsData);
-      setMovements(movementsData);
+      setAnalytics(analyticsData as InventoryAnalytics);
+      setMovements(movementsData as MovementHistoryRow[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load inventory data");
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAdmin, movementDays]);
 
   useEffect(() => {
     if (isAdmin) {
@@ -43,7 +47,7 @@ export default function Inventory() {
     } else {
       setLoading(false);
     }
-  }, [movementDays, isAdmin]);
+  }, [isAdmin, loadData, movementDays]);
 
   // Block access for non-Admin users
   if (!isAdmin) {
@@ -105,7 +109,7 @@ export default function Inventory() {
     return null;
   }
 
-  const locations = analytics.stock_by_location.map((loc: any) => loc.location);
+  const locations = analytics.stock_by_location.map((loc) => loc.location);
 
   return (
     <div className="app-shell">

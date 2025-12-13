@@ -1,5 +1,5 @@
 import { API_BASE } from "../api";
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface Transaction {
   id: number;
@@ -34,11 +34,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showDebtModal, setShowDebtModal] = useState(false);
 
-  useEffect(() => {
-    fetchTransactions();
-  }, [creditor.id]);
-
-  const fetchTransactions = async () => {
+  const fetchTransactions = useCallback(async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem("token");
@@ -47,11 +43,11 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
           "Authorization": `Bearer ${token}`,
         },
       });
-      
+
       if (!response.ok) {
         throw new Error("Failed to fetch transactions");
       }
-      
+
       const data = await response.json();
       setTransactions(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -60,7 +56,11 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
     } finally {
       setLoading(false);
     }
-  };
+  }, [creditor.id]);
+
+  useEffect(() => {
+    fetchTransactions();
+  }, [fetchTransactions]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-GH", {
@@ -343,7 +343,7 @@ interface Product {
   quantity_in_stock: number;
 }
 
-function DebtModal({ creditorId, creditorName, onClose, onSuccess }: DebtModalProps) {
+function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }: DebtModalProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState("");
   const [quantity, setQuantity] = useState("");

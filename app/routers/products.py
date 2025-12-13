@@ -138,8 +138,8 @@ def record_movement(
     movement_data = payload.model_dump()
     movement_data["batch_number"] = batch_number
     movement_data["user_id"] = current_user.id
-    # Set expiry_date from product if available
-    if product.expiry_date:
+    # If client didn't provide an expiry_date, fall back to product expiry_date
+    if movement_data.get("expiry_date") is None and product.expiry_date:
         movement_data["expiry_date"] = product.expiry_date
     
     movement = models.StockMovement(product_id=product_id, **movement_data)

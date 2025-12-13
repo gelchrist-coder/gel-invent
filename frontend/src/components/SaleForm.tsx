@@ -543,7 +543,7 @@ function CreditorSelectionModal({ onSelect, onClose }: CreditorSelectionModalPro
   const fetchCreditors = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE}/creditors/");
+      const response = await fetch(`${API_BASE}/creditors/`);
       const data = await response.json();
       setCreditors(data);
     } catch (error) {
@@ -559,7 +559,7 @@ function CreditorSelectionModal({ onSelect, onClose }: CreditorSelectionModalPro
 
   const handleCreateCreditor = async (name: string, phone: string) => {
     try {
-      const response = await fetch(`${API_BASE}/creditors/", {
+      const response = await fetch(`${API_BASE}/creditors/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, phone: phone || null }),

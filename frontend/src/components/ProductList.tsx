@@ -31,7 +31,13 @@ export default function ProductList({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
   const [adjustingId, setAdjustingId] = useState<number | null>(null);
-  const [adjustment, setAdjustment] = useState({ quantity: "", reason: "", expiry_date: "", location: "Main Store" });
+  const [adjustment, setAdjustment] = useState({
+    quantity: "",
+    reason: "",
+    expiry_date: "",
+    location: "Main Store",
+    returned_by: "",
+  });
   const [stockData, setStockData] = useState<Record<number, number>>({});
   const [busy, setBusy] = useState(false);
 
@@ -114,12 +120,12 @@ export default function ProductList({
   const startAdjustment = (productId: number) => {
     const product = products.find(p => p.id === productId);
     setAdjustingId(productId);
-    setAdjustment({ quantity: "", reason: "", expiry_date: product?.expiry_date || "", location: "Main Store" });
+    setAdjustment({ quantity: "", reason: "", expiry_date: product?.expiry_date || "", location: "Main Store", returned_by: "" });
   };
 
   const cancelAdjustment = () => {
     setAdjustingId(null);
-    setAdjustment({ quantity: "", reason: "", expiry_date: "", location: "Main Store" });
+    setAdjustment({ quantity: "", reason: "", expiry_date: "", location: "Main Store", returned_by: "" });
   };
 
   const saveAdjustment = async (productId: number) => {
@@ -132,15 +138,25 @@ export default function ProductList({
       alert("Please provide a reason for the adjustment");
       return;
     }
+    if (adjustment.reason === "Returned" && !adjustment.returned_by.trim()) {
+      alert("Please enter who returned the item");
+      return;
+    }
     if (adjustment.reason === "New Stock" && !adjustment.expiry_date) {
       alert("Please set an expiry date for new stock");
       return;
     }
+
+    const reasonToSend =
+      adjustment.reason === "Returned"
+        ? `Returned (${adjustment.returned_by.trim()})`
+        : adjustment.reason;
+
     setBusy(true);
     try {
-      await onStockAdjust(productId, qty, adjustment.reason, adjustment.expiry_date || undefined, adjustment.location);
+      await onStockAdjust(productId, qty, reasonToSend, adjustment.expiry_date || undefined, adjustment.location);
       setAdjustingId(null);
-      setAdjustment({ quantity: "", reason: "", expiry_date: "", location: "Main Store" });
+      setAdjustment({ quantity: "", reason: "", expiry_date: "", location: "Main Store", returned_by: "" });
       // Refresh stock data
       const movements = await fetchMovements(productId);
       const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
@@ -490,6 +506,24 @@ export default function ProductList({
                   <option value="Lost/Stolen">Lost/Stolen</option>
                 </select>
               </label>
+              {adjustment.reason === "Returned" && (
+                <label>
+                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                    Returned By (Customer) *
+                  </span>
+                  <input
+                    className="input"
+                    type="text"
+                    value={adjustment.returned_by}
+                    onChange={(e) => setAdjustment({ ...adjustment, returned_by: e.target.value })}
+                    placeholder="e.g., John Doe"
+                    style={{ fontSize: 14, padding: 10 }}
+                  />
+                  <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
+                    This will be saved on the stock movement
+                  </small>
+                </label>
+              )}
               <label>
                 <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                   Location/Warehouse
@@ -593,7 +627,8 @@ export default function ProductList({
             </thead>
             <tbody>
               {filteredProducts.map((p) => {
-                const stock = stockData[p.id] ?? 0;
+                const stock = stockData[p.id];
+                const stockLoaded = stock !== undefined;
                 const profitMargin = calculateProfitMargin(p.cost_price, p.selling_price);
 
                 return (
@@ -623,13 +658,21 @@ export default function ProductList({
                     </td>
                     <td style={{ padding: "12px", textAlign: "right", fontWeight: 500 }}>
                       <span style={{ 
-                        color: stock > 0 ? "#059669" : "#dc2626",
-                        background: stock > 0 ? "#d1fae5" : "#fee2e2",
+                        color: !stockLoaded
+                          ? "#6b7280"
+                          : stock > 0
+                            ? "#059669"
+                            : "#dc2626",
+                        background: !stockLoaded
+                          ? "#f3f4f6"
+                          : stock > 0
+                            ? "#d1fae5"
+                            : "#fee2e2",
                         padding: "4px 8px",
                         borderRadius: 4,
                         fontSize: 13,
                       }}>
-                        {stock}
+                        {stockLoaded ? stock : "..."}
                       </span>
                     </td>
                     <td style={{ padding: "12px", textAlign: "right", color: "#374151" }}>

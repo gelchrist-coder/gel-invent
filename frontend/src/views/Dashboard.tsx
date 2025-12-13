@@ -7,10 +7,41 @@ type Props = {
   onNavigate: (view: string) => void;
 };
 
+type DashboardTopProduct = {
+  name: string;
+  quantity_sold: number | string;
+  revenue: number | string;
+};
+
+type DashboardRecentSale = {
+  id: number | string;
+  product?: { name?: string | null } | null;
+  product_id?: number | string;
+  customer_name?: string | null;
+  quantity?: number | string;
+  total_price?: number | string;
+  payment_method?: string | null;
+  created_at: string;
+};
+
+type SalesDashboardResponse = {
+  top_products?: DashboardTopProduct[];
+  recent_sales?: DashboardRecentSale[];
+  [key: string]: unknown;
+};
+
+type LowStockItem = {
+  id: number | string;
+  name: string;
+  sku: string;
+  currentStock: number;
+  minStock: number;
+};
+
 export default function Dashboard({ onNavigate }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dashboardData, setDashboardData] = useState<any>(null);
+  const [dashboardData, setDashboardData] = useState<SalesDashboardResponse | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
 
   // Check if current user is Admin
@@ -57,13 +88,13 @@ export default function Dashboard({ onNavigate }: Props) {
   }, [token, isAdmin]);
 
   // Top products from dashboard data
-  const topProducts = dashboardData?.top_products || [];
+  const topProducts = dashboardData?.top_products ?? [];
 
   // Recent sales from dashboard data
-  const recentSales = dashboardData?.recent_sales || [];
+  const recentSales = dashboardData?.recent_sales ?? [];
 
   // Stock alerts - will be based on real stock movements when implemented
-  const lowStockItems: any[] = [];
+  const lowStockItems: LowStockItem[] = [];
 
   // Calculate expired and expiring soon products
   const expiredProducts = products.filter(
@@ -125,7 +156,7 @@ export default function Dashboard({ onNavigate }: Props) {
             <p style={{ margin: 0, color: "#4a5368" }}>No sales data yet</p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {topProducts.map((item: any, idx: number) => (
+              {topProducts.map((item, idx) => (
                 <div
                   key={idx}
                   style={{
@@ -326,7 +357,7 @@ export default function Dashboard({ onNavigate }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {recentSales.map((sale: any) => (
+                  {recentSales.map((sale) => (
                     <tr key={sale.id}>
                       <td style={{ fontWeight: 600 }}>{sale.product?.name || `Product #${sale.product_id}`}</td>
                       <td>{sale.customer_name || "Walk-in"}</td>

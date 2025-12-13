@@ -98,19 +98,25 @@ export default function Profile() {
     if (savedSystem) setSystemSettings(JSON.parse(savedSystem));
     
     // Always load current user data from the 'user' object
-    if (currentUserData) {
-      setUserInfo({
-        name: currentUserData.name || "",
-        email: currentUserData.email || "",
-        phone: "",
-        role: currentUserData.role || "Admin",
-      });
-      setBusinessInfo(prev => ({
-        ...prev,
-        name: currentUserData.business_name || prev.name,
-        owner: currentUserData.name || prev.owner,
-        email: currentUserData.email || prev.email,
-      }));
+    try {
+      const rawUser = localStorage.getItem("user");
+      const parsedUser = rawUser ? (JSON.parse(rawUser) as Record<string, unknown>) : null;
+      if (parsedUser) {
+        setUserInfo({
+          name: String(parsedUser.name ?? ""),
+          email: String(parsedUser.email ?? ""),
+          phone: "",
+          role: String(parsedUser.role ?? "Admin"),
+        });
+        setBusinessInfo((prev) => ({
+          ...prev,
+          name: String(parsedUser.business_name ?? prev.name),
+          owner: String(parsedUser.name ?? prev.owner),
+          email: String(parsedUser.email ?? prev.email),
+        }));
+      }
+    } catch {
+      // ignore
     }
   }, []);
 

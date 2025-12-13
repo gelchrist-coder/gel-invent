@@ -1,9 +1,52 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchRevenueAnalytics } from "../api";
 import RevenueMetrics from "../components/RevenueMetrics";
 import RevenueTrend from "../components/RevenueTrend";
 import TopProducts from "../components/TopProducts";
 import PaymentMethodBreakdown from "../components/PaymentMethodBreakdown";
+
+type RevenueMetricsData = {
+  total_revenue: number;
+  cash_revenue: number;
+  credit_revenue: number;
+  total_profit: number;
+  total_losses: number;
+  actual_profit: number;
+  total_cost: number;
+  profit_margin: number;
+  actual_profit_margin: number;
+  sales_count: number;
+  avg_transaction: number;
+  revenue_growth: number;
+};
+
+type DailyTrendRow = {
+  date: string;
+  revenue: number;
+};
+
+type PaymentMethodRow = {
+  method: string;
+  revenue: number;
+};
+
+type TopProductRow = {
+  product_id: number;
+  product_name: string;
+  sku: string;
+  quantity_sold: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  profit_margin: number;
+};
+
+type RevenueAnalyticsResponse = {
+  metrics: RevenueMetricsData;
+  daily_trend: DailyTrendRow[];
+  payment_methods: PaymentMethodRow[];
+  top_products: TopProductRow[];
+};
 
 export default function RevenueAnalysis() {
   // Check if current user is Admin
@@ -11,12 +54,12 @@ export default function RevenueAnalysis() {
   const userRole = currentUser ? JSON.parse(currentUser).role : null;
   const isAdmin = userRole === "Admin";
 
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<RevenueAnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState("30d");
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     // Only load data if user is Admin
     if (!isAdmin) return;
     
@@ -24,13 +67,13 @@ export default function RevenueAnalysis() {
     setError(null);
     try {
       const analytics = await fetchRevenueAnalytics(period);
-      setData(analytics);
+      setData(analytics as RevenueAnalyticsResponse);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load revenue data");
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAdmin, period]);
 
   useEffect(() => {
     if (isAdmin) {
@@ -38,7 +81,7 @@ export default function RevenueAnalysis() {
     } else {
       setLoading(false);
     }
-  }, [period, isAdmin]);
+  }, [isAdmin, loadData, period]);
 
   // Block access for non-Admin users
   if (!isAdmin) {

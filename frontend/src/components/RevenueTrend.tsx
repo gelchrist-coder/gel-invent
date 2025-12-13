@@ -87,7 +87,7 @@ export default function RevenueTrend({ data }: Props) {
               padding: "0 8px",
             }}
           >
-            {data.map((item, index) => {
+            {data.map((item) => {
               const barHeight = maxRevenue > 0 ? (item.revenue / maxRevenue) * chartHeight : 0;
               const isWeekend = new Date(item.date).getDay() === 0 || new Date(item.date).getDay() === 6;
 

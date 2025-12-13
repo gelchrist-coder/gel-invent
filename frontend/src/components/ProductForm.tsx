@@ -48,7 +48,7 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saveMode, setSaveMode] = useState<"save" | "saveAndNew">("save");
+  const [submittingMode, setSubmittingMode] = useState<"save" | "saveAndNew" | null>(null);
 
   const generateSKU = () => {
     const prefix = form.category?.substring(0, 3).toUpperCase() || "PRD";
@@ -58,7 +58,13 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const nativeEvent = e.nativeEvent as SubmitEvent;
+    const submitter = nativeEvent.submitter as HTMLButtonElement | null;
+    const mode = (submitter?.dataset.saveMode as "save" | "saveAndNew" | undefined) ?? "save";
+
     setBusy(true);
+    setSubmittingMode(mode);
     setError(null);
     try {
       // Calculate actual stock based on unit type
@@ -86,7 +92,7 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
         initial_location: form.initialLocation || undefined,
       });
       
-      if (saveMode === "saveAndNew") {
+      if (mode === "saveAndNew") {
         // Clear form but keep category and unit
         setForm({ 
           sku: "", 
@@ -102,10 +108,11 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
           sellingPrice: "",
           packSellingPrice: "",
           initialStock: "0",
+          initialLocation: form.initialLocation || "Main Store",
           packSize: "",
           reorderLevel: form.reorderLevel,
           supplier: "",
-          status: "active",
+          status: form.status || "active",
         });
         // Focus on name field
         setTimeout(() => {
@@ -119,6 +126,7 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
       setError((err as Error).message || "Failed to create product");
     } finally {
       setBusy(false);
+      setSubmittingMode(null);
     }
   };
 
@@ -431,19 +439,19 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
             className="button"
             type="submit"
             disabled={busy}
-            onClick={() => setSaveMode("save")}
+            data-save-mode="save"
             style={{ flex: 1 }}
           >
-            {busy && saveMode === "save" ? "Saving..." : "💾 Save Product"}
+            {busy && submittingMode === "save" ? "Saving..." : "💾 Save Product"}
           </button>
           <button
             className="button"
             type="submit"
             disabled={busy}
-            onClick={() => setSaveMode("saveAndNew")}
+            data-save-mode="saveAndNew"
             style={{ flex: 1, background: "#10b981" }}
           >
-            {busy && saveMode === "saveAndNew" ? "Saving..." : "➕ Save & Add Another"}
+            {busy && submittingMode === "saveAndNew" ? "Saving..." : "➕ Save & Add Another"}
           </button>
           {onCancel && (
             <button

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { NewSale, Product } from "../types";
 import { useAppCategories } from "../categories";
 
@@ -16,7 +16,7 @@ interface CartItem {
 
 const PAYMENT_METHODS = ["cash", "card", "mobile money", "bank transfer", "credit"];
 
-export default function POSSaleForm({ products, onSubmit, onCancel }: POSSaleFormProps) {
+export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }: POSSaleFormProps) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");

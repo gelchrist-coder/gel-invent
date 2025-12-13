@@ -12,6 +12,7 @@ export default function Sales() {
   const [pendingSales, setPendingSales] = useState<NewSale[]>([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [saleConfirmed, setSaleConfirmed] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   // Get user and business info for receipt
   const currentUser = localStorage.getItem("user");
@@ -46,7 +47,7 @@ export default function Sales() {
 
   const confirmSale = async () => {
     if (pendingSales.length === 0) return;
-    
+    setConfirming(true);
     try {
       // Create all sales
       for (const sale of pendingSales) {
@@ -56,6 +57,8 @@ export default function Sales() {
       setSaleConfirmed(true); // Show success state with print/done buttons
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to create sale");
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -74,7 +77,7 @@ export default function Sales() {
     // Calculate totals
     const total = pendingSales.reduce((sum, sale) => sum + sale.total_price, 0);
     const customerName = pendingSales[0].customer_name;
-    const paymentMethod = pendingSales[0].payment_method;
+    const paymentMethod = pendingSales[0].payment_method ?? "cash";
     const amountPaid = pendingSales[0].amount_paid || 0;
     
     // Calculate remaining balance for credit sales
@@ -224,38 +227,39 @@ export default function Sales() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="app-shell">
-        <p>Loading...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="app-shell">
-        <p style={{ color: "#ef4444" }}>Error: {error}</p>
-        <button onClick={loadData} style={{ marginTop: 8 }}>
-          Retry
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="app-shell">
       <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>💳 Point of Sale</h1>
 
+      {error && (
+        <div className="card" style={{ marginBottom: 16, border: "1px solid #fecaca", background: "#fef2f2" }}>
+          <p style={{ margin: 0, color: "#b91c1c" }}>Error: {error}</p>
+          <button onClick={loadData} style={{ marginTop: 8 }}>
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* POS Form */}
       <div className="card" style={{ marginBottom: 24, padding: 16 }}>
-        <POSSaleForm products={products} onSubmit={handleCreateSale} />
+        {products.length === 0 && loading ? (
+          <p style={{ margin: 0, color: "#6b7280" }}>Loading products...</p>
+        ) : (
+          <POSSaleForm products={products} onSubmit={handleCreateSale} />
+        )}
       </div>
 
       {/* Sales List */}
       <div className="card">
         <h3 style={{ margin: "0 0 16px 0" }}>Recent Sales</h3>
-        <SalesList sales={sales} products={products} onDelete={handleDeleteSale} />
+        {sales.length === 0 && loading ? (
+          <p style={{ margin: 0, color: "#6b7280" }}>Loading sales...</p>
+        ) : (
+          <>
+            {loading ? <p style={{ margin: "0 0 12px 0", color: "#6b7280", fontSize: 13 }}>Refreshing...</p> : null}
+            <SalesList sales={sales} products={products} onDelete={handleDeleteSale} />
+          </>
+        )}
       </div>
 
       {/* Confirmation Modal */}
@@ -275,6 +279,7 @@ export default function Sales() {
             padding: 20,
           }}
           onClick={() => {
+            if (confirming) return;
             setShowConfirmation(false);
             setPendingSales([]);
           }}
@@ -362,9 +367,11 @@ export default function Sales() {
                   <button
                     type="button"
                     onClick={() => {
+                      if (confirming) return;
                       setShowConfirmation(false);
                       setPendingSales([]);
                     }}
+                    disabled={confirming}
                     style={{
                       flex: 1,
                       padding: "12px 24px",
@@ -374,7 +381,8 @@ export default function Sales() {
                       fontSize: 15,
                       fontWeight: 600,
                       color: "#6b7280",
-                      cursor: "pointer",
+                      cursor: confirming ? "not-allowed" : "pointer",
+                      opacity: confirming ? 0.6 : 1,
                     }}
                   >
                     ← Go Back
@@ -383,6 +391,7 @@ export default function Sales() {
                   <button
                     type="button"
                     onClick={confirmSale}
+                    disabled={confirming}
                     style={{
                       flex: 1,
                       padding: "12px 24px",
@@ -392,11 +401,12 @@ export default function Sales() {
                       fontSize: 15,
                       fontWeight: 600,
                       color: "white",
-                      cursor: "pointer",
+                      cursor: confirming ? "not-allowed" : "pointer",
+                      opacity: confirming ? 0.8 : 1,
                       boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
                     }}
                   >
-                    ✓ Confirm Sale
+                    {confirming ? "Processing..." : "✓ Confirm Sale"}
                   </button>
                 </>
               ) : (
