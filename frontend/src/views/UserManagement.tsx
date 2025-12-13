@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
-import { API_BASE } from "../api";
+import { API_BASE, createBranch, fetchBranches } from "../api";
+import { Branch } from "../types";
 
 type Employee = {
   id: number;
   email: string;
   name: string;
   role: string;
+  branch_id?: number | null;
   is_active: boolean;
   created_at?: string;
 };
@@ -14,6 +16,9 @@ export default function UserManagement() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchName, setBranchName] = useState("");
+  const [branchError, setBranchError] = useState("");
   
   // Check if current user is Admin
   const currentUser = localStorage.getItem("user");
@@ -23,13 +28,31 @@ export default function UserManagement() {
     email: "",
     password: "",
     role: "Sales",
+    branch_id: "" as "" | number,
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   useEffect(() => {
     loadEmployees();
+    loadBranches();
   }, []);
+
+  const loadBranches = async () => {
+    try {
+      const data = await fetchBranches();
+      setBranches(data);
+      // Default employee branch selection to Main Branch (or first) if not set.
+      setFormData((prev) => {
+        if (prev.branch_id !== "") return prev;
+        const main = data.find((b) => b.name === "Main Branch");
+        const nextId = (main?.id ?? data[0]?.id) ?? "";
+        return { ...prev, branch_id: nextId };
+      });
+    } catch (err) {
+      console.error("Error loading branches:", err);
+    }
+  };
 
   const loadEmployees = async () => {
     try {
@@ -63,18 +86,27 @@ export default function UserManagement() {
 
     try {
       const token = localStorage.getItem("token");
+      const payload: Record<string, unknown> = {
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
+      };
+      if (typeof formData.branch_id === "number") {
+        payload.branch_id = formData.branch_id;
+      }
       const response = await fetch(`${API_BASE}/employees/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
 
       if (response.ok) {
         setSuccess("Employee added successfully!");
-        setFormData({ name: "", email: "", password: "", role: "Sales" });
+        setFormData((prev) => ({ name: "", email: "", password: "", role: "Sales", branch_id: prev.branch_id }));
         setShowAddForm(false);
         loadEmployees();
       } else {
@@ -103,6 +135,44 @@ export default function UserManagement() {
       }
     } catch (err) {
       console.error("Error updating employee:", err);
+    }
+  };
+
+  const handleChangeEmployeeBranch = async (employeeId: number, branchId: number) => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_BASE}/employees/${employeeId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ branch_id: branchId }),
+      });
+      if (response.ok) {
+        loadEmployees();
+      }
+    } catch (err) {
+      console.error("Error changing employee branch:", err);
+    }
+  };
+
+  const handleCreateBranch = async () => {
+    setBranchError("");
+    const name = branchName.trim();
+    if (!name) {
+      setBranchError("Enter a branch name");
+      return;
+    }
+    try {
+      await createBranch({ name });
+      setBranchName("");
+      await loadBranches();
+      window.dispatchEvent(new CustomEvent("branchesChanged"));
+      setSuccess("Branch created successfully!");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to create branch";
+      setBranchError(message);
     }
   };
 
@@ -180,6 +250,53 @@ export default function UserManagement() {
           {success}
         </div>
       )}
+
+      <div
+        style={{
+          background: "#fff",
+          padding: 24,
+          borderRadius: 12,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+          marginBottom: 24,
+        }}
+      >
+        <h2 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 700 }}>Branches</h2>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            type="text"
+            value={branchName}
+            onChange={(e) => setBranchName(e.target.value)}
+            placeholder="e.g., Accra Branch"
+            style={{
+              width: 260,
+              padding: 10,
+              border: "1px solid #d8dce8",
+              borderRadius: 6,
+              fontSize: 14,
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleCreateBranch}
+            style={{
+              padding: "10px 18px",
+              background: "linear-gradient(135deg, #1f7aff, #0d5edb)",
+              color: "#fff",
+              border: "none",
+              borderRadius: 8,
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            + Create Branch
+          </button>
+          <div style={{ color: "#5f6475", fontSize: 13 }}>
+            Current: {branches.map((b) => b.name).join(", ") || "Main Branch"}
+          </div>
+        </div>
+        {branchError && <div style={{ marginTop: 10, color: "#c33", fontSize: 13 }}>{branchError}</div>}
+      </div>
 
       {showAddForm && (
         <div
@@ -270,6 +387,39 @@ export default function UserManagement() {
                 </select>
               </div>
             </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600 }}>
+                Branch
+              </label>
+              <select
+                value={formData.branch_id === "" ? "" : String(formData.branch_id)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setFormData({ ...formData, branch_id: value ? Number(value) : "" });
+                }}
+                style={{
+                  width: "100%",
+                  padding: 10,
+                  border: "1px solid #d8dce8",
+                  borderRadius: 6,
+                  fontSize: 14,
+                }}
+              >
+                {branches.length === 0 ? (
+                  <option value="">Main Branch</option>
+                ) : (
+                  branches.map((b) => (
+                    <option key={b.id} value={String(b.id)}>
+                      {b.name}
+                    </option>
+                  ))
+                )}
+              </select>
+              <div style={{ marginTop: 6, color: "#5f6475", fontSize: 12 }}>
+                Employees are locked to their assigned branch.
+              </div>
+            </div>
             <button
               type="submit"
               style={{
@@ -320,6 +470,9 @@ export default function UserManagement() {
                   Role
                 </th>
                 <th style={{ padding: 16, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#5f6475" }}>
+                  Branch
+                </th>
+                <th style={{ padding: 16, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#5f6475" }}>
                   Status
                 </th>
                 <th style={{ padding: 16, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#5f6475" }}>
@@ -345,6 +498,31 @@ export default function UserManagement() {
                     >
                       {employee.role}
                     </span>
+                  </td>
+                  <td style={{ padding: 16, fontSize: 14 }}>
+                    <select
+                      value={String(employee.branch_id ?? "")}
+                      onChange={(e) => handleChangeEmployeeBranch(employee.id, Number(e.target.value))}
+                      style={{
+                        width: "100%",
+                        maxWidth: 220,
+                        padding: 8,
+                        border: "1px solid #d8dce8",
+                        borderRadius: 6,
+                        fontSize: 13,
+                        background: "#fff",
+                      }}
+                    >
+                      {branches.length === 0 ? (
+                        <option value={String(employee.branch_id ?? "")}>Main Branch</option>
+                      ) : (
+                        branches.map((b) => (
+                          <option key={b.id} value={String(b.id)}>
+                            {b.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
                   </td>
                   <td style={{ padding: 16, fontSize: 14 }}>
                     <span

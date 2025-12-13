@@ -122,6 +122,31 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
+  // Refresh branches when another part of the app creates/changes them.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const handler = () => {
+      fetchBranches()
+        .then((data) => {
+          setBranches(data);
+          const stillValid = activeBranchId != null && data.some((b) => b.id === activeBranchId);
+          if (stillValid) return;
+          const main = data.find((b) => b.name === "Main Branch");
+          const nextId = (main?.id ?? data[0]?.id) ?? null;
+          setActiveBranchId(nextId);
+          if (nextId != null) localStorage.setItem("activeBranchId", String(nextId));
+          else localStorage.removeItem("activeBranchId");
+        })
+        .catch(() => {
+          setBranches([]);
+        });
+    };
+
+    window.addEventListener("branchesChanged", handler as EventListener);
+    return () => window.removeEventListener("branchesChanged", handler as EventListener);
+  }, [isAuthenticated, activeBranchId]);
+
   // Auto-refresh when another user signs in
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
