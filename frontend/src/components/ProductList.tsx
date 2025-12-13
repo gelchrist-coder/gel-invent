@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Product } from "../types";
 import { fetchMovements } from "../api";
+import { useAppCategories } from "../categories";
 
 type Props = {
   products: Product[];
@@ -26,6 +27,7 @@ export default function ProductList({
   userRole = "Admin",
 }: Props) {
   const isAdmin = userRole === "Admin";
+  const categoryOptions = useAppCategories();
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
   const [adjustingId, setAdjustingId] = useState<number | null>(null);
@@ -269,8 +271,14 @@ export default function ProductList({
                   value={editForm.category || ""}
                   onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
                   placeholder="e.g., Groceries, Beverages"
+                  list="edit-category-suggestions"
                   style={{ fontSize: 14, padding: 10 }}
                 />
+                <datalist id="edit-category-suggestions">
+                  {categoryOptions.map((cat) => (
+                    <option key={cat} value={cat} />
+                  ))}
+                </datalist>
               </label>
               <label>
                 <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>

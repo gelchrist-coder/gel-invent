@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { NewSale, Product } from "../types";
+import { useAppCategories } from "../categories";
 
 type POSSaleFormProps = {
   products: Product[];
@@ -22,6 +23,8 @@ export default function POSSaleForm({ products, onSubmit, onCancel }: POSSaleFor
   const [customerName, setCustomerName] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [notes, setNotes] = useState("");
+
+  const userCategories = useAppCategories();
   
   // Credit sale states
   const [showCreditModal, setShowCreditModal] = useState(false);
@@ -29,8 +32,15 @@ export default function POSSaleForm({ products, onSubmit, onCancel }: POSSaleFor
   const [creditorPhone, setCreditorPhone] = useState("");
   const [initialPayment, setInitialPayment] = useState<number>(0);
 
-  // Get unique categories from products
-  const categories = ["all", ...Array.from(new Set(products.map(p => p.category).filter(Boolean)))];
+  // Get categories from user registration + existing products
+  const categories = [
+    "all",
+    ...Array.from(
+      new Set(
+        [...userCategories, ...products.map((p) => p.category).filter(Boolean)].map((c) => String(c)),
+      ),
+    ),
+  ];
 
   // Filter products by category and search
   const filteredProducts = products.filter(p => {

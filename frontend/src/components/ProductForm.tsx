@@ -1,28 +1,18 @@
 import React, { useState } from "react";
 
 import { NewProduct } from "../types";
+import { useAppCategories } from "../categories";
 
 type Props = {
   onCreate: (payload: NewProduct) => Promise<void>;
   onCancel?: () => void;
 };
 
-const CATEGORIES = [
-  "Groceries",
-  "Beverages",
-  "Household",
-  "Electronics",
-  "Clothing",
-  "Health & Beauty",
-  "Office Supplies",
-  "Tools & Hardware",
-  "Sports & Outdoors",
-  "Other",
-];
-
 const UNITS = ["pcs", "box", "pack", "dozen", "carton", "bundle", "unit"];
 
 export default function ProductForm({ onCreate, onCancel }: Props) {
+  const categoryOptions = useAppCategories();
+
   const [form, setForm] = useState<NewProduct & { 
     category?: string; 
     barcode?: string;
@@ -43,7 +33,7 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
     unit: "pcs",
     pack_size: null,
     expiry_date: null,
-    category: CATEGORIES[0],
+    category: categoryOptions[0] ?? "Other",
     barcode: "",
     costPrice: "",
     packCostPrice: "",
@@ -187,7 +177,7 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
                   value={form.category}
                   onChange={(e) => setForm({ ...form, category: e.target.value })}
                 >
-                  {CATEGORIES.map((cat) => (
+                  {categoryOptions.map((cat) => (
                     <option key={cat} value={cat}>{cat}</option>
                   ))}
                 </select>

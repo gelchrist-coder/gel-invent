@@ -6,6 +6,7 @@ import MovementForm from "./components/MovementForm";
 import MovementTable from "./components/MovementTable";
 import ProductForm from "./components/ProductForm";
 import ProductList from "./components/ProductList";
+import { useAppCategories } from "./categories";
 import { computeBalance } from "./state";
 import { NewMovement, NewProduct, Product, StockMovement } from "./types";
 import Creditors from "./views/Creditors";
@@ -34,6 +35,7 @@ export default function App() {
   const [businessName, setBusinessName] = useState("Business");
   const [userRole, setUserRole] = useState("Admin");
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const categoryOptions = useAppCategories();
 
   const logoutAndReset = () => {
     setIsAuthenticated(false);
@@ -114,11 +116,11 @@ export default function App() {
       }
     };
 
-    window.addEventListener("userChanged" as any, handleCustomUserChange);
+    window.addEventListener("userChanged", handleCustomUserChange as EventListener);
 
     return () => {
       window.removeEventListener("storage", handleStorageChange);
-      window.removeEventListener("userChanged" as any, handleCustomUserChange);
+      window.removeEventListener("userChanged", handleCustomUserChange as EventListener);
     };
   }, [currentUserId]);
 
@@ -321,16 +323,11 @@ export default function App() {
                     style={{ padding: 10 }}
                   >
                     <option value="all">All Categories</option>
-                    <option value="Groceries">Groceries</option>
-                    <option value="Beverages">Beverages</option>
-                    <option value="Household">Household</option>
-                    <option value="Electronics">Electronics</option>
-                    <option value="Clothing">Clothing</option>
-                    <option value="Health & Beauty">Health & Beauty</option>
-                    <option value="Office Supplies">Office Supplies</option>
-                    <option value="Tools & Hardware">Tools & Hardware</option>
-                    <option value="Sports & Outdoors">Sports & Outdoors</option>
-                    <option value="Other">Other</option>
+                    {categoryOptions.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label style={{ margin: 0 }}>
