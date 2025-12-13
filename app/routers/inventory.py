@@ -9,6 +9,7 @@ from ..database import get_db
 from ..models import Product, StockMovement, Sale, User
 from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
+from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
@@ -16,7 +17,8 @@ router = APIRouter(prefix="/inventory", tags=["inventory"])
 @router.get("/analytics")
 def get_inventory_analytics(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     """
     Get comprehensive inventory analytics including:
@@ -29,7 +31,12 @@ def get_inventory_analytics(
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     
     # Get all products with their stock levels
-    products = db.scalars(select(Product).where(Product.user_id.in_(tenant_user_ids))).all()
+    products = db.scalars(
+        select(Product).where(
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        )
+    ).all()
     
     # Calculate stock for each product by location
     stock_by_location = {}
@@ -42,7 +49,13 @@ def get_inventory_analytics(
     for product in products:
         movements = db.scalars(
             select(StockMovement)
-            .where(and_(StockMovement.product_id == product.id, StockMovement.user_id.in_(tenant_user_ids)))
+            .where(
+                and_(
+                    StockMovement.product_id == product.id,
+                    StockMovement.user_id.in_(tenant_user_ids),
+                    StockMovement.branch_id == active_branch_id,
+                )
+            )
             .order_by(StockMovement.created_at.desc())
         ).all()
         
@@ -110,7 +123,13 @@ def get_inventory_analytics(
     thirty_days_ago = datetime.now() - timedelta(days=30)
     recent_movements = db.scalars(
         select(StockMovement)
-        .where(and_(StockMovement.created_at >= thirty_days_ago, StockMovement.user_id.in_(tenant_user_ids)))
+        .where(
+            and_(
+                StockMovement.created_at >= thirty_days_ago,
+                StockMovement.user_id.in_(tenant_user_ids),
+                StockMovement.branch_id == active_branch_id,
+            )
+        )
     ).all()
     
     movement_summary = {
@@ -146,6 +165,7 @@ def get_inventory_analytics(
 def get_all_movements(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
     location: str | None = Query(None),
     reason: str | None = Query(None),
     days: int = Query(30, ge=1, le=365),
@@ -158,7 +178,15 @@ def get_all_movements(
     
     # Filter by date and user
     since_date = datetime.now() - timedelta(days=days)
-    query = query.where(and_(StockMovement.created_at >= since_date, StockMovement.user_id.in_(tenant_user_ids), Product.user_id.in_(tenant_user_ids)))
+    query = query.where(
+        and_(
+            StockMovement.created_at >= since_date,
+            StockMovement.user_id.in_(tenant_user_ids),
+            StockMovement.branch_id == active_branch_id,
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        )
+    )
     
     # Filter by location
     if location:
@@ -174,7 +202,15 @@ def get_all_movements(
     
     result = []
     for movement in movements:
-        product = db.scalar(select(Product).where(and_(Product.id == movement.product_id, Product.user_id.in_(tenant_user_ids))))
+        product = db.scalar(
+            select(Product).where(
+                and_(
+                    Product.id == movement.product_id,
+                    Product.user_id.in_(tenant_user_ids),
+                    Product.branch_id == active_branch_id,
+                )
+            )
+        )
         result.append({
             "id": movement.id,
             "product_id": movement.product_id,

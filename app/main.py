@@ -2,9 +2,11 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from .database import Base, engine
-from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees
+from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches
+from . import models
 
 app = FastAPI(title="Gel Invent API", version="0.1.0")
 
@@ -45,6 +47,129 @@ async def on_startup() -> None:
         # Lightweight schema patch for existing DBs (create_all won't add columns).
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
+
+            # Branch support (multi-branch / separate product lists per branch)
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+            conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+            conn.execute(text("ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+            conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+            conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+            conn.execute(text("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+
+        # Backfill branch IDs for existing rows into each tenant's Main Branch.
+        with Session(engine) as db:
+            admin_users = db.query(models.User).filter(models.User.role == "Admin").all()
+            for admin in admin_users:
+                main_branch = (
+                    db.query(models.Branch)
+                    .filter(
+                        models.Branch.owner_user_id == admin.id,
+                        models.Branch.name == "Main Branch",
+                    )
+                    .first()
+                )
+                if not main_branch:
+                    main_branch = models.Branch(owner_user_id=admin.id, name="Main Branch", is_active=True)
+                    db.add(main_branch)
+                    db.flush()
+
+            db.commit()
+
+        # Use SQL for bulk backfills (idempotent).
+        with engine.begin() as conn:
+            # Employees without a branch_id get their admin's Main Branch.
+            conn.execute(
+                text(
+                    """
+                    UPDATE users u
+                    SET branch_id = b.id
+                    FROM branches b
+                    WHERE u.role <> 'Admin'
+                      AND u.branch_id IS NULL
+                      AND b.owner_user_id = COALESCE(u.created_by, u.id)
+                      AND b.name = 'Main Branch'
+                    """
+                )
+            )
+
+            # Products created before branches go to tenant Main Branch.
+            conn.execute(
+                text(
+                    """
+                    UPDATE products p
+                    SET branch_id = b.id
+                    FROM users u
+                    JOIN branches b
+                      ON b.owner_user_id = COALESCE(u.created_by, u.id)
+                     AND b.name = 'Main Branch'
+                    WHERE p.branch_id IS NULL
+                      AND p.user_id = u.id
+                    """
+                )
+            )
+
+            # Stock movements inherit product/tenant Main Branch.
+            conn.execute(
+                text(
+                    """
+                    UPDATE stock_movements m
+                    SET branch_id = b.id
+                    FROM users u
+                    JOIN branches b
+                      ON b.owner_user_id = COALESCE(u.created_by, u.id)
+                     AND b.name = 'Main Branch'
+                    WHERE m.branch_id IS NULL
+                      AND m.user_id = u.id
+                    """
+                )
+            )
+
+            # Sales go to tenant Main Branch.
+            conn.execute(
+                text(
+                    """
+                    UPDATE sales s
+                    SET branch_id = b.id
+                    FROM users u
+                    JOIN branches b
+                      ON b.owner_user_id = COALESCE(u.created_by, u.id)
+                     AND b.name = 'Main Branch'
+                    WHERE s.branch_id IS NULL
+                      AND s.user_id = u.id
+                    """
+                )
+            )
+
+            # Creditors and credit transactions are scoped to branch.
+            conn.execute(
+                text(
+                    """
+                    UPDATE creditors c
+                    SET branch_id = b.id
+                    FROM users u
+                    JOIN branches b
+                      ON b.owner_user_id = COALESCE(u.created_by, u.id)
+                     AND b.name = 'Main Branch'
+                    WHERE c.branch_id IS NULL
+                      AND c.user_id = u.id
+                    """
+                )
+            )
+
+            conn.execute(
+                text(
+                    """
+                    UPDATE credit_transactions ct
+                    SET branch_id = b.id
+                    FROM users u
+                    JOIN branches b
+                      ON b.owner_user_id = COALESCE(u.created_by, u.id)
+                     AND b.name = 'Main Branch'
+                    WHERE ct.branch_id IS NULL
+                      AND ct.user_id = u.id
+                    """
+                )
+            )
     except Exception as e:
         print(f"⚠️ Warning: Could not create tables: {e}")
         print(f"Error details: {type(e).__name__}: {str(e)}")
@@ -67,6 +192,7 @@ async def health_check() -> dict[str, str]:
 
 app.include_router(auth.router)
 app.include_router(employees.router)
+app.include_router(branches.router)
 app.include_router(products.router)
 app.include_router(sales.router)
 app.include_router(inventory.router)

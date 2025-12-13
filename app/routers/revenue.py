@@ -9,6 +9,7 @@ from ..auth import get_current_active_user
 from ..database import get_db
 from ..models import Sale, Product, StockMovement, User
 from app.utils.tenant import get_tenant_user_ids
+from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/revenue", tags=["revenue"])
 
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/revenue", tags=["revenue"])
 def get_revenue_analytics(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
     period: str = Query("30d", regex="^(today|7d|30d|90d|all)$"),
@@ -68,7 +70,10 @@ def get_revenue_analytics(
     sales_query = select(Sale).join(Product).where(
         Sale.created_at >= start,
         Sale.created_at <= end,
+        Sale.branch_id == active_branch_id,
         Product.user_id.in_(tenant_user_ids)
+        ,
+        Product.branch_id == active_branch_id,
     )
     sales = db.scalars(sales_query).all()
     
@@ -79,7 +84,10 @@ def get_revenue_analytics(
         StockMovement.created_at <= end,
         StockMovement.change < 0,
         StockMovement.reason.in_(loss_reasons),
+        StockMovement.branch_id == active_branch_id,
         Product.user_id.in_(tenant_user_ids)
+        ,
+        Product.branch_id == active_branch_id,
     )
     losses = db.scalars(losses_query).all()
     
@@ -102,7 +110,9 @@ def get_revenue_analytics(
             StockMovement.created_at <= range_end,
             StockMovement.change > 0,
             StockMovement.reason.like("Returned%"),
+            StockMovement.branch_id == active_branch_id,
             Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
         )
         returns_movements = db.scalars(returns_query).all()
 
@@ -153,7 +163,8 @@ def get_revenue_analytics(
         # Get product for cost calculation
         product = db.scalar(select(Product).where(
             Product.id == sale.product_id,
-            Product.user_id.in_(tenant_user_ids)
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
         ))
         if product and product.cost_price:
             cost = product.cost_price * sale.quantity
@@ -205,6 +216,7 @@ def get_revenue_analytics(
                 StockMovement.change > 0,
                 StockMovement.reason.like("Returned%"),
                 StockMovement.user_id.in_(tenant_user_ids),
+                StockMovement.branch_id == active_branch_id,
             )
         ).all()
         for movement in returns_movements_for_days:
@@ -212,6 +224,7 @@ def get_revenue_analytics(
                 select(Product).where(
                     Product.id == movement.product_id,
                     Product.user_id.in_(tenant_user_ids),
+                    Product.branch_id == active_branch_id,
                 )
             )
             if not product or product.selling_price is None:
@@ -223,7 +236,8 @@ def get_revenue_analytics(
     for loss in losses:
         product = db.scalar(select(Product).where(
             Product.id == loss.product_id,
-            Product.user_id.in_(tenant_user_ids)
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
         ))
         if product and product.cost_price:
             loss_value = abs(loss.change) * product.cost_price
@@ -245,7 +259,10 @@ def get_revenue_analytics(
     prev_sales_query = select(Sale).join(Product).where(
         Sale.created_at >= prev_start,
         Sale.created_at < prev_end,
+        Sale.branch_id == active_branch_id,
         Product.user_id.in_(tenant_user_ids)
+        ,
+        Product.branch_id == active_branch_id,
     )
     prev_sales = db.scalars(prev_sales_query).all()
     prev_revenue = sum(s.total_price for s in prev_sales)

@@ -17,6 +17,8 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(50), default="Admin")
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), default=None)
+    # Branch assignment for employees (Admin users can access all branches)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), index=True, default=None)
     business_name: Mapped[str | None] = mapped_column(String(255), default=None)
     # JSON string (list of categories). Kept as Text for portability.
     categories: Mapped[str | None] = mapped_column(Text, default=None)
@@ -27,6 +29,17 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class Branch(Base):
+    __tablename__ = "branches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
 
 
 class PasswordResetToken(Base):
@@ -45,6 +58,8 @@ class Product(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Separate product lists per branch
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
     sku: Mapped[str] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(String(1024), default=None)
@@ -73,6 +88,7 @@ class StockMovement(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
     product_id: Mapped[int] = mapped_column(
         ForeignKey("products.id", ondelete="CASCADE"), index=True
     )
@@ -93,6 +109,7 @@ class Sale(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
     product_id: Mapped[int] = mapped_column(
         ForeignKey("products.id", ondelete="CASCADE"), index=True
     )
@@ -121,6 +138,7 @@ class Creditor(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
     name: Mapped[str] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(50), default=None)
     email: Mapped[str | None] = mapped_column(String(255), default=None)
@@ -143,6 +161,7 @@ class CreditTransaction(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
     creditor_id: Mapped[int] = mapped_column(
         ForeignKey("creditors.id", ondelete="CASCADE"), index=True
     )

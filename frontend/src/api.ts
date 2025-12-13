@@ -1,4 +1,4 @@
-import { NewMovement, NewProduct, NewSale, Product, Sale, StockMovement } from "./types";
+import { Branch, NewMovement, NewProduct, NewSale, Product, Sale, StockMovement } from "./types";
 
 // Railway backend URL - production deployment v2.0
 const API_BASE = "https://gel-invent-production.up.railway.app";
@@ -23,6 +23,7 @@ type StockMovementResponse = Omit<StockMovement, "change"> & { change: string | 
 
 async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem("token");
+  const activeBranchId = localStorage.getItem("activeBranchId");
   const headers: Record<string, string> = { 
     "Content-Type": "application/json", 
     ...(options?.headers as Record<string, string> ?? {}) 
@@ -30,6 +31,10 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
   
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  if (activeBranchId) {
+    headers["X-Branch-Id"] = activeBranchId;
   }
   
   const response = await fetch(`${API_BASE}${path}`, {
@@ -59,6 +64,19 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+// Branches API
+
+export async function fetchBranches(): Promise<Branch[]> {
+  return jsonRequest<Branch[]>("/branches");
+}
+
+export async function createBranch(payload: { name: string }): Promise<Branch> {
+  return jsonRequest<Branch>("/branches", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchMe(): Promise<AuthUser> {

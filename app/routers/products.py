@@ -9,6 +9,7 @@ from app import models, schemas
 from app.deps import get_db
 from app.auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
+from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -30,12 +31,15 @@ class ProductUpdate(BaseModel):
 def create_product(
     payload: schemas.ProductCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user)
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
-    # Check for duplicate SKU within the user's products
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    # Check for duplicate SKU within the branch's products
     existing = db.query(models.Product).filter(
         models.Product.sku == payload.sku,
-        models.Product.user_id == current_user.id
+        models.Product.branch_id == active_branch_id,
+        models.Product.user_id.in_(tenant_user_ids),
     ).first()
     if existing:
         raise HTTPException(
@@ -47,6 +51,7 @@ def create_product(
     initial_location = payload.initial_location or "Main Store"
     product_data = payload.model_dump(exclude={'initial_stock', 'initial_location'})
     product_data['user_id'] = current_user.id
+    product_data['branch_id'] = active_branch_id
     
     product = models.Product(**product_data)
     db.add(product)
@@ -61,6 +66,7 @@ def create_product(
         movement = models.StockMovement(
             product_id=product.id,
             user_id=current_user.id,
+            branch_id=active_branch_id,
             change=initial_stock,
             reason="Initial Stock",
             batch_number=batch_number,
@@ -76,11 +82,13 @@ def create_product(
 @router.get("/", response_model=list[schemas.ProductRead])
 def list_products(
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user)
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     products = db.query(models.Product).filter(
-        models.Product.user_id.in_(tenant_user_ids)
+        models.Product.user_id.in_(tenant_user_ids),
+        models.Product.branch_id == active_branch_id,
     ).order_by(models.Product.created_at.desc()).all()
     
     # Add created_by_name to each product
@@ -95,12 +103,14 @@ def list_products(
 def get_product(
     product_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user)
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     product = db.query(models.Product).filter(
         models.Product.id == product_id,
-        models.Product.user_id.in_(tenant_user_ids)
+        models.Product.user_id.in_(tenant_user_ids),
+        models.Product.branch_id == active_branch_id,
     ).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
@@ -121,12 +131,14 @@ def record_movement(
     product_id: int,
     payload: schemas.StockMovementCreate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user)
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     product = db.query(models.Product).filter(
         models.Product.id == product_id,
-        models.Product.user_id.in_(tenant_user_ids)
+        models.Product.user_id.in_(tenant_user_ids),
+        models.Product.branch_id == active_branch_id,
     ).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
@@ -138,6 +150,7 @@ def record_movement(
     movement_data = payload.model_dump()
     movement_data["batch_number"] = batch_number
     movement_data["user_id"] = current_user.id
+    movement_data["branch_id"] = active_branch_id
     # If client didn't provide an expiry_date, fall back to product expiry_date
     if movement_data.get("expiry_date") is None and product.expiry_date:
         movement_data["expiry_date"] = product.expiry_date
@@ -153,12 +166,14 @@ def record_movement(
 def list_movements(
     product_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user)
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     product = db.query(models.Product).filter(
         models.Product.id == product_id,
-        models.Product.user_id.in_(tenant_user_ids)
+        models.Product.user_id.in_(tenant_user_ids),
+        models.Product.branch_id == active_branch_id,
     ).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
@@ -167,7 +182,8 @@ def list_movements(
         db.query(models.StockMovement)
         .filter(
             models.StockMovement.product_id == product_id,
-            models.StockMovement.user_id.in_(tenant_user_ids)
+            models.StockMovement.user_id.in_(tenant_user_ids),
+            models.StockMovement.branch_id == active_branch_id,
         )
         .order_by(models.StockMovement.created_at.desc())
         .all()
@@ -179,12 +195,14 @@ def update_product(
     product_id: int,
     payload: ProductUpdate,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user)
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     product = db.query(models.Product).filter(
         models.Product.id == product_id,
-        models.Product.user_id.in_(tenant_user_ids)
+        models.Product.user_id.in_(tenant_user_ids),
+        models.Product.branch_id == active_branch_id,
     ).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
@@ -193,7 +211,8 @@ def update_product(
     if payload.sku and payload.sku != product.sku:
         existing = db.query(models.Product).filter(
             models.Product.sku == payload.sku,
-            models.Product.user_id.in_(tenant_user_ids)
+            models.Product.user_id.in_(tenant_user_ids),
+            models.Product.branch_id == active_branch_id,
         ).first()
         if existing:
             raise HTTPException(
@@ -215,12 +234,14 @@ def update_product(
 def delete_product(
     product_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user)
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     product = db.query(models.Product).filter(
         models.Product.id == product_id,
-        models.Product.user_id.in_(tenant_user_ids)
+        models.Product.user_id.in_(tenant_user_ids),
+        models.Product.branch_id == active_branch_id,
     ).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")

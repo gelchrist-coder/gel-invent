@@ -9,6 +9,7 @@ from ..database import get_db
 from ..models import Sale, Product, StockMovement, Creditor, CreditTransaction, User
 from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
+from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -16,7 +17,8 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 @router.get("/sales-dashboard")
 def get_sales_dashboard(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     """
     Get sales dashboard with key metrics (Owner/Admin only).
@@ -41,7 +43,7 @@ def get_sales_dashboard(
         select(
             func.count(Sale.id).label("count"),
             func.coalesce(func.sum(Sale.total_price), 0).label("total")
-        ).where(and_(Sale.created_at >= today_start, Sale.user_id.in_(tenant_user_ids)))
+        ).where(and_(Sale.created_at >= today_start, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
     ).first()
     
     # This week's sales
@@ -49,7 +51,7 @@ def get_sales_dashboard(
         select(
             func.count(Sale.id).label("count"),
             func.coalesce(func.sum(Sale.total_price), 0).label("total")
-        ).where(and_(Sale.created_at >= week_start, Sale.user_id.in_(tenant_user_ids)))
+        ).where(and_(Sale.created_at >= week_start, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
     ).first()
     
     # This month's sales
@@ -57,7 +59,7 @@ def get_sales_dashboard(
         select(
             func.count(Sale.id).label("count"),
             func.coalesce(func.sum(Sale.total_price), 0).label("total")
-        ).where(and_(Sale.created_at >= month_start, Sale.user_id.in_(tenant_user_ids)))
+        ).where(and_(Sale.created_at >= month_start, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
     ).first()
     
     # Sales by payment method (this month)
@@ -66,7 +68,7 @@ def get_sales_dashboard(
             Sale.payment_method,
             func.count(Sale.id).label("count"),
             func.coalesce(func.sum(Sale.total_price), 0).label("total")
-        ).where(and_(Sale.created_at >= month_start, Sale.user_id.in_(tenant_user_ids)))
+        ).where(and_(Sale.created_at >= month_start, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
         .group_by(Sale.payment_method)
     ).all()
     
@@ -77,7 +79,13 @@ def get_sales_dashboard(
             func.sum(Sale.quantity).label("quantity_sold"),
             func.coalesce(func.sum(Sale.total_price), 0).label("revenue")
         ).join(Sale, Sale.product_id == Product.id)
-        .where(and_(Sale.created_at >= month_start, Sale.user_id.in_(tenant_user_ids), Product.user_id.in_(tenant_user_ids)))
+        .where(and_(
+            Sale.created_at >= month_start,
+            Sale.user_id.in_(tenant_user_ids),
+            Sale.branch_id == active_branch_id,
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        ))
         .group_by(Product.id, Product.name)
         .order_by(func.sum(Sale.quantity).desc())
         .limit(10)
@@ -85,13 +93,22 @@ def get_sales_dashboard(
     
     # Recent sales
     recent_sales = db.scalars(
-        select(Sale).where(Sale.user_id.in_(tenant_user_ids)).order_by(Sale.created_at.desc()).limit(10)
+        select(Sale)
+        .where(Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id)
+        .order_by(Sale.created_at.desc())
+        .limit(10)
     ).all()
     
     # Add product details to recent sales
     recent_sales_data = []
     for s in recent_sales:
-        product = db.scalar(select(Product).where(Product.id == s.product_id))
+        product = db.scalar(
+            select(Product).where(
+                Product.id == s.product_id,
+                Product.user_id.in_(tenant_user_ids),
+                Product.branch_id == active_branch_id,
+            )
+        )
         recent_sales_data.append({
             "id": s.id,
             "product_id": s.product_id,
@@ -142,7 +159,8 @@ def get_sales_dashboard(
 @router.get("/inventory-status")
 def get_inventory_status(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     """
     Get current inventory status with stock levels and alerts (Owner/Admin only).
@@ -168,8 +186,8 @@ def get_inventory_status(
         Product.selling_price,
         Product.expiry_date,
         func.coalesce(func.sum(StockMovement.change), 0).label("current_stock")
-    ).outerjoin(StockMovement, StockMovement.product_id == Product.id)\
-     .where(Product.user_id.in_(tenant_user_ids))\
+    ).outerjoin(StockMovement, and_(StockMovement.product_id == Product.id, StockMovement.branch_id == active_branch_id))\
+     .where(Product.user_id.in_(tenant_user_ids), Product.branch_id == active_branch_id)\
      .group_by(Product.id)
     
     products = db.execute(products_query).all()
@@ -262,7 +280,8 @@ def get_inventory_status(
 @router.get("/creditors-summary")
 def get_creditors_summary(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     """
     Get summary of all creditors with outstanding debts (Owner/Admin only).
@@ -278,7 +297,11 @@ def get_creditors_summary(
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     
     # Get all creditors with transaction details
-    creditors = db.scalars(select(Creditor).where(Creditor.user_id.in_(tenant_user_ids)).order_by(Creditor.total_debt.desc())).all()
+    creditors = db.scalars(
+        select(Creditor)
+        .where(Creditor.user_id.in_(tenant_user_ids), Creditor.branch_id == active_branch_id)
+        .order_by(Creditor.total_debt.desc())
+    ).all()
     
     # Calculate totals
     total_debt = sum(float(c.total_debt) for c in creditors)
@@ -295,7 +318,11 @@ def get_creditors_summary(
             CreditTransaction.notes,
             CreditTransaction.created_at
         ).join(Creditor, Creditor.id == CreditTransaction.creditor_id)
-        .where(Creditor.user_id.in_(tenant_user_ids))
+        .where(
+            Creditor.user_id.in_(tenant_user_ids),
+            Creditor.branch_id == active_branch_id,
+            CreditTransaction.branch_id == active_branch_id,
+        )
         .order_by(CreditTransaction.created_at.desc())
         .limit(20)
     ).all()
@@ -350,7 +377,8 @@ def get_sales_by_period(
     start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
     end_date: str = Query(..., description="End date (YYYY-MM-DD)"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     """
     Get detailed sales report for a specific period (Owner/Admin only).
@@ -371,7 +399,7 @@ def get_sales_by_period(
     # Sales in period
     sales = db.scalars(
         select(Sale)
-        .where(and_(Sale.created_at >= start, Sale.created_at <= end, Sale.user_id.in_(tenant_user_ids)))
+        .where(and_(Sale.created_at >= start, Sale.created_at <= end, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
         .order_by(Sale.created_at.desc())
     ).all()
     

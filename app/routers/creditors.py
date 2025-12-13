@@ -10,6 +10,7 @@ from ..models import Creditor, CreditTransaction, Sale
 from ..auth import get_current_active_user
 from ..models import User
 from app.utils.tenant import get_tenant_user_ids
+from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/creditors", tags=["creditors"])
 
@@ -37,11 +38,15 @@ class TransactionCreate(BaseModel):
 @router.get("/")
 async def get_creditors(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditors = db.scalars(
-        select(Creditor).where(Creditor.user_id.in_(tenant_user_ids))
+        select(Creditor).where(
+            Creditor.user_id.in_(tenant_user_ids),
+            Creditor.branch_id == active_branch_id,
+        )
     ).all()
     
     result = []
@@ -50,7 +55,8 @@ async def get_creditors(
         transactions = db.scalars(
             select(CreditTransaction).where(
                 CreditTransaction.creditor_id == creditor.id,
-                CreditTransaction.user_id.in_(tenant_user_ids)
+                CreditTransaction.user_id.in_(tenant_user_ids),
+                CreditTransaction.branch_id == active_branch_id,
             )
         ).all()
         
@@ -81,12 +87,15 @@ async def get_creditors(
 async def get_creditor(
     creditor_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditor = db.scalar(
         select(Creditor).where(
             Creditor.id == creditor_id,
-            Creditor.user_id == current_user.id
+            Creditor.user_id.in_(tenant_user_ids),
+            Creditor.branch_id == active_branch_id,
         )
     )
     if not creditor:
@@ -97,7 +106,8 @@ async def get_creditor(
         select(CreditTransaction)
         .where(
             CreditTransaction.creditor_id == creditor_id,
-            CreditTransaction.user_id == current_user.id
+            CreditTransaction.user_id.in_(tenant_user_ids),
+            CreditTransaction.branch_id == active_branch_id,
         )
         .order_by(CreditTransaction.created_at.desc())
     ).all()
@@ -128,7 +138,8 @@ async def get_creditor(
 async def create_creditor(
     creditor: CreditorCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     new_creditor = Creditor(
         name=creditor.name,
@@ -136,6 +147,7 @@ async def create_creditor(
         email=creditor.email,
         notes=creditor.notes,
         user_id=current_user.id,
+        branch_id=active_branch_id,
     )
     db.add(new_creditor)
     db.commit()
@@ -148,12 +160,15 @@ async def update_creditor(
     creditor_id: int,
     creditor: CreditorUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
     existing = db.scalar(
         select(Creditor).where(
             Creditor.id == creditor_id,
-            Creditor.user_id == current_user.id
+            Creditor.user_id.in_(tenant_user_ids),
+            Creditor.branch_id == active_branch_id,
         )
     )
     if not existing:
@@ -177,12 +192,15 @@ async def update_creditor(
 async def delete_creditor(
     creditor_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
     existing = db.scalar(
         select(Creditor).where(
             Creditor.id == creditor_id,
-            Creditor.user_id == current_user.id
+            Creditor.user_id.in_(tenant_user_ids),
+            Creditor.branch_id == active_branch_id,
         )
     )
     if not existing:
@@ -204,12 +222,15 @@ async def delete_creditor(
 async def add_transaction(
     transaction: TransactionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditor = db.scalar(
         select(Creditor).where(
             Creditor.id == transaction.creditor_id,
-            Creditor.user_id == current_user.id
+            Creditor.user_id.in_(tenant_user_ids),
+            Creditor.branch_id == active_branch_id,
         )
     )
     if not creditor:
@@ -223,6 +244,7 @@ async def add_transaction(
         transaction_type=transaction.transaction_type,
         notes=transaction.notes,
         user_id=current_user.id,
+        branch_id=active_branch_id,
     )
     db.add(new_transaction)
     
@@ -241,12 +263,15 @@ async def add_transaction(
 async def get_creditor_transactions(
     creditor_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditor = db.scalar(
         select(Creditor).where(
             Creditor.id == creditor_id,
-            Creditor.user_id == current_user.id
+            Creditor.user_id.in_(tenant_user_ids),
+            Creditor.branch_id == active_branch_id,
         )
     )
     if not creditor:
@@ -256,7 +281,8 @@ async def get_creditor_transactions(
         select(CreditTransaction)
         .where(
             CreditTransaction.creditor_id == creditor_id,
-            CreditTransaction.user_id == current_user.id
+            CreditTransaction.user_id.in_(tenant_user_ids),
+            CreditTransaction.branch_id == active_branch_id,
         )
         .order_by(CreditTransaction.created_at.desc())
     ).all()
@@ -278,10 +304,15 @@ async def get_creditor_transactions(
 @router.get("/analytics/summary")
 async def get_creditors_summary(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditors = db.scalars(
-        select(Creditor).where(Creditor.user_id == current_user.id)
+        select(Creditor).where(
+            Creditor.user_id.in_(tenant_user_ids),
+            Creditor.branch_id == active_branch_id,
+        )
     ).all()
     
     total_creditors = len(creditors)
@@ -292,7 +323,10 @@ async def get_creditors_summary(
     # Get recent transactions
     recent_transactions = db.scalars(
         select(CreditTransaction)
-        .where(CreditTransaction.user_id == current_user.id)
+        .where(
+            CreditTransaction.user_id.in_(tenant_user_ids),
+            CreditTransaction.branch_id == active_branch_id,
+        )
         .order_by(CreditTransaction.created_at.desc())
         .limit(10)
     ).all()

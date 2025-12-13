@@ -1,13 +1,26 @@
 import { useState, useRef, useEffect } from "react";
 
+import { Branch } from "../types";
+
 type Props = {
   userName?: string;
   userRole?: string;
   businessName?: string;
   onLogout?: () => void;
+  branches?: Branch[];
+  activeBranchId?: number | null;
+  onChangeBranch?: (branchId: number) => void;
 };
 
-export default function TopBar({ userName = "User", userRole = "Admin", businessName = "Gel Invent", onLogout }: Props) {
+export default function TopBar({
+  userName = "User",
+  userRole = "Admin",
+  businessName = "Gel Invent",
+  onLogout,
+  branches,
+  activeBranchId,
+  onChangeBranch,
+}: Props) {
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -45,7 +58,7 @@ export default function TopBar({ userName = "User", userRole = "Admin", business
       }}
     >
       {/* Left - Business Name */}
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 12 }}>
         <h1
           style={{
             margin: 0,
@@ -65,6 +78,30 @@ export default function TopBar({ userName = "User", userRole = "Admin", business
         >
           {businessName}
         </h1>
+
+        {branches && branches.length > 0 ? (
+          <select
+            value={activeBranchId ?? branches[0]?.id}
+            onChange={(e) => onChangeBranch?.(Number(e.target.value))}
+            style={{
+              height: 36,
+              borderRadius: 10,
+              border: "1px solid #e6e9f2",
+              background: "#ffffff",
+              padding: "0 10px",
+              fontSize: 13,
+              color: "#0b1021",
+              maxWidth: 220,
+            }}
+            aria-label="Select branch"
+          >
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        ) : null}
       </div>
 
       {/* Right - User Info */}

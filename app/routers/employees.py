@@ -5,8 +5,9 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User
+from app.models import User, Branch
 from app.auth import get_current_active_user, get_password_hash
+from app.utils.branch import get_owner_user_id, ensure_main_branch
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
@@ -17,6 +18,7 @@ class EmployeeCreate(BaseModel):
     name: str
     password: str
     role: str = "Sales"  # Default role for employees
+    branch_id: Optional[int] = None
 
 
 class EmployeeResponse(BaseModel):
@@ -24,6 +26,7 @@ class EmployeeResponse(BaseModel):
     email: str
     name: str
     role: str
+    branch_id: Optional[int] = None
     is_active: bool
     created_at: Optional[datetime] = None
 
@@ -35,6 +38,7 @@ class EmployeeUpdate(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
     is_active: Optional[bool] = None
+    branch_id: Optional[int] = None
 
 
 @router.post("/", response_model=EmployeeResponse, status_code=status.HTTP_201_CREATED)
@@ -60,6 +64,24 @@ def create_employee(
         )
     
     # Create new employee
+    owner_user_id = get_owner_user_id(current_user)
+
+    branch_id = employee_data.branch_id
+    if branch_id is None:
+        branch_id = ensure_main_branch(db, owner_user_id).id
+    else:
+        branch = (
+            db.query(Branch)
+            .filter(
+                Branch.id == branch_id,
+                Branch.owner_user_id == owner_user_id,
+                Branch.is_active.is_(True),
+            )
+            .first()
+        )
+        if not branch:
+            raise HTTPException(status_code=400, detail="Invalid branch")
+
     hashed_password = get_password_hash(employee_data.password)
     new_employee = User(
         email=employee_data.email,
@@ -67,6 +89,7 @@ def create_employee(
         hashed_password=hashed_password,
         role=employee_data.role,
         created_by=current_user.id,
+        branch_id=branch_id,
         business_name=current_user.business_name,  # Inherit owner's business
         is_active=True
     )
@@ -155,6 +178,20 @@ def update_employee(
         employee.role = employee_data.role
     if employee_data.is_active is not None:
         employee.is_active = employee_data.is_active
+    if employee_data.branch_id is not None:
+        owner_user_id = get_owner_user_id(current_user)
+        branch = (
+            db.query(Branch)
+            .filter(
+                Branch.id == employee_data.branch_id,
+                Branch.owner_user_id == owner_user_id,
+                Branch.is_active.is_(True),
+            )
+            .first()
+        )
+        if not branch:
+            raise HTTPException(status_code=400, detail="Invalid branch")
+        employee.branch_id = branch.id
     
     db.commit()
     db.refresh(employee)

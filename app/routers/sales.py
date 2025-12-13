@@ -9,6 +9,7 @@ from ..database import get_db
 from .. import models
 from ..schemas import SaleCreate, SaleRead
 from app.utils.tenant import get_tenant_user_ids
+from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -18,6 +19,7 @@ def create_sale(
     payload: SaleCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     """
     Create a new sale and deduct stock.
@@ -30,6 +32,7 @@ def create_sale(
         select(models.Product).where(
             models.Product.id == payload.product_id,
             models.Product.user_id.in_(tenant_user_ids),
+            models.Product.branch_id == active_branch_id,
         )
     )
     if not product:
@@ -38,6 +41,7 @@ def create_sale(
     # Create the sale
     sale = models.Sale(
         user_id=current_user.id,
+        branch_id=active_branch_id,
         product_id=payload.product_id,
         quantity=payload.quantity,
         unit_price=payload.unit_price,
@@ -52,6 +56,7 @@ def create_sale(
     # Deduct stock by creating a negative stock movement
     stock_movement = models.StockMovement(
         user_id=current_user.id,
+        branch_id=active_branch_id,
         product_id=payload.product_id,
         change=-payload.quantity,  # Negative to deduct stock
         reason="Sale",
@@ -91,6 +96,7 @@ def create_sale(
             select(models.Creditor).where(
                 models.Creditor.name == payload.customer_name,
                 models.Creditor.user_id.in_(tenant_user_ids),
+                models.Creditor.branch_id == active_branch_id,
             )
         )
         
@@ -98,6 +104,7 @@ def create_sale(
             # Create new creditor if doesn't exist
             creditor = models.Creditor(
                 user_id=current_user.id,
+                branch_id=active_branch_id,
                 name=payload.customer_name,
                 phone=phone_number,
                 total_debt=credit_amount,
@@ -123,6 +130,7 @@ def create_sale(
         # Create debt transaction
         credit_transaction = models.CreditTransaction(
             user_id=current_user.id,
+            branch_id=active_branch_id,
             creditor_id=creditor.id,
             sale_id=sale.id,
             amount=credit_amount,
@@ -135,6 +143,7 @@ def create_sale(
         if payload.amount_paid and payload.amount_paid > 0:
             payment_transaction = models.CreditTransaction(
                 user_id=current_user.id,
+                branch_id=active_branch_id,
                 creditor_id=creditor.id,
                 sale_id=sale.id,
                 amount=payload.amount_paid,
@@ -152,6 +161,7 @@ def create_sale(
 def list_sales(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     """
     Retrieve all sales for the current user's tenant.
@@ -159,7 +169,7 @@ def list_sales(
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     sales = db.scalars(
         select(models.Sale)
-        .where(models.Sale.user_id.in_(tenant_user_ids))
+        .where(models.Sale.user_id.in_(tenant_user_ids), models.Sale.branch_id == active_branch_id)
         .order_by(models.Sale.created_at.desc())
     ).all()
     
@@ -176,6 +186,7 @@ def get_sale(
     sale_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     """
     Retrieve a specific sale by ID for the current user's tenant.
@@ -185,6 +196,7 @@ def get_sale(
         select(models.Sale).where(
             models.Sale.id == sale_id,
             models.Sale.user_id.in_(tenant_user_ids),
+            models.Sale.branch_id == active_branch_id,
         )
     )
     if not sale:
@@ -202,6 +214,7 @@ def delete_sale(
     sale_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     """
     Delete a sale and restore the stock.
@@ -212,6 +225,7 @@ def delete_sale(
         select(models.Sale).where(
             models.Sale.id == sale_id,
             models.Sale.user_id.in_(tenant_user_ids),
+            models.Sale.branch_id == active_branch_id,
         )
     )
     if not sale:
@@ -220,6 +234,7 @@ def delete_sale(
     # Restore stock by creating a positive stock movement
     stock_movement = models.StockMovement(
         user_id=current_user.id,
+        branch_id=active_branch_id,
         product_id=sale.product_id,
         change=sale.quantity,  # Positive to restore stock
         reason="Sale Reversal",
@@ -233,6 +248,7 @@ def delete_sale(
             select(models.CreditTransaction).where(
                 models.CreditTransaction.sale_id == sale_id,
                 models.CreditTransaction.user_id.in_(tenant_user_ids),
+                models.CreditTransaction.branch_id == active_branch_id,
             )
         )
         if credit_transaction:

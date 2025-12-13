@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 
 import TopBar from "./TopBar";
+import { Branch } from "../types";
 
 type NavItem = {
   id: string;
@@ -29,9 +30,23 @@ type Props = {
   userName?: string;
   businessName?: string;
   userRole?: string;
+  branches?: Branch[];
+  activeBranchId?: number | null;
+  onChangeBranch?: (branchId: number) => void;
 };
 
-export default function Layout({ activeView, onNavigate, onLogout, children, userName = "User", businessName = "Business", userRole = "Admin" }: Props) {
+export default function Layout({
+  activeView,
+  onNavigate,
+  onLogout,
+  children,
+  userName = "User",
+  businessName = "Business",
+  userRole = "Admin",
+  branches,
+  activeBranchId,
+  onChangeBranch,
+}: Props) {
   // Filter navigation items based on user role
   const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || userRole === "Admin");
   
@@ -104,7 +119,15 @@ export default function Layout({ activeView, onNavigate, onLogout, children, use
 
       {/* Main Content */}
       <main style={{ flex: 1, background: "#f7f9ff", display: "flex", flexDirection: "column" }}>
-        <TopBar userName={userName} userRole={userRole} businessName={businessName} onLogout={onLogout} />
+        <TopBar
+          userName={userName}
+          userRole={userRole}
+          businessName={businessName}
+          onLogout={onLogout}
+          branches={branches}
+          activeBranchId={activeBranchId}
+          onChangeBranch={onChangeBranch}
+        />
         <div style={{ flex: 1 }}>{children}</div>
       </main>
     </div>

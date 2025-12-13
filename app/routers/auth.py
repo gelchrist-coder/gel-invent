@@ -10,7 +10,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User, PasswordResetToken
+from app.models import User, PasswordResetToken, Branch
 from app.auth import (
     create_access_token,
     get_password_hash,
@@ -144,6 +144,11 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    # Ensure every business starts with a default branch.
+    main_branch = Branch(owner_user_id=new_user.id, name="Main Branch", is_active=True)
+    db.add(main_branch)
+    db.commit()
     
     return _serialize_user(new_user)
 

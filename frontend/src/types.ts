@@ -75,3 +75,10 @@ export type NewSale = {
   amount_paid?: number;
   partial_payment_method?: string;
 };
+
+export type Branch = {
+  id: number;
+  owner_user_id: number;
+  name: string;
+  is_active: boolean;
+};

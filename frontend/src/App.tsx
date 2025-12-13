@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { createMovement, createProduct, deleteProduct, fetchMe, fetchProducts, updateProduct } from "./api";
+import { createMovement, createProduct, deleteProduct, fetchBranches, fetchMe, fetchProducts, updateProduct } from "./api";
 import Layout from "./components/Layout";
 import ProductForm from "./components/ProductForm";
 import ProductList from "./components/ProductList";
 import { useAppCategories } from "./categories";
-import { NewProduct, Product } from "./types";
+import { Branch, NewProduct, Product } from "./types";
 import Creditors from "./views/Creditors";
 import Dashboard from "./views/Dashboard";
 import Inventory from "./views/Inventory";
@@ -29,16 +29,26 @@ export default function App() {
   const [businessName, setBusinessName] = useState("Business");
   const [userRole, setUserRole] = useState("Admin");
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [activeBranchId, setActiveBranchId] = useState<number | null>(() => {
+    const raw = localStorage.getItem("activeBranchId");
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  });
   const categoryOptions = useAppCategories();
 
   const logoutAndReset = () => {
     setIsAuthenticated(false);
     localStorage.removeItem("user");
     localStorage.removeItem("token");
+    localStorage.removeItem("activeBranchId");
     setUserName("User");
     setBusinessName("Business");
     setUserRole("Admin");
     setCurrentUserId(null);
+    setBranches([]);
+    setActiveBranchId(null);
   };
 
   // Check if user is authenticated on mount
@@ -75,6 +85,42 @@ export default function App() {
         });
     }
   }, []);
+
+  // Load branches after login and pick an active branch.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    const run = async () => {
+      try {
+        const data = await fetchBranches();
+        setBranches(data);
+
+        const existing = activeBranchId;
+        const stillValid = existing != null && data.some((b) => b.id === existing);
+        if (stillValid) {
+          return;
+        }
+
+        const main = data.find((b) => b.name === "Main Branch");
+        const nextId = (main?.id ?? data[0]?.id) ?? null;
+        setActiveBranchId(nextId);
+        if (nextId != null) {
+          localStorage.setItem("activeBranchId", String(nextId));
+        } else {
+          localStorage.removeItem("activeBranchId");
+        }
+      } catch {
+        // Branches are optional UI; backend may deny for some roles.
+        setBranches([]);
+      }
+    };
+
+    run();
+    // Intentionally not depending on activeBranchId to avoid repeated fetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   // Auto-refresh when another user signs in
   useEffect(() => {
@@ -124,12 +170,14 @@ export default function App() {
     }
     
     const run = async () => {
+      setProducts([]);
+      setSelectedId(null);
       const data = await fetchProducts();
       setProducts(data);
       setSelectedId((prev) => prev ?? (data[0]?.id ?? null));
     };
     run();
-  }, [isAuthenticated]);
+  }, [isAuthenticated, activeBranchId]);
 
 
 
@@ -141,6 +189,11 @@ export default function App() {
 
   const handleLogout = () => {
     logoutAndReset();
+  };
+
+  const handleChangeBranch = (branchId: number) => {
+    setActiveBranchId(branchId);
+    localStorage.setItem("activeBranchId", String(branchId));
   };
 
   // Show login page if not authenticated
@@ -361,8 +414,18 @@ export default function App() {
   };
 
   return (
-    <Layout activeView={activeView} onNavigate={setActiveView} onLogout={handleLogout} userName={userName} businessName={businessName} userRole={userRole}>
-      {renderView()}
+    <Layout
+      activeView={activeView}
+      onNavigate={setActiveView}
+      onLogout={handleLogout}
+      userName={userName}
+      businessName={businessName}
+      userRole={userRole}
+      branches={branches}
+      activeBranchId={activeBranchId}
+      onChangeBranch={userRole === "Admin" ? handleChangeBranch : undefined}
+    >
+      <div key={`${activeView}:${activeBranchId ?? "none"}`}>{renderView()}</div>
     </Layout>
   );
 }
