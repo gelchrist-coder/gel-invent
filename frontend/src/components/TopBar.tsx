@@ -44,11 +44,8 @@ export default function TopBar({ userName = "User", userRole = "Admin", business
         zIndex: 100,
       }}
     >
-      {/* Left spacer */}
-      <div style={{ flex: 1 }} />
-
-      {/* Center - Business Name */}
-      <div style={{ flex: 1, textAlign: "center" }}>
+      {/* Left - Business Name */}
+      <div style={{ minWidth: 0 }}>
         <h1
           style={{
             margin: 0,
@@ -59,14 +56,19 @@ export default function TopBar({ userName = "User", userRole = "Admin", business
             WebkitTextFillColor: "transparent",
             backgroundClip: "text",
             letterSpacing: "-0.5px",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: 520,
           }}
+          title={businessName}
         >
           {businessName}
         </h1>
       </div>
 
       {/* Right - User Info */}
-      <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <div style={{ position: "relative" }} ref={dropdownRef}>
           <div
             onClick={() => setShowDropdown(!showDropdown)}
