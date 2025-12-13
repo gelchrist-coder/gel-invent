@@ -13,16 +13,151 @@ export default function Login({ onLogin }: LoginProps) {
     password: "",
     confirmPassword: "",
     businessName: "",
+    categories: [] as string[],
   });
+  const [categoryInput, setCategoryInput] = useState("");
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const [showReset, setShowReset] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+  const safeJson = async (res: Response): Promise<unknown> => {
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
+  };
+
+  const COMMON_CATEGORIES = [
+    "Beverages",
+    "Food",
+    "Groceries",
+    "Cosmetics",
+    "Pharmacy",
+    "Stationery",
+    "Electronics",
+    "Household",
+    "Baby Products",
+    "Cleaning",
+  ];
+
+  const addCategory = (raw: string) => {
+    const value = raw.trim();
+    if (!value) return;
+    if (formData.categories.some((c) => c.toLowerCase() === value.toLowerCase())) return;
+    setFormData({
+      ...formData,
+      categories: [...formData.categories, value],
+    });
+    setCategoryInput("");
+  };
+
+  const removeCategory = (value: string) => {
+    setFormData({
+      ...formData,
+      categories: formData.categories.filter((c) => c !== value),
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setInfo("");
     setLoading(true);
 
     try {
+      if (showReset) {
+        const email = (resetEmail || formData.email).trim();
+        if (!email) {
+          setError("Please enter your email");
+          setLoading(false);
+          return;
+        }
+
+        if (!resetCode) {
+          // Request reset code
+          const res = await fetch(`${API_BASE}/auth/password-reset/request`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email }),
+          });
+
+          const data = await safeJson(res);
+          if (!res.ok) {
+            const detail = isRecord(data) && typeof data.detail === "string" ? data.detail : null;
+            setError(detail || "Could not request reset code");
+            setLoading(false);
+            return;
+          }
+
+          const message =
+            isRecord(data) && typeof data.message === "string"
+              ? data.message
+              : "Check your email for the reset code.";
+          setInfo(message);
+          if (isRecord(data) && typeof data.reset_code === "string" && data.reset_code.trim()) {
+            setResetCode(data.reset_code);
+          }
+          setLoading(false);
+          return;
+        }
+
+        // Confirm reset
+        if (resetPassword !== resetConfirmPassword) {
+          setError("Passwords do not match");
+          setLoading(false);
+          return;
+        }
+        if (resetPassword.length < 6) {
+          setError("Password must be at least 6 characters");
+          setLoading(false);
+          return;
+        }
+
+        const confirmRes = await fetch(`${API_BASE}/auth/password-reset/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email,
+            code: resetCode,
+            new_password: resetPassword,
+          }),
+        });
+
+        const confirmData = await safeJson(confirmRes);
+        if (!confirmRes.ok) {
+          const detail =
+            isRecord(confirmData) && typeof confirmData.detail === "string" ? confirmData.detail : null;
+          setError(detail || "Reset failed. Check your code and try again.");
+          setLoading(false);
+          return;
+        }
+
+        setInfo("Password updated. Please sign in with your new password.");
+        setShowReset(false);
+        setResetEmail("");
+        setResetCode("");
+        setResetPassword("");
+        setResetConfirmPassword("");
+        setFormData({
+          ...formData,
+          email,
+          password: resetPassword,
+          confirmPassword: "",
+        });
+        setLoading(false);
+        return;
+      }
+
       if (isSignUp) {
         // Sign up validation
         if (!formData.name.trim()) {
@@ -55,6 +190,7 @@ export default function Login({ onLogin }: LoginProps) {
             name: formData.name,
             password: formData.password,
             business_name: formData.businessName,
+            categories: formData.categories,
           }),
         });
 
@@ -225,8 +361,24 @@ export default function Login({ onLogin }: LoginProps) {
             </div>
           )}
 
+          {info && (
+            <div
+              style={{
+                padding: 12,
+                background: "#ecfeff",
+                border: "1px solid #06b6d4",
+                borderRadius: 8,
+                color: "#155e75",
+                fontSize: 14,
+                marginBottom: 20,
+              }}
+            >
+              {info}
+            </div>
+          )}
+
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {isSignUp && (
+            {isSignUp && !showReset && (
               <>
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
@@ -257,9 +409,165 @@ export default function Login({ onLogin }: LoginProps) {
                     style={{ padding: 12 }}
                   />
                 </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    Business Categories
+                  </span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      type="text"
+                      value={categoryInput}
+                      onChange={(e) => setCategoryInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addCategory(categoryInput);
+                        }
+                      }}
+                      placeholder="Type a category and press Enter"
+                      list="category-suggestions"
+                      className="input"
+                      style={{ padding: 12, flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => addCategory(categoryInput)}
+                      className="button"
+                      style={{ padding: "12px 14px" }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <datalist id="category-suggestions">
+                    {COMMON_CATEGORIES.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
+
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      addCategory(e.target.value);
+                      e.currentTarget.value = "";
+                    }}
+                    className="input"
+                    style={{ padding: 12 }}
+                  >
+                    <option value="" disabled>
+                      Or select a common category
+                    </option>
+                    {COMMON_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+
+                  {formData.categories.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+                      {formData.categories.map((c) => (
+                        <span
+                          key={c}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
+                            background: "#eef2ff",
+                            border: "1px solid #c7d2fe",
+                            color: "#3730a3",
+                            padding: "6px 10px",
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {c}
+                          <button
+                            type="button"
+                            onClick={() => removeCategory(c)}
+                            style={{
+                              border: "none",
+                              background: "transparent",
+                              cursor: "pointer",
+                              color: "#3730a3",
+                              fontWeight: 800,
+                              lineHeight: 1,
+                            }}
+                            aria-label={`Remove ${c}`}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </label>
               </>
             )}
 
+            {!isSignUp && showReset && (
+              <>
+                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    Email Address *
+                  </span>
+                  <input
+                    type="email"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    required
+                    className="input"
+                    style={{ padding: 12 }}
+                  />
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    Reset Code
+                  </span>
+                  <input
+                    type="text"
+                    value={resetCode}
+                    onChange={(e) => setResetCode(e.target.value)}
+                    placeholder="Enter the 6-digit code"
+                    className="input"
+                    style={{ padding: 12 }}
+                  />
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    New Password
+                  </span>
+                  <input
+                    type="password"
+                    value={resetPassword}
+                    onChange={(e) => setResetPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="input"
+                    style={{ padding: 12 }}
+                  />
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    Confirm New Password
+                  </span>
+                  <input
+                    type="password"
+                    value={resetConfirmPassword}
+                    onChange={(e) => setResetConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="input"
+                    style={{ padding: 12 }}
+                  />
+                </label>
+              </>
+            )}
+
+            {!showReset && (
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                 Email Address *
@@ -274,7 +582,9 @@ export default function Login({ onLogin }: LoginProps) {
                 style={{ padding: 12 }}
               />
             </label>
+            )}
 
+            {!showReset && (
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                 Password *
@@ -289,6 +599,36 @@ export default function Login({ onLogin }: LoginProps) {
                 style={{ padding: 12 }}
               />
             </label>
+            )}
+
+            {!isSignUp && !showReset && (
+              <div style={{ marginTop: -8, textAlign: "right" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReset(true);
+                    setError("");
+                    setInfo("");
+                    setResetEmail(formData.email);
+                    setResetCode("");
+                    setResetPassword("");
+                    setResetConfirmPassword("");
+                  }}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#1f7aff",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                    padding: 0,
+                  }}
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
 
             {isSignUp && (
               <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -323,23 +663,62 @@ export default function Login({ onLogin }: LoginProps) {
               cursor: loading ? "not-allowed" : "pointer",
             }}
           >
-            {loading ? "Processing..." : isSignUp ? "Sign Up" : "Sign In"}
+            {loading
+              ? "Processing..."
+              : showReset
+                ? (resetCode ? "Reset Password" : "Send Reset Code")
+                : isSignUp
+                  ? "Sign Up"
+                  : "Sign In"}
           </button>
 
+          {!isSignUp && showReset && (
+            <div style={{ marginTop: 16, textAlign: "center" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReset(false);
+                  setError("");
+                  setInfo("");
+                }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#1f7aff",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  textDecoration: "underline",
+                }}
+              >
+                Back to Sign In
+              </button>
+            </div>
+          )}
+
           {/* Toggle Sign In/Sign Up */}
+          {!showReset && (
           <div style={{ marginTop: 24, textAlign: "center" }}>
             <button
               type="button"
               onClick={() => {
                 setIsSignUp(!isSignUp);
                 setError("");
+                setInfo("");
                 setFormData({
                   name: "",
                   email: "",
                   password: "",
                   confirmPassword: "",
                   businessName: "",
+                  categories: [],
                 });
+                setCategoryInput("");
+                setShowReset(false);
+                setResetEmail("");
+                setResetCode("");
+                setResetPassword("");
+                setResetConfirmPassword("");
               }}
               style={{
                 background: "transparent",
@@ -356,6 +735,7 @@ export default function Login({ onLogin }: LoginProps) {
                 : "Don't have an account? Sign Up"}
             </button>
           </div>
+          )}
         </form>
 
         {/* Footer */}

@@ -1,6 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from .database import Base, engine
 from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees
@@ -40,6 +41,10 @@ async def on_startup() -> None:
         print("Creating/verifying database tables...")
         Base.metadata.create_all(bind=engine)
         print("✅ Database tables created/verified successfully")
+
+        # Lightweight schema patch for existing DBs (create_all won't add columns).
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
     except Exception as e:
         print(f"⚠️ Warning: Could not create tables: {e}")
         print(f"Error details: {type(e).__name__}: {str(e)}")
