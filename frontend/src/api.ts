@@ -1,7 +1,13 @@
 import { Branch, NewMovement, NewProduct, NewSale, Product, Sale, StockMovement } from "./types";
 
-// Railway backend URL - production deployment v2.0
-const API_BASE = "https://gel-invent-production.up.railway.app";
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+// API base URL (configure via VITE_API_URL on Vercel/Netlify/etc)
+const API_BASE = normalizeBaseUrl(
+  (import.meta.env.VITE_API_URL as string | undefined) ?? "https://gel-invent-production.up.railway.app"
+);
 
 // Export for use in other components
 export { API_BASE };
