@@ -1,19 +1,30 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 
-import { NewProduct } from "../types";
+import { Branch, NewProduct } from "../types";
 import { useAppCategories } from "../categories";
 
 type Props = {
-  onCreate: (payload: NewProduct) => Promise<void>;
+  onCreate: (payload: NewProduct, branchIdOverride?: number | null) => Promise<void>;
   onCancel?: () => void;
+  userRole?: string;
+  branches?: Branch[];
+  activeBranchId?: number | null;
 };
 
 const UNITS = ["pcs", "box", "pack", "dozen", "carton", "bundle", "unit"];
 
-export default function ProductForm({ onCreate, onCancel }: Props) {
+export default function ProductForm({
+  onCreate,
+  onCancel,
+  userRole = "Admin",
+  branches,
+  activeBranchId,
+}: Props) {
   const categoryOptions = useAppCategories();
 
-  const [form, setForm] = useState<NewProduct & { 
+  const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
+
+  const [form, setForm] = useState<NewProduct & {
     category?: string; 
     barcode?: string;
     costPrice?: string;
@@ -49,6 +60,17 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submittingMode, setSubmittingMode] = useState<"save" | "saveAndNew" | null>(null);
+
+  const role = userRole;
+
+  const effectiveBranchId = useMemo(() => {
+    if (role === "Admin") {
+      if (selectedBranchId != null) return selectedBranchId;
+      if (activeBranchId != null) return activeBranchId;
+      return branches?.[0]?.id ?? null;
+    }
+    return activeBranchId ?? null;
+  }, [role, selectedBranchId, activeBranchId, branches]);
 
   const generateSKU = () => {
     const prefix = form.category?.substring(0, 3).toUpperCase() || "PRD";
@@ -90,7 +112,7 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
         pack_selling_price: form.packSellingPrice ? parseFloat(form.packSellingPrice) : undefined,
         initial_stock: actualStock,
         initial_location: form.initialLocation || undefined,
-      });
+      }, role === "Admin" ? effectiveBranchId : null);
       
       if (mode === "saveAndNew") {
         // Clear form but keep category and unit
@@ -360,18 +382,29 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
               </label>
               <label>
                 Initial Location
-                <select
-                  className="input"
-                  value={form.initialLocation}
-                  onChange={(e) => setForm({ ...form, initialLocation: e.target.value })}
-                >
-                  <option value="Main Store">Main Store</option>
-                  <option value="Warehouse A">Warehouse A</option>
-                  <option value="Warehouse B">Warehouse B</option>
-                  <option value="Cold Storage">Cold Storage</option>
-                  <option value="Display Area">Display Area</option>
-                  <option value="Back Room">Back Room</option>
-                </select>
+                {role === "Admin" && branches && branches.length > 0 ? (
+                  <select
+                    className="input"
+                    value={String(effectiveBranchId ?? branches[0].id)}
+                    onChange={(e) => setSelectedBranchId(Number(e.target.value))}
+                  >
+                    {branches.map((b) => (
+                      <option key={b.id} value={String(b.id)}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="input"
+                    value={
+                      branches && branches.length > 0
+                        ? (branches.find((b) => b.id === effectiveBranchId)?.name ?? "Main Branch")
+                        : "Main Branch"
+                    }
+                    readOnly
+                  />
+                )}
               </label>
             </div>
             <label>

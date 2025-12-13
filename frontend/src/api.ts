@@ -13,6 +13,7 @@ export type AuthUser = {
   role: string;
   business_name?: string | null;
   categories?: string[] | null;
+  branch_id?: number | null;
   is_active: boolean;
 };
 
@@ -102,9 +103,14 @@ export async function fetchMovements(productId: number): Promise<StockMovement[]
   return data.map((m) => ({ ...m, change: Number(m.change) }));
 }
 
-export async function createProduct(payload: NewProduct): Promise<Product> {
+export async function createProduct(payload: NewProduct, branchIdOverride?: number | null): Promise<Product> {
+  const headers: Record<string, string> = {};
+  if (branchIdOverride != null) {
+    headers["X-Branch-Id"] = String(branchIdOverride);
+  }
   return jsonRequest<Product>("/products/", {
     method: "POST",
+    headers,
     body: JSON.stringify(payload),
   });
 }

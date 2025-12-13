@@ -52,6 +52,7 @@ class UserResponse(BaseModel):
     role: str
     business_name: Optional[str] = None
     categories: Optional[list[str]] = None
+    branch_id: Optional[int] = None
     is_active: bool
 
     class Config:
@@ -81,6 +82,7 @@ def _serialize_user(user: User) -> UserResponse:
         role=user.role,
         business_name=user.business_name,
         categories=_parse_categories(getattr(user, "categories", None)),
+        branch_id=getattr(user, "branch_id", None),
         is_active=user.is_active,
     )
 

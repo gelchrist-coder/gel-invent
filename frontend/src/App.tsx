@@ -63,6 +63,11 @@ export default function App() {
         setBusinessName(user.business_name || "Business");
         setUserRole(user.role || "Admin");
         setCurrentUserId(user.id || null);
+        if (user.role && user.role !== "Admin") {
+          const bid = typeof user.branch_id === "number" ? user.branch_id : null;
+          setActiveBranchId(bid);
+          if (bid != null) localStorage.setItem("activeBranchId", String(bid));
+        }
       } catch (error) {
         console.error("Error parsing user data:", error);
       }
@@ -79,6 +84,14 @@ export default function App() {
           setBusinessName(me.business_name || "Business");
           setUserRole(me.role || "Admin");
           setCurrentUserId(me.id || null);
+
+          // Employees are locked to their assigned branch.
+          if (me.role !== "Admin") {
+            const bid = typeof me.branch_id === "number" ? me.branch_id : null;
+            setActiveBranchId(bid);
+            if (bid != null) localStorage.setItem("activeBranchId", String(bid));
+            else localStorage.removeItem("activeBranchId");
+          }
         })
         .catch(() => {
           logoutAndReset();
@@ -226,8 +239,8 @@ export default function App() {
     return <Login onLogin={handleLogin} />;
   }
 
-  const handleCreateProduct = async (payload: NewProduct) => {
-    const created = await createProduct(payload);
+  const handleCreateProduct = async (payload: NewProduct, branchIdOverride?: number | null) => {
+    const created = await createProduct(payload, branchIdOverride);
     setProducts((prev) => [created, ...prev]);
     setSelectedId(created.id);
     setShowAddProduct(false);
@@ -323,7 +336,12 @@ export default function App() {
                       ✕
                     </button>
                   </div>
-                  <ProductForm onCreate={handleCreateProduct} />
+                  <ProductForm
+                    onCreate={handleCreateProduct}
+                    userRole={userRole}
+                    branches={branches}
+                    activeBranchId={activeBranchId}
+                  />
                 </div>
               </div>
             )}

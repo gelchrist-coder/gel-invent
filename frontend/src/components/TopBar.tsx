@@ -79,7 +79,7 @@ export default function TopBar({
           {businessName}
         </h1>
 
-        {branches && branches.length > 0 ? (
+        {userRole === "Admin" && onChangeBranch && branches && branches.length > 0 ? (
           <select
             value={activeBranchId ?? branches[0]?.id}
             onChange={(e) => onChangeBranch?.(Number(e.target.value))}
@@ -101,6 +101,27 @@ export default function TopBar({
               </option>
             ))}
           </select>
+        ) : branches && branches.length > 0 ? (
+          <div
+            style={{
+              height: 36,
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "0 10px",
+              borderRadius: 10,
+              border: "1px solid #e6e9f2",
+              background: "#ffffff",
+              fontSize: 13,
+              color: "#0b1021",
+              maxWidth: 240,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+            title={branches.find((b) => b.id === (activeBranchId ?? branches[0]?.id))?.name}
+          >
+            {branches.find((b) => b.id === (activeBranchId ?? branches[0]?.id))?.name ?? "Main Branch"}
+          </div>
         ) : null}
       </div>
 
