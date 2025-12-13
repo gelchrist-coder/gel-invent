@@ -83,22 +83,31 @@ def get_inventory_analytics(
                 "category": product.category,
             })
         
-        # Expiring batches
-        for movement in movements:
-            if movement.expiry_date and movement.change > 0:  # Only positive movements (stock in)
-                # Calculate remaining stock for this batch
-                batch_stock = movement.change
-                
-                # Check if batch is expiring
+        # Expiring batches (estimate remaining by allocating total_stock to newest stock-in batches)
+        if total_stock > 0:
+            positive_batches = [
+                m
+                for m in movements
+                if m.change > 0 and m.expiry_date is not None
+            ]
+            positive_batches.sort(key=lambda m: m.created_at, reverse=True)
+
+            remaining = total_stock
+            for movement in positive_batches:
+                if remaining <= 0:
+                    break
+
+                batch_remaining = movement.change if movement.change <= remaining else remaining
+                remaining = remaining - batch_remaining
+
                 days_to_expiry = (movement.expiry_date - today).days
-                
-                if days_to_expiry <= 90 and batch_stock > 0:
+                if days_to_expiry <= 90 and batch_remaining > 0:
                     expiring_batches.append({
                         "product_id": product.id,
                         "product_name": product.name,
                         "sku": product.sku,
                         "batch_number": movement.batch_number,
-                        "quantity": float(batch_stock),
+                        "quantity": float(batch_remaining),
                         "expiry_date": movement.expiry_date.isoformat(),
                         "days_to_expiry": days_to_expiry,
                         "status": "expired" if days_to_expiry < 0 else "expiring_soon" if days_to_expiry <= 7 else "expiring_30" if days_to_expiry <= 30 else "expiring_90",
