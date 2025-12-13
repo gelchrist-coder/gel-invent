@@ -52,7 +52,27 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
 
   // Add product to cart
   const addToCart = (product: Product, unit: 'piece' | 'pack' = 'piece') => {
+    const availablePieces = Number(product.current_stock ?? 0);
+    if (availablePieces <= 0) {
+      alert("Out of stock");
+      return;
+    }
+
     const existingItem = cart.find(item => item.product.id === product.id && item.sellingUnit === unit);
+
+    const cartPiecesForProduct = cart.reduce((sum, item) => {
+      if (item.product.id !== product.id) return sum;
+      const pieceQty = item.sellingUnit === 'pack'
+        ? item.quantity * (item.product.pack_size || 1)
+        : item.quantity;
+      return sum + pieceQty;
+    }, 0);
+
+    const addPieceQty = unit === 'pack' ? (product.pack_size || 1) : 1;
+    if (cartPiecesForProduct + addPieceQty > availablePieces) {
+      alert(`Not enough stock. Available: ${availablePieces}`);
+      return;
+    }
     
     if (existingItem) {
       // Increase quantity if already in cart
@@ -71,6 +91,28 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const updateQuantity = (productId: number, unit: 'piece' | 'pack', newQuantity: number) => {
     if (newQuantity < 1) {
       removeFromCart(productId, unit);
+      return;
+    }
+
+    const product = products.find((p) => p.id === productId);
+    const availablePieces = Number(product?.current_stock ?? 0);
+    if (availablePieces <= 0) {
+      alert("Out of stock");
+      removeFromCart(productId, unit);
+      return;
+    }
+
+    const nextPiecesForProduct = cart.reduce((sum, item) => {
+      if (item.product.id !== productId) return sum;
+      const qty = item.sellingUnit === unit ? newQuantity : item.quantity;
+      const pieceQty = item.sellingUnit === 'pack'
+        ? qty * (item.product.pack_size || 1)
+        : qty;
+      return sum + pieceQty;
+    }, 0);
+
+    if (nextPiecesForProduct > availablePieces) {
+      alert(`Not enough stock. Available: ${availablePieces}`);
       return;
     }
     setCart(cart.map(item => 
@@ -113,6 +155,29 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     if (cart.length === 0) {
       alert("Please add items to cart");
       return;
+    }
+
+    // Validate stock before checkout
+    const byProduct = new Map<number, { requiredPieces: number; availablePieces: number }>();
+    for (const item of cart) {
+      const availablePieces = Number(item.product.current_stock ?? 0);
+      const pieceQuantity = item.sellingUnit === 'pack'
+        ? item.quantity * (item.product.pack_size || 1)
+        : item.quantity;
+      const prev = byProduct.get(item.product.id) || { requiredPieces: 0, availablePieces };
+      byProduct.set(item.product.id, {
+        requiredPieces: prev.requiredPieces + pieceQuantity,
+        availablePieces,
+      });
+    }
+
+    for (const [productId, v] of byProduct.entries()) {
+      if (v.requiredPieces > v.availablePieces) {
+        const p = products.find((x) => x.id === productId);
+        const name = p?.name || "This product";
+        alert(`${name}: not enough stock (available ${v.availablePieces})`);
+        return;
+      }
     }
 
     // If credit payment, validate customer name and show credit modal
@@ -256,23 +321,27 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                 <button
                   type="button"
                   onClick={() => addToCart(product, 'piece')}
+                  disabled={Number(product.current_stock ?? 0) <= 0}
                   style={{
                     flex: 1,
                     padding: "8px 12px",
                     border: "1px solid #10b981",
                     borderRadius: 6,
                     background: "linear-gradient(135deg, #ecfdf5, #d1fae5)",
-                    cursor: "pointer",
+                    cursor: Number(product.current_stock ?? 0) <= 0 ? "not-allowed" : "pointer",
+                    opacity: Number(product.current_stock ?? 0) <= 0 ? 0.6 : 1,
                     fontSize: 13,
                     fontWeight: 600,
                     color: "#059669",
                     transition: "all 0.2s",
                   }}
                   onMouseEnter={(e) => {
+                    if (Number(product.current_stock ?? 0) <= 0) return;
                     e.currentTarget.style.background = "#10b981";
                     e.currentTarget.style.color = "white";
                   }}
                   onMouseLeave={(e) => {
+                    if (Number(product.current_stock ?? 0) <= 0) return;
                     e.currentTarget.style.background = "linear-gradient(135deg, #ecfdf5, #d1fae5)";
                     e.currentTarget.style.color = "#059669";
                   }}
@@ -287,23 +356,27 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                   <button
                     type="button"
                     onClick={() => addToCart(product, 'pack')}
+                    disabled={Number(product.current_stock ?? 0) <= 0}
                     style={{
                       flex: 1,
                       padding: "8px 12px",
                       border: "1px solid #3b82f6",
                       borderRadius: 6,
                       background: "linear-gradient(135deg, #eff6ff, #dbeafe)",
-                      cursor: "pointer",
+                      cursor: Number(product.current_stock ?? 0) <= 0 ? "not-allowed" : "pointer",
+                      opacity: Number(product.current_stock ?? 0) <= 0 ? 0.6 : 1,
                       fontSize: 13,
                       fontWeight: 600,
                       color: "#2563eb",
                       transition: "all 0.2s",
                     }}
                     onMouseEnter={(e) => {
+                      if (Number(product.current_stock ?? 0) <= 0) return;
                       e.currentTarget.style.background = "#3b82f6";
                       e.currentTarget.style.color = "white";
                     }}
                     onMouseLeave={(e) => {
+                      if (Number(product.current_stock ?? 0) <= 0) return;
                       e.currentTarget.style.background = "linear-gradient(135deg, #eff6ff, #dbeafe)";
                       e.currentTarget.style.color = "#2563eb";
                     }}

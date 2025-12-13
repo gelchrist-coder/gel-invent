@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
@@ -37,6 +37,21 @@ def create_sale(
     )
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+
+    available_stock = db.scalar(
+        select(func.coalesce(func.sum(models.StockMovement.change), 0)).where(
+            models.StockMovement.product_id == payload.product_id,
+            models.StockMovement.branch_id == active_branch_id,
+            models.StockMovement.user_id.in_(tenant_user_ids),
+        )
+    )
+    if available_stock is None:
+        available_stock = Decimal(0)
+    if payload.quantity > available_stock:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient stock. Available: {available_stock}",
+        )
 
     # Create the sale
     sale = models.Sale(

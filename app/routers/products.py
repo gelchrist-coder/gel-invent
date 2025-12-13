@@ -90,6 +90,8 @@ def create_product(
         db.add(movement)
         db.commit()
 
+    product.current_stock = initial_stock if (initial_stock and initial_stock > 0) else Decimal(0)
+
     # Populate computed fields expected by the frontend.
     product.created_by_name = current_user.name
     return product
@@ -106,11 +108,30 @@ def list_products(
         models.Product.user_id.in_(tenant_user_ids),
         models.Product.branch_id == active_branch_id,
     ).order_by(models.Product.created_at.desc()).all()
+
+    product_ids = [p.id for p in products]
+    stocks: dict[int, Decimal] = {}
+    if product_ids:
+        stock_rows = (
+            db.query(
+                models.StockMovement.product_id,
+                func.coalesce(func.sum(models.StockMovement.change), 0),
+            )
+            .filter(
+                models.StockMovement.product_id.in_(product_ids),
+                models.StockMovement.user_id.in_(tenant_user_ids),
+                models.StockMovement.branch_id == active_branch_id,
+            )
+            .group_by(models.StockMovement.product_id)
+            .all()
+        )
+        stocks = {int(pid): (total if isinstance(total, Decimal) else Decimal(str(total))) for pid, total in stock_rows}
     
     # Add created_by_name to each product
     for product in products:
         creator = db.query(models.User).filter(models.User.id == product.user_id).first()
         product.created_by_name = creator.name if creator else None
+        product.current_stock = stocks.get(product.id, Decimal(0))
     
     return products
 
@@ -134,6 +155,13 @@ def get_product(
     # Add created_by_name
     creator = db.query(models.User).filter(models.User.id == product.user_id).first()
     product.created_by_name = creator.name if creator else None
+
+    stock_total = db.query(func.coalesce(func.sum(models.StockMovement.change), 0)).filter(
+        models.StockMovement.product_id == product.id,
+        models.StockMovement.user_id.in_(tenant_user_ids),
+        models.StockMovement.branch_id == active_branch_id,
+    ).scalar()
+    product.current_stock = stock_total if isinstance(stock_total, Decimal) else Decimal(str(stock_total or 0))
     
     return product
 
@@ -259,6 +287,13 @@ def update_product(
     db.commit()
     db.refresh(product)
     product.created_by_name = (db.query(models.User).filter(models.User.id == product.user_id).first() or current_user).name
+
+    stock_total = db.query(func.coalesce(func.sum(models.StockMovement.change), 0)).filter(
+        models.StockMovement.product_id == product.id,
+        models.StockMovement.user_id.in_(tenant_user_ids),
+        models.StockMovement.branch_id == active_branch_id,
+    ).scalar()
+    product.current_stock = stock_total if isinstance(stock_total, Decimal) else Decimal(str(stock_total or 0))
     return product
 
 

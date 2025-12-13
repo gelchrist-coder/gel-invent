@@ -14,6 +14,7 @@ export type Product = {
   created_at: string;
   updated_at: string;
   created_by_name?: string | null;
+  current_stock?: number | null;
 };
 
 export type StockMovement = {

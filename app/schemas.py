@@ -28,6 +28,7 @@ class ProductRead(ProductBase):
     created_at: datetime
     updated_at: datetime
     created_by_name: str | None = None
+    current_stock: Decimal = Decimal(0)
 
     model_config = ConfigDict(from_attributes=True)
 
