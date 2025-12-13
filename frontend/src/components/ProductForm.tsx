@@ -33,7 +33,7 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
     unit: "pcs",
     pack_size: null,
     expiry_date: null,
-    category: categoryOptions[0] ?? "Other",
+    category: categoryOptions[0] ?? "",
     barcode: "",
     costPrice: "",
     packCostPrice: "",
@@ -172,15 +172,26 @@ export default function ProductForm({ onCreate, onCancel }: Props) {
             <div className="form-row">
               <label>
                 Category
-                <select
-                  className="input"
-                  value={form.category}
-                  onChange={(e) => setForm({ ...form, category: e.target.value })}
-                >
-                  {categoryOptions.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
+                {categoryOptions.length > 0 ? (
+                  <select
+                    className="input"
+                    value={form.category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                  >
+                    {categoryOptions.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="input"
+                    value={form.category ?? ""}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                    placeholder="Type a category"
+                  />
+                )}
               </label>
               <label>
                 Barcode
