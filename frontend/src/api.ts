@@ -70,7 +70,15 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
     }
   }
 
-  return response.json() as Promise<T>;
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await response.text();
+  if (!text) {
+    return undefined as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 // Branches API
@@ -140,9 +148,7 @@ export async function updateProduct(id: number, updates: Partial<Product>): Prom
 }
 
 export async function deleteProduct(productId: number): Promise<void> {
-  await fetch(`${API_BASE}/products/${productId}`, {
-    method: "DELETE",
-  });
+  await jsonRequest<void>(`/products/${productId}`, { method: "DELETE" });
 }
 
 // Sales API
@@ -159,9 +165,7 @@ export async function createSale(payload: NewSale): Promise<Sale> {
 }
 
 export async function deleteSale(saleId: number): Promise<void> {
-  await fetch(`${API_BASE}/sales/${saleId}`, {
-    method: "DELETE",
-  });
+  await jsonRequest<void>(`/sales/${saleId}`, { method: "DELETE" });
 }
 
 // Inventory API
