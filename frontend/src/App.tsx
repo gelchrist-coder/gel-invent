@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { createMovement, createProduct, deleteProduct, fetchMovements, fetchProducts, updateProduct } from "./api";
+import { createMovement, createProduct, deleteProduct, fetchMe, fetchMovements, fetchProducts, updateProduct } from "./api";
 import Layout from "./components/Layout";
 import MovementForm from "./components/MovementForm";
 import MovementTable from "./components/MovementTable";
@@ -35,9 +35,20 @@ export default function App() {
   const [userRole, setUserRole] = useState("Admin");
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
+  const logoutAndReset = () => {
+    setIsAuthenticated(false);
+    localStorage.removeItem("user");
+    localStorage.removeItem("token");
+    setUserName("User");
+    setBusinessName("Business");
+    setUserRole("Admin");
+    setCurrentUserId(null);
+  };
+
   // Check if user is authenticated on mount
   useEffect(() => {
     const userStr = localStorage.getItem("user");
+    const token = localStorage.getItem("token");
     if (userStr) {
       setIsAuthenticated(true);
       try {
@@ -49,6 +60,23 @@ export default function App() {
       } catch (error) {
         console.error("Error parsing user data:", error);
       }
+    }
+
+    // If we have a token, validate the session against the backend.
+    // This ensures deleting a user in the DB logs them out on refresh.
+    if (token) {
+      fetchMe()
+        .then((me) => {
+          localStorage.setItem("user", JSON.stringify(me));
+          setIsAuthenticated(true);
+          setUserName(me.name || "User");
+          setBusinessName(me.business_name || "Business");
+          setUserRole(me.role || "Admin");
+          setCurrentUserId(me.id || null);
+        })
+        .catch(() => {
+          logoutAndReset();
+        });
     }
   }, []);
 
@@ -76,6 +104,10 @@ export default function App() {
     // Also listen for custom event in the same tab
     const handleCustomUserChange = (e: CustomEvent) => {
       const newUser = e.detail;
+      if (!newUser) {
+        logoutAndReset();
+        return;
+      }
       if (newUser?.id && newUser.id !== currentUserId) {
         console.log("Different user detected in same tab, refreshing...");
         window.location.reload();
@@ -141,11 +173,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    setIsAuthenticated(false);
-    localStorage.removeItem("user");
-    localStorage.removeItem("token");
-    // Optionally clear other data
-    // localStorage.clear();
+    logoutAndReset();
   };
 
   // Show login page if not authenticated

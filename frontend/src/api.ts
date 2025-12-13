@@ -6,6 +6,16 @@ const API_BASE = "https://gel-invent-production.up.railway.app";
 // Export for use in other components
 export { API_BASE };
 
+export type AuthUser = {
+  id: number;
+  email: string;
+  name: string;
+  role: string;
+  business_name?: string | null;
+  categories?: string[] | null;
+  is_active: boolean;
+};
+
 type StockMovementResponse = Omit<StockMovement, "change"> & { change: string | number };
 
 async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
@@ -26,6 +36,9 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     if (response.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
       throw new Error("Not authenticated");
     }
     const body = await response.text();
@@ -43,6 +56,10 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function fetchMe(): Promise<AuthUser> {
+  return jsonRequest<AuthUser>("/auth/me");
 }
 
 export async function fetchProducts(): Promise<Product[]> {
