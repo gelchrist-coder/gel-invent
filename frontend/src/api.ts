@@ -39,8 +39,8 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
   }
   
   const response = await fetch(`${API_BASE}${path}`, {
-    headers,
     ...options,
+    headers,
   });
 
   if (!response.ok) {
