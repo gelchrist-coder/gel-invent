@@ -223,10 +223,6 @@ def record_movement(
     movement = models.StockMovement(product_id=product_id, **movement_data)
     db.add(movement)
 
-    # When receiving new stock with an explicit expiry date, update the product's displayed expiry.
-    if payload.reason == "New Stock" and payload.expiry_date is not None:
-        product.expiry_date = payload.expiry_date
-
     db.commit()
     db.refresh(movement)
     return movement

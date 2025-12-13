@@ -40,6 +40,7 @@ export default function ProductList({
   });
   const [stockData, setStockData] = useState<Record<number, number>>({});
   const [locationOptions, setLocationOptions] = useState<string[]>(["Main Store"]);
+  const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
 
   // Fetch stock movements for all products
@@ -48,6 +49,7 @@ export default function ProductList({
       const stockMap: Record<number, number> = {};
       const locations = new Set<string>();
       locations.add("Main Store");
+      const expiryMap: Record<number, string | null> = {};
       for (const product of products) {
         try {
           const movements = await fetchMovements(product.id);
@@ -57,12 +59,24 @@ export default function ProductList({
           for (const m of movements) {
             if (m.location) locations.add(String(m.location));
           }
+
+          const expiries = movements
+            .map((m) => m.expiry_date)
+            .filter((d): d is string => Boolean(d));
+          if (expiries.length) {
+            expiries.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+            expiryMap[product.id] = expiries[0];
+          } else {
+            expiryMap[product.id] = null;
+          }
         } catch {
           stockMap[product.id] = 0;
+          expiryMap[product.id] = null;
         }
       }
       setStockData(stockMap);
       setLocationOptions(Array.from(locations));
+      setExpiryByProduct(expiryMap);
     };
     if (products.length > 0) {
       loadStockData();
@@ -209,16 +223,17 @@ export default function ProductList({
 
     // Expiry filter
     let matchesExpiry = true;
+    const effectiveExpiry = expiryByProduct[p.id] || p.expiry_date;
     if (filterExpiry === "expired") {
-      matchesExpiry = p.expiry_date ? new Date(p.expiry_date) < new Date() : false;
+      matchesExpiry = effectiveExpiry ? new Date(effectiveExpiry) < new Date() : false;
     } else if (filterExpiry === "expiring") {
-      matchesExpiry = p.expiry_date ? 
-        new Date(p.expiry_date) >= new Date() && 
-        new Date(p.expiry_date) <= new Date(Date.now() + 180 * 24 * 60 * 60 * 1000) : 
+      matchesExpiry = effectiveExpiry ? 
+        new Date(effectiveExpiry) >= new Date() && 
+        new Date(effectiveExpiry) <= new Date(Date.now() + 180 * 24 * 60 * 60 * 1000) : 
         false;
     } else if (filterExpiry === "fresh") {
-      matchesExpiry = !p.expiry_date || 
-        new Date(p.expiry_date) > new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+      matchesExpiry = !effectiveExpiry || 
+        new Date(effectiveExpiry) > new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
     }
 
     return matchesSearch && matchesCategory && matchesExpiry;
