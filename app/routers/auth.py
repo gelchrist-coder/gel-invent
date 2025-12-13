@@ -22,6 +22,20 @@ from app.auth import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _password_rule_error(password: str) -> Optional[str]:
+    if len(password) < 8:
+        return "Password must be at least 8 characters."
+    if not any(c.islower() for c in password):
+        return "Password must include a lowercase letter."
+    if not any(c.isupper() for c in password):
+        return "Password must include an uppercase letter."
+    if not any(c.isdigit() for c in password):
+        return "Password must include a number."
+    if not any(not c.isalnum() for c in password):
+        return "Password must include a special character."
+    return None
+
+
 # Schemas
 class UserCreate(BaseModel):
     email: EmailStr
@@ -106,6 +120,10 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
             detail="Email already registered"
         )
     
+    rule_error = _password_rule_error(user_data.password)
+    if rule_error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rule_error)
+
     # Create new user
     hashed_password = get_password_hash(user_data.password)
     new_user = User(
@@ -196,8 +214,9 @@ def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(
 @router.post("/password-reset/confirm")
 def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
     """Confirm reset code and set a new password."""
-    if len(payload.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    rule_error = _password_rule_error(payload.new_password)
+    if rule_error:
+        raise HTTPException(status_code=400, detail=rule_error)
 
     user = db.query(User).filter(User.email == payload.email).first()
     if not user or not user.is_active:

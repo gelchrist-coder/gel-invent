@@ -26,6 +26,11 @@ export default function Login({ onLogin }: LoginProps) {
   const [resetPassword, setResetPassword] = useState("");
   const [resetConfirmPassword, setResetConfirmPassword] = useState("");
 
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
+
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -36,6 +41,65 @@ export default function Login({ onLogin }: LoginProps) {
       return null;
     }
   };
+
+  const getPasswordRuleError = (password: string): string | null => {
+    if (password.length < 8) return "Password must be at least 8 characters";
+    if (!/[a-z]/.test(password)) return "Password must include a lowercase letter";
+    if (!/[A-Z]/.test(password)) return "Password must include an uppercase letter";
+    if (!/\d/.test(password)) return "Password must include a number";
+    if (!/[^A-Za-z0-9]/.test(password)) return "Password must include a special character";
+    return null;
+  };
+
+  const PasswordInput = ({
+    value,
+    onChange,
+    placeholder,
+    required,
+    show,
+    onToggle,
+    autoComplete,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    placeholder: string;
+    required?: boolean;
+    show: boolean;
+    onToggle: () => void;
+    autoComplete?: string;
+  }) => (
+    <div style={{ position: "relative" }}>
+      <input
+        type={show ? "text" : "password"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        required={required}
+        autoComplete={autoComplete}
+        className="input"
+        style={{ padding: 12, paddingRight: 56, width: "100%" }}
+      />
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          position: "absolute",
+          right: 10,
+          top: "50%",
+          transform: "translateY(-50%)",
+          border: "none",
+          background: "transparent",
+          color: "#1f7aff",
+          fontSize: 12,
+          fontWeight: 700,
+          cursor: "pointer",
+          padding: 6,
+        }}
+      >
+        {show ? "Hide" : "Show"}
+      </button>
+    </div>
+  );
 
   const COMMON_CATEGORIES = [
     "Beverages",
@@ -117,8 +181,9 @@ export default function Login({ onLogin }: LoginProps) {
           setLoading(false);
           return;
         }
-        if (resetPassword.length < 6) {
-          setError("Password must be at least 6 characters");
+        const resetRuleError = getPasswordRuleError(resetPassword);
+        if (resetRuleError) {
+          setError(resetRuleError);
           setLoading(false);
           return;
         }
@@ -175,8 +240,9 @@ export default function Login({ onLogin }: LoginProps) {
           setLoading(false);
           return;
         }
-        if (formData.password.length < 6) {
-          setError("Password must be at least 6 characters");
+        const passwordRuleError = getPasswordRuleError(formData.password);
+        if (passwordRuleError) {
+          setError(passwordRuleError);
           setLoading(false);
           return;
         }
@@ -541,13 +607,13 @@ export default function Login({ onLogin }: LoginProps) {
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                     New Password
                   </span>
-                  <input
-                    type="password"
+                  <PasswordInput
                     value={resetPassword}
-                    onChange={(e) => setResetPassword(e.target.value)}
+                    onChange={setResetPassword}
                     placeholder="••••••••"
-                    className="input"
-                    style={{ padding: 12 }}
+                    show={showResetPassword}
+                    onToggle={() => setShowResetPassword(!showResetPassword)}
+                    autoComplete="new-password"
                   />
                 </label>
 
@@ -555,13 +621,13 @@ export default function Login({ onLogin }: LoginProps) {
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                     Confirm New Password
                   </span>
-                  <input
-                    type="password"
+                  <PasswordInput
                     value={resetConfirmPassword}
-                    onChange={(e) => setResetConfirmPassword(e.target.value)}
+                    onChange={setResetConfirmPassword}
                     placeholder="••••••••"
-                    className="input"
-                    style={{ padding: 12 }}
+                    show={showResetConfirmPassword}
+                    onToggle={() => setShowResetConfirmPassword(!showResetConfirmPassword)}
+                    autoComplete="new-password"
                   />
                 </label>
               </>
@@ -589,14 +655,14 @@ export default function Login({ onLogin }: LoginProps) {
               <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                 Password *
               </span>
-              <input
-                type="password"
+              <PasswordInput
                 value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                onChange={(value) => setFormData({ ...formData, password: value })}
                 placeholder="••••••••"
                 required
-                className="input"
-                style={{ padding: 12 }}
+                show={showPassword}
+                onToggle={() => setShowPassword(!showPassword)}
+                autoComplete={isSignUp ? "new-password" : "current-password"}
               />
             </label>
             )}
@@ -635,14 +701,14 @@ export default function Login({ onLogin }: LoginProps) {
                 <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                   Confirm Password *
                 </span>
-                <input
-                  type="password"
+                <PasswordInput
                   value={formData.confirmPassword}
-                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                  onChange={(value) => setFormData({ ...formData, confirmPassword: value })}
                   placeholder="••••••••"
                   required={isSignUp}
-                  className="input"
-                  style={{ padding: 12 }}
+                  show={showConfirmPassword}
+                  onToggle={() => setShowConfirmPassword(!showConfirmPassword)}
+                  autoComplete="new-password"
                 />
               </label>
             )}
