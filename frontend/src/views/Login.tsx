@@ -5,6 +5,60 @@ type LoginProps = {
   onLogin: (email: string, password: string) => void;
 };
 
+type PasswordInputProps = {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  required?: boolean;
+  show: boolean;
+  onToggle: () => void;
+  autoComplete?: string;
+};
+
+function PasswordInput({
+  value,
+  onChange,
+  placeholder,
+  required,
+  show,
+  onToggle,
+  autoComplete,
+}: PasswordInputProps) {
+  return (
+    <div style={{ position: "relative" }}>
+      <input
+        type={show ? "text" : "password"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        required={required}
+        autoComplete={autoComplete}
+        className="input"
+        style={{ padding: 12, paddingRight: 56, width: "100%" }}
+      />
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          position: "absolute",
+          right: 10,
+          top: "50%",
+          transform: "translateY(-50%)",
+          border: "none",
+          background: "transparent",
+          color: "#1f7aff",
+          fontSize: 12,
+          fontWeight: 700,
+          cursor: "pointer",
+          padding: 6,
+        }}
+      >
+        {show ? "Hide" : "Show"}
+      </button>
+    </div>
+  );
+}
+
 export default function Login({ onLogin }: LoginProps) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [formData, setFormData] = useState({
@@ -50,56 +104,6 @@ export default function Login({ onLogin }: LoginProps) {
     if (!/[^A-Za-z0-9]/.test(password)) return "Password must include a special character";
     return null;
   };
-
-  const PasswordInput = ({
-    value,
-    onChange,
-    placeholder,
-    required,
-    show,
-    onToggle,
-    autoComplete,
-  }: {
-    value: string;
-    onChange: (value: string) => void;
-    placeholder: string;
-    required?: boolean;
-    show: boolean;
-    onToggle: () => void;
-    autoComplete?: string;
-  }) => (
-    <div style={{ position: "relative" }}>
-      <input
-        type={show ? "text" : "password"}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        required={required}
-        autoComplete={autoComplete}
-        className="input"
-        style={{ padding: 12, paddingRight: 56, width: "100%" }}
-      />
-      <button
-        type="button"
-        onClick={onToggle}
-        style={{
-          position: "absolute",
-          right: 10,
-          top: "50%",
-          transform: "translateY(-50%)",
-          border: "none",
-          background: "transparent",
-          color: "#1f7aff",
-          fontSize: 12,
-          fontWeight: 700,
-          cursor: "pointer",
-          padding: 6,
-        }}
-      >
-        {show ? "Hide" : "Show"}
-      </button>
-    </div>
-  );
 
   const COMMON_CATEGORIES = [
     "Beverages",
