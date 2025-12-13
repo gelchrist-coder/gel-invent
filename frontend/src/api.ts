@@ -46,7 +46,7 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export async function fetchProducts(): Promise<Product[]> {
-  return jsonRequest<Product[]>("/products");
+  return jsonRequest<Product[]>("/products/");
 }
 
 export async function fetchMovements(productId: number): Promise<StockMovement[]> {
@@ -55,7 +55,7 @@ export async function fetchMovements(productId: number): Promise<StockMovement[]
 }
 
 export async function createProduct(payload: NewProduct): Promise<Product> {
-  return jsonRequest<Product>("/products", {
+  return jsonRequest<Product>("/products/", {
     method: "POST",
     body: JSON.stringify(payload),
   });
