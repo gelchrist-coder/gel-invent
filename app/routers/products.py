@@ -187,6 +187,27 @@ def record_movement(
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
+    # Enforce stock restrictions for reductions and validate new stock metadata.
+    if payload.reason == "New Stock":
+        if payload.change <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New Stock must be a positive quantity")
+        if payload.expiry_date is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expiry date is required for New Stock")
+
+    if payload.change < 0:
+        available_stock = db.query(func.coalesce(func.sum(models.StockMovement.change), 0)).filter(
+            models.StockMovement.product_id == product_id,
+            models.StockMovement.user_id.in_(tenant_user_ids),
+            models.StockMovement.branch_id == active_branch_id,
+        ).scalar()
+        if available_stock is None:
+            available_stock = Decimal(0)
+        if (-payload.change) > available_stock:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient stock. Available: {available_stock}",
+            )
+
     # Auto-generate batch number: BATCH-{SKU}-{TIMESTAMP}
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     batch_number = f"BATCH-{product.sku}-{timestamp}"
@@ -201,6 +222,11 @@ def record_movement(
     
     movement = models.StockMovement(product_id=product_id, **movement_data)
     db.add(movement)
+
+    # When receiving new stock with an explicit expiry date, update the product's displayed expiry.
+    if payload.reason == "New Stock" and payload.expiry_date is not None:
+        product.expiry_date = payload.expiry_date
+
     db.commit()
     db.refresh(movement)
     return movement

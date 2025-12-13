@@ -39,22 +39,30 @@ export default function ProductList({
     returned_by: "",
   });
   const [stockData, setStockData] = useState<Record<number, number>>({});
+  const [locationOptions, setLocationOptions] = useState<string[]>(["Main Store"]);
   const [busy, setBusy] = useState(false);
 
   // Fetch stock movements for all products
   useEffect(() => {
     const loadStockData = async () => {
       const stockMap: Record<number, number> = {};
+      const locations = new Set<string>();
+      locations.add("Main Store");
       for (const product of products) {
         try {
           const movements = await fetchMovements(product.id);
           const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
           stockMap[product.id] = totalStock;
+
+          for (const m of movements) {
+            if (m.location) locations.add(String(m.location));
+          }
         } catch {
           stockMap[product.id] = 0;
         }
       }
       setStockData(stockMap);
+      setLocationOptions(Array.from(locations));
     };
     if (products.length > 0) {
       loadStockData();
@@ -118,9 +126,8 @@ export default function ProductList({
   };
 
   const startAdjustment = (productId: number) => {
-    const product = products.find(p => p.id === productId);
     setAdjustingId(productId);
-    setAdjustment({ quantity: "", reason: "", expiry_date: product?.expiry_date || "", location: "Main Store", returned_by: "" });
+    setAdjustment({ quantity: "", reason: "", expiry_date: "", location: "Main Store", returned_by: "" });
   };
 
   const cancelAdjustment = () => {
@@ -144,6 +151,17 @@ export default function ProductList({
     }
     if (adjustment.reason === "New Stock" && !adjustment.expiry_date) {
       alert("Please set an expiry date for new stock");
+      return;
+    }
+
+    if (adjustment.reason === "New Stock" && qty < 0) {
+      alert("New Stock must be a positive quantity");
+      return;
+    }
+
+    const available = stockData[productId] ?? 0;
+    if (qty < 0 && Math.abs(qty) > available) {
+      alert(`Not enough stock. Available: ${available}`);
       return;
     }
 
@@ -494,7 +512,14 @@ export default function ProductList({
                 <select
                   className="input"
                   value={adjustment.reason}
-                  onChange={(e) => setAdjustment({ ...adjustment, reason: e.target.value })}
+                  onChange={(e) => {
+                    const nextReason = e.target.value;
+                    setAdjustment((prev) => ({
+                      ...prev,
+                      reason: nextReason,
+                      expiry_date: nextReason === "New Stock" ? "" : prev.expiry_date,
+                    }));
+                  }}
                   style={{ fontSize: 14, padding: 10 }}
                 >
                   <option value="">Select reason...</option>
@@ -528,19 +553,20 @@ export default function ProductList({
                 <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                   Location/Warehouse
                 </span>
-                <select
+                <input
                   className="input"
+                  type="text"
+                  list="stock-location-options"
                   value={adjustment.location}
                   onChange={(e) => setAdjustment({ ...adjustment, location: e.target.value })}
+                  placeholder="e.g., Main Store"
                   style={{ fontSize: 14, padding: 10 }}
-                >
-                  <option value="Main Store">Main Store</option>
-                  <option value="Warehouse A">Warehouse A</option>
-                  <option value="Warehouse B">Warehouse B</option>
-                  <option value="Cold Storage">Cold Storage</option>
-                  <option value="Display Area">Display Area</option>
-                  <option value="Back Room">Back Room</option>
-                </select>
+                />
+                <datalist id="stock-location-options">
+                  {locationOptions.map((loc) => (
+                    <option key={loc} value={loc} />
+                  ))}
+                </datalist>
               </label>
               {adjustment.reason === "New Stock" && (
                 <label>
