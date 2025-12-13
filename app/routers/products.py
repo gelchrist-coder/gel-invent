@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import Optional
 from pydantic import BaseModel
@@ -44,6 +45,19 @@ def create_product(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="SKU already exists"
+        )
+
+    # Check for duplicate name within the branch (case-insensitive)
+    normalized_name = payload.name.strip().lower()
+    existing_name = db.query(models.Product).filter(
+        func.lower(func.trim(models.Product.name)) == normalized_name,
+        models.Product.branch_id == active_branch_id,
+        models.Product.user_id.in_(tenant_user_ids),
+    ).first()
+    if existing_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Product name already exists in this branch",
         )
 
     # Extract initial_stock before creating product
@@ -220,6 +234,21 @@ def update_product(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"SKU '{payload.sku}' already exists"
+            )
+
+    # Check name uniqueness if it's being updated (case-insensitive)
+    if payload.name and payload.name.strip() and payload.name.strip() != (product.name or ""):
+        normalized_name = payload.name.strip().lower()
+        existing_name = db.query(models.Product).filter(
+            models.Product.id != product.id,
+            func.lower(func.trim(models.Product.name)) == normalized_name,
+            models.Product.user_id.in_(tenant_user_ids),
+            models.Product.branch_id == active_branch_id,
+        ).first()
+        if existing_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Product name already exists in this branch",
             )
     
     # Update only provided fields

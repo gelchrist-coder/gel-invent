@@ -56,6 +56,19 @@ async def on_startup() -> None:
             conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
             conn.execute(text("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
 
+            # Prevent duplicate product names within a branch (case-insensitive)
+            try:
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_branch_lower_name_unique "
+                        "ON products (branch_id, lower(trim(name)))"
+                    )
+                )
+            except Exception as e:
+                # If existing duplicates are present, creating the unique index will fail.
+                # Don't block startup; the API also enforces this rule at write-time.
+                print(f"⚠️  Could not create unique index for product names: {e}")
+
         # Backfill branch IDs for existing rows into each tenant's Main Branch.
         with Session(engine) as db:
             admin_users = db.query(models.User).filter(models.User.role == "Admin").all()
