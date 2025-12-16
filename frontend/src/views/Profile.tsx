@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword } from "../api";
+import { changePassword, exportData, importData } from "../api";
 
 type PasswordInputProps = {
   label: string;
@@ -89,6 +89,17 @@ export default function Profile() {
   const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
 
+  const importFileRef = useRef<HTMLInputElement | null>(null);
+  const [exportingData, setExportingData] = useState(false);
+  const [importingData, setImportingData] = useState(false);
+  const [dataMessage, setDataMessage] = useState<string | null>(null);
+
+  const todayStamp = useMemo(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }, []);
+
   // Load saved settings from localStorage on mount
   useEffect(() => {
     const savedBusiness = localStorage.getItem("businessInfo");
@@ -171,8 +182,79 @@ export default function Profile() {
     }
   };
 
+  const handleExportData = async () => {
+    setDataMessage(null);
+    setExportingData(true);
+    try {
+      const { blob, filename } = await exportData();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename ?? `gel-invent-export-${todayStamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setDataMessage("Export downloaded.");
+    } catch (error) {
+      setDataMessage(error instanceof Error ? error.message : "Export failed");
+    } finally {
+      setExportingData(false);
+    }
+  };
+
+  const handlePickImportFile = () => {
+    setDataMessage(null);
+    importFileRef.current?.click();
+  };
+
+  const handleImportFileSelected = async (file: File | null) => {
+    if (!file) return;
+    setDataMessage(null);
+    setImportingData(true);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as unknown;
+
+      // First attempt without force.
+      try {
+        const result = await importData(parsed, false);
+        setDataMessage(result.message || "Import completed");
+        return;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.startsWith("409:")) {
+          const ok = confirm(
+            "Existing data found. Do you want to replace your current data with this import? (This will clear existing products, movements, sales and creditors.)"
+          );
+          if (!ok) {
+            setDataMessage("Import cancelled.");
+            return;
+          }
+          const result = await importData(parsed, true);
+          setDataMessage(result.message || "Import completed");
+          return;
+        }
+        throw e;
+      }
+    } catch (error) {
+      setDataMessage(error instanceof Error ? error.message : "Import failed");
+    } finally {
+      setImportingData(false);
+      if (importFileRef.current) importFileRef.current.value = "";
+    }
+  };
+
   return (
     <div className="app-shell">
+      <input
+        ref={importFileRef}
+        type="file"
+        accept="application/json,.json"
+        style={{ display: "none" }}
+        onChange={(e) => handleImportFileSelected(e.target.files?.[0] ?? null)}
+      />
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Profile & Settings</h1>
         {editing ? (
@@ -222,6 +304,21 @@ export default function Profile() {
           }}
         >
           ✓ Settings saved successfully!
+        </div>
+      )}
+
+      {dataMessage && (
+        <div
+          style={{
+            padding: 12,
+            borderRadius: 8,
+            marginBottom: 16,
+            background: "#f3f4f6",
+            border: "1px solid #e5e7eb",
+            color: "#374151",
+          }}
+        >
+          {dataMessage}
         </div>
       )}
 
@@ -723,8 +820,10 @@ export default function Profile() {
                     background: "#10b981",
                     fontSize: 14,
                   }}
+                  onClick={handleExportData}
+                  disabled={exportingData || importingData}
                 >
-                  📥 Export Data
+                  {exportingData ? "⏳ Exporting..." : "📥 Export Data"}
                 </button>
                 <button
                   className="button"
@@ -732,8 +831,10 @@ export default function Profile() {
                     background: "#8246ff",
                     fontSize: 14,
                   }}
+                  onClick={handlePickImportFile}
+                  disabled={exportingData || importingData}
                 >
-                  📤 Import Data
+                  {importingData ? "⏳ Importing..." : "📤 Import Data"}
                 </button>
                 <button
                   className="button"
