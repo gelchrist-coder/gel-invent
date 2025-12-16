@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, exportData, importData } from "../api";
+import { changePassword, exportData, exportDataXlsx, importData } from "../api";
 
 type PasswordInputProps = {
   label: string;
@@ -186,11 +186,18 @@ export default function Profile() {
     setDataMessage(null);
     setExportingData(true);
     try {
-      const { blob, filename } = await exportData();
+      const preferExcel = confirm(
+        "Download as Excel (OK) or JSON backup (Cancel)?\n\nExcel includes recent Products, Sales and Inventory Movements. JSON is for full backup/import."
+      );
+      const { blob, filename } = preferExcel ? await exportDataXlsx(30) : await exportData();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = filename ?? `gel-invent-export-${todayStamp}.json`;
+      a.download =
+        filename ??
+        (preferExcel
+          ? `gel-invent-export-${todayStamp}.xlsx`
+          : `gel-invent-export-${todayStamp}.json`);
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -225,7 +232,7 @@ export default function Profile() {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.startsWith("409:")) {
           const ok = confirm(
-            "Existing data found. Do you want to replace your current data with this import? (This will clear existing products, movements, sales and creditors.)"
+            "Existing data found. Do you want to replace your current data with this import? (This will clear existing products, movements, sales and creditors.)\n\nTip: Use the JSON export for backups you want to import later."
           );
           if (!ok) {
             setDataMessage("Import cancelled.");

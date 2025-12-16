@@ -47,6 +47,11 @@ pip install -r requirements.txt
 - `POST /products/{id}/movements` – record stock movement `{ "change": 5, "reason": "initial stock" }`.
 - `GET /products/{id}/movements` – list movements for a product.
 
+## Data export/import (Admin)
+- `GET /data/export` – downloads a JSON backup (best for restoring/import later).
+- `POST /data/import?force=true|false` – imports a prior JSON backup (with optional replace).
+- `GET /data/export/xlsx?days=30` – downloads an Excel workbook with recent Products, Sales, and Inventory Movements.
+
 ### Example curl flow
 ```bash
 curl -X POST http://127.0.0.1:8000/products \

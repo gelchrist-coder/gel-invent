@@ -129,6 +129,43 @@ export async function exportData(): Promise<{ blob: Blob; filename: string | nul
   return { blob, filename };
 }
 
+export async function exportDataXlsx(days: number = 30): Promise<{ blob: Blob; filename: string | null }> {
+  const response = await fetch(`${API_BASE}/data/export/xlsx?days=${encodeURIComponent(String(days))}`, {
+    method: "GET",
+    headers: buildAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
+      throw new Error("Not authenticated");
+    }
+    const body = await response.text();
+    try {
+      const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
+      const detail = parsed?.detail ?? parsed?.message;
+      const message = typeof detail === "string" ? detail : response.statusText;
+      throw new Error(message || "Request failed");
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error(body || response.statusText);
+      }
+      throw error;
+    }
+  }
+
+  const blob = await response.blob();
+  const contentDisposition = response.headers.get("content-disposition");
+  let filename: string | null = null;
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename="?([^";]+)"?/i);
+    if (match?.[1]) filename = match[1];
+  }
+  return { blob, filename };
+}
+
 export async function importData(payload: unknown, force: boolean = false): Promise<{ message: string }> {
   const response = await fetch(`${API_BASE}/data/import?force=${force ? "true" : "false"}`,
     {

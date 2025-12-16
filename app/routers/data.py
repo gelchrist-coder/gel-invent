@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
+from io import BytesIO
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
+
+try:
+    import openpyxl  # type: ignore[import-not-found]
+    from openpyxl.styles import Font  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover
+    openpyxl = None
+    Font = None
 
 from app.database import get_db
 from app.auth import get_current_active_user
@@ -41,6 +49,18 @@ def _serialize_decimal(value: Any) -> Any:
     if isinstance(value, Decimal):
         # Preserve exact value as string
         return str(value)
+    return value
+
+
+def _serialize_num(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        # Excel handles floats; this is mainly for human consumption.
+        try:
+            return float(value)
+        except Exception:
+            return str(value)
     return value
 
 
@@ -200,6 +220,217 @@ def export_data(
     return Response(
         content=content,
         media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/export/xlsx")
+def export_data_xlsx(
+    days: int = Query(30, ge=1, le=3650, description="How many days back to include"),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    """Export recent tenant data as an Excel workbook (admin-only)."""
+    _require_admin(current_user)
+
+    if openpyxl is None:
+        raise HTTPException(status_code=500, detail="Excel export is not available")
+
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    branches = (
+        db.query(models.Branch)
+        .filter(models.Branch.owner_user_id == current_user.id)
+        .order_by(models.Branch.id.asc())
+        .all()
+    )
+    branch_name_by_id = {b.id: b.name for b in branches}
+
+    products = (
+        db.query(models.Product)
+        .filter(models.Product.user_id.in_(tenant_user_ids))
+        .filter(models.Product.updated_at >= cutoff)
+        .order_by(models.Product.id.asc())
+        .all()
+    )
+
+    movements = (
+        db.query(models.StockMovement)
+        .filter(models.StockMovement.user_id.in_(tenant_user_ids))
+        .filter(models.StockMovement.created_at >= cutoff)
+        .order_by(models.StockMovement.id.asc())
+        .all()
+    )
+
+    sales = (
+        db.query(models.Sale)
+        .filter(models.Sale.user_id.in_(tenant_user_ids))
+        .filter(models.Sale.created_at >= cutoff)
+        .order_by(models.Sale.id.asc())
+        .all()
+    )
+
+    product_ids = {p.id for p in products}
+    for s in sales:
+        product_ids.add(s.product_id)
+    for m in movements:
+        product_ids.add(m.product_id)
+
+    products_by_id: dict[int, models.Product] = {}
+    if product_ids:
+        for p in (
+            db.query(models.Product)
+            .filter(models.Product.user_id.in_(tenant_user_ids))
+            .filter(models.Product.id.in_(list(product_ids)))
+            .all()
+        ):
+            products_by_id[p.id] = p
+
+    wb = openpyxl.Workbook()
+    ws_products = wb.active
+    ws_products.title = "Products"
+
+    ws_sales = wb.create_sheet("Sales")
+    ws_movements = wb.create_sheet("Inventory Movements")
+
+    bold = Font(bold=True) if Font else None
+
+    # Products sheet
+    prod_headers = [
+        "Product ID",
+        "Branch",
+        "SKU",
+        "Name",
+        "Category",
+        "Unit",
+        "Pack Size",
+        "Cost Price",
+        "Selling Price",
+        "Created At",
+        "Updated At",
+    ]
+    ws_products.append(prod_headers)
+    if bold:
+        for cell in ws_products[1]:
+            cell.font = bold
+
+    for p in products:
+        ws_products.append(
+            [
+                p.id,
+                branch_name_by_id.get(p.branch_id) if p.branch_id else None,
+                p.sku,
+                p.name,
+                p.category,
+                p.unit,
+                p.pack_size,
+                _serialize_num(p.cost_price),
+                _serialize_num(p.selling_price),
+                _serialize_dt(p.created_at),
+                _serialize_dt(p.updated_at),
+            ]
+        )
+
+    # Sales sheet
+    sales_headers = [
+        "Sale ID",
+        "Branch",
+        "Date",
+        "Product ID",
+        "SKU",
+        "Product Name",
+        "Quantity",
+        "Unit Price",
+        "Total Price",
+        "Customer",
+        "Payment Method",
+        "Amount Paid",
+        "Notes",
+    ]
+    ws_sales.append(sales_headers)
+    if bold:
+        for cell in ws_sales[1]:
+            cell.font = bold
+
+    for s in sales:
+        p = products_by_id.get(s.product_id)
+        ws_sales.append(
+            [
+                s.id,
+                branch_name_by_id.get(s.branch_id) if s.branch_id else None,
+                _serialize_dt(s.created_at),
+                s.product_id,
+                getattr(p, "sku", None),
+                getattr(p, "name", None),
+                _serialize_num(s.quantity),
+                _serialize_num(s.unit_price),
+                _serialize_num(s.total_price),
+                s.customer_name,
+                s.payment_method,
+                _serialize_num(s.amount_paid),
+                s.notes,
+            ]
+        )
+
+    # Inventory Movements sheet
+    mov_headers = [
+        "Movement ID",
+        "Branch",
+        "Date",
+        "Product ID",
+        "SKU",
+        "Product Name",
+        "Change",
+        "Reason",
+        "Batch",
+        "Expiry Date",
+        "Location",
+    ]
+    ws_movements.append(mov_headers)
+    if bold:
+        for cell in ws_movements[1]:
+            cell.font = bold
+
+    for m in movements:
+        p = products_by_id.get(m.product_id)
+        ws_movements.append(
+            [
+                m.id,
+                branch_name_by_id.get(m.branch_id) if m.branch_id else None,
+                _serialize_dt(m.created_at),
+                m.product_id,
+                getattr(p, "sku", None),
+                getattr(p, "name", None),
+                _serialize_num(m.change),
+                m.reason,
+                m.batch_number,
+                _serialize_dt(m.expiry_date),
+                m.location,
+            ]
+        )
+
+    # Basic column sizing
+    for ws in (ws_products, ws_sales, ws_movements):
+        for col in ws.columns:
+            max_len = 0
+            col_letter = col[0].column_letter
+            for cell in col:
+                if cell.value is None:
+                    continue
+                val = str(cell.value)
+                if len(val) > max_len:
+                    max_len = len(val)
+            ws.column_dimensions[col_letter].width = min(max(10, max_len + 2), 40)
+
+    buf = BytesIO()
+    wb.save(buf)
+    content = buf.getvalue()
+
+    filename = f"gel-invent-export-{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
