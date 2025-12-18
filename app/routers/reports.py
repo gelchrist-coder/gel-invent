@@ -6,12 +6,29 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Sale, Product, StockMovement, Creditor, CreditTransaction, User
+from ..models import Sale, Product, StockMovement, Creditor, CreditTransaction, User, SystemSettings
 from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+def _get_tenant_owner_id(user: User) -> int:
+    if user.role == "Admin":
+        return user.id
+    return user.created_by or user.id
+
+
+def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
+    settings = db.query(SystemSettings).filter(SystemSettings.owner_user_id == owner_user_id).first()
+    if settings:
+        return settings
+    settings = SystemSettings(owner_user_id=owner_user_id)
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
 
 
 @router.get("/sales-dashboard")
@@ -174,6 +191,7 @@ def get_inventory_status(
     
     # Get tenant user IDs for multi-tenant filtering
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+    settings = _get_or_create_settings(db, _get_tenant_owner_id(current_user))
     
     # Get all products with their current stock
     products_query = select(
@@ -194,17 +212,17 @@ def get_inventory_status(
     
     # Calculate metrics
     total_products = len(products)
-    low_stock_threshold = 10
+    low_stock_threshold = settings.low_stock_threshold
     low_stock_items = [p for p in products if float(p.current_stock) < low_stock_threshold]
     out_of_stock = [p for p in products if float(p.current_stock) <= 0]
     
-    # Items expiring soon (within 30 days)
+    # Items expiring soon (within expiry warning window)
     expiring_soon = []
     if products:
-        thirty_days = datetime.now().date() + timedelta(days=30)
+        warning_end = datetime.now().date() + timedelta(days=settings.expiry_warning_days)
         expiring_soon = [
             p for p in products 
-            if p.expiry_date and p.expiry_date <= thirty_days and float(p.current_stock) > 0
+            if p.expiry_date and p.expiry_date <= warning_end and float(p.current_stock) > 0
         ]
     
     # Calculate total stock value

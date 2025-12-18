@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, exportData, exportDataXlsx, importData } from "../api";
+import { changePassword, exportData, exportDataXlsx, fetchSystemSettings, importData, updateSystemSettings } from "../api";
 
 type PasswordInputProps = {
   label: string;
@@ -103,10 +103,8 @@ export default function Profile() {
   // Load saved settings from localStorage on mount
   useEffect(() => {
     const savedBusiness = localStorage.getItem("businessInfo");
-    const savedSystem = localStorage.getItem("systemSettings");
 
     if (savedBusiness) setBusinessInfo(JSON.parse(savedBusiness));
-    if (savedSystem) setSystemSettings(JSON.parse(savedSystem));
     
     // Always load current user data from the 'user' object
     try {
@@ -129,14 +127,44 @@ export default function Profile() {
     } catch {
       // ignore
     }
+
+    // Load persisted system settings from API (tenant-wide)
+    (async () => {
+      try {
+        const settings = await fetchSystemSettings();
+        setSystemSettings({
+          lowStockThreshold: String(settings.low_stock_threshold),
+          expiryWarningDays: String(settings.expiry_warning_days),
+          autoBackup: settings.auto_backup,
+          emailNotifications: settings.email_notifications,
+        });
+      } catch {
+        // If unauthenticated or API unavailable, keep defaults.
+      }
+    })();
   }, []);
 
-  const handleSave = () => {
-    // Save to localStorage (in production, this would be an API call)
+  const handleSave = async () => {
     localStorage.setItem("businessInfo", JSON.stringify(businessInfo));
     localStorage.setItem("userInfo", JSON.stringify(userInfo));
-    localStorage.setItem("systemSettings", JSON.stringify(systemSettings));
-    
+
+    // Persist system settings (Admin only)
+    if (isAdmin) {
+      const payload = {
+        low_stock_threshold: Number(systemSettings.lowStockThreshold) || 0,
+        expiry_warning_days: Number(systemSettings.expiryWarningDays) || 0,
+        auto_backup: systemSettings.autoBackup,
+        email_notifications: systemSettings.emailNotifications,
+      };
+      const updated = await updateSystemSettings(payload);
+      setSystemSettings({
+        lowStockThreshold: String(updated.low_stock_threshold),
+        expiryWarningDays: String(updated.expiry_warning_days),
+        autoBackup: updated.auto_backup,
+        emailNotifications: updated.email_notifications,
+      });
+    }
+
     setEditing(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { fetchProducts, fetchSalesDashboard } from "../api";
+import { fetchProducts, fetchSalesDashboard, fetchSystemSettings } from "../api";
 import { Product } from "../types";
 
 type Props = {
@@ -43,6 +43,8 @@ export default function Dashboard({ onNavigate }: Props) {
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState<SalesDashboardResponse | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
+  const [expiryWarningDays, setExpiryWarningDays] = useState<number>(180);
 
   // Check if current user is Admin
   const currentUser = localStorage.getItem("user");
@@ -66,6 +68,19 @@ export default function Dashboard({ onNavigate }: Props) {
       }
     };
     loadData();
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    (async () => {
+      try {
+        const settings = await fetchSystemSettings();
+        setLowStockThreshold(settings.low_stock_threshold);
+        setExpiryWarningDays(settings.expiry_warning_days);
+      } catch {
+        // ignore
+      }
+    })();
   }, [token]);
 
   useEffect(() => {
@@ -94,7 +109,15 @@ export default function Dashboard({ onNavigate }: Props) {
   const recentSales = dashboardData?.recent_sales ?? [];
 
   // Stock alerts - will be based on real stock movements when implemented
-  const lowStockItems: LowStockItem[] = [];
+  const lowStockItems: LowStockItem[] = products
+    .filter((p) => (p.current_stock ?? 0) < lowStockThreshold)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      currentStock: p.current_stock ?? 0,
+      minStock: lowStockThreshold,
+    }));
 
   // Calculate expired and expiring soon products
   const expiredProducts = products.filter(
@@ -104,7 +127,7 @@ export default function Dashboard({ onNavigate }: Props) {
     (p) =>
       p.expiry_date &&
       new Date(p.expiry_date) >= new Date() &&
-      new Date(p.expiry_date) <= new Date(Date.now() + 180 * 24 * 60 * 60 * 1000)
+      new Date(p.expiry_date) <= new Date(Date.now() + expiryWarningDays * 24 * 60 * 60 * 1000)
   );
 
   const quickActions = [
@@ -295,7 +318,7 @@ export default function Dashboard({ onNavigate }: Props) {
             <div className="card">
               <h2 className="section-title">
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  ⚠️ Expiring Soon (6 months)
+                  ⚠️ Expiring Soon ({expiryWarningDays} days)
                   <span
                     className="badge"
                     style={{ background: "#fef3c7", color: "#92400e", fontSize: 12 }}

@@ -23,6 +23,13 @@ export type AuthUser = {
   is_active: boolean;
 };
 
+export type SystemSettings = {
+  low_stock_threshold: number;
+  expiry_warning_days: number;
+  auto_backup: boolean;
+  email_notifications: boolean;
+};
+
 type JsonObject = Record<string, unknown>;
 type JsonArray = Record<string, unknown>[];
 
@@ -290,6 +297,19 @@ export async function deleteSale(saleId: number): Promise<void> {
 
 export async function fetchInventoryAnalytics(): Promise<JsonObject> {
   return jsonRequest<JsonObject>("/inventory/analytics");
+}
+
+// Settings API
+
+export async function fetchSystemSettings(): Promise<SystemSettings> {
+  return jsonRequest<SystemSettings>("/settings/system");
+}
+
+export async function updateSystemSettings(payload: SystemSettings): Promise<SystemSettings> {
+  return jsonRequest<SystemSettings>("/settings/system", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchAllMovements(days: number = 30, location?: string, reason?: string): Promise<JsonArray> {

@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .database import Base, engine
-from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data
+from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings
 from . import models
 
 app = FastAPI(title="Gel Invent API", version="0.1.0")
@@ -210,6 +210,7 @@ async def health_check() -> dict[str, str]:
 app.include_router(auth.router)
 app.include_router(employees.router)
 app.include_router(branches.router)
+app.include_router(settings.router)
 app.include_router(products.router)
 app.include_router(sales.router)
 app.include_router(inventory.router)

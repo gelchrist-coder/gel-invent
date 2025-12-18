@@ -6,12 +6,29 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Product, StockMovement, Sale, User
+from ..models import Product, StockMovement, Sale, User, SystemSettings
 from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
+
+
+def _get_tenant_owner_id(user: User) -> int:
+    if user.role == "Admin":
+        return user.id
+    return user.created_by or user.id
+
+
+def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
+    settings = db.query(SystemSettings).filter(SystemSettings.owner_user_id == owner_user_id).first()
+    if settings:
+        return settings
+    settings = SystemSettings(owner_user_id=owner_user_id)
+    db.add(settings)
+    db.commit()
+    db.refresh(settings)
+    return settings
 
 
 @router.get("/analytics")
@@ -29,6 +46,9 @@ def get_inventory_analytics(
     - Stock value
     """
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+    settings = _get_or_create_settings(db, _get_tenant_owner_id(current_user))
+    low_stock_threshold = settings.low_stock_threshold
+    expiry_warning_days = settings.expiry_warning_days
     
     # Get all products with their stock levels
     products = db.scalars(
@@ -72,14 +92,14 @@ def get_inventory_analytics(
         if product.cost_price and total_stock > 0:
             total_stock_value += product.cost_price * total_stock
         
-        # Low stock check (threshold: 10 units)
-        if total_stock < 10:
+        # Low stock check
+        if total_stock < low_stock_threshold:
             low_stock_products.append({
                 "id": product.id,
                 "name": product.name,
                 "sku": product.sku,
                 "current_stock": float(total_stock),
-                "threshold": 10,
+                "threshold": low_stock_threshold,
                 "category": product.category,
             })
         
@@ -101,7 +121,7 @@ def get_inventory_analytics(
                 remaining = remaining - batch_remaining
 
                 days_to_expiry = (movement.expiry_date - today).days
-                if days_to_expiry <= 90 and batch_remaining > 0:
+                if days_to_expiry <= expiry_warning_days and batch_remaining > 0:
                     expiring_batches.append({
                         "product_id": product.id,
                         "product_name": product.name,

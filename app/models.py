@@ -192,3 +192,20 @@ class CreditTransaction(Base):
 
     creditor: Mapped[Creditor] = relationship(back_populates="transactions")
     sale: Mapped[Sale | None] = relationship()
+
+
+class SystemSettings(Base):
+    __tablename__ = "system_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    low_stock_threshold: Mapped[int] = mapped_column(Integer, default=10)
+    expiry_warning_days: Mapped[int] = mapped_column(Integer, default=180)
+    auto_backup: Mapped[bool] = mapped_column(Boolean, default=True)
+    email_notifications: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
