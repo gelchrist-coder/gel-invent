@@ -54,7 +54,6 @@ class UserResponse(BaseModel):
     categories: Optional[list[str]] = None
     branch_id: Optional[int] = None
     is_active: bool
-    email_verified: bool = True
 
     class Config:
         from_attributes = True
@@ -89,7 +88,6 @@ def _serialize_user(user: User) -> UserResponse:
         categories=_parse_categories(getattr(user, "categories", None)),
         branch_id=getattr(user, "branch_id", None),
         is_active=user.is_active,
-        email_verified=getattr(user, "email_verified", True),
     )
 
 
@@ -128,7 +126,7 @@ class ChangePasswordRequest(BaseModel):
 
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserCreate, db: Session = Depends(get_db)):
-    """Register a new user (email verification disabled)."""
+    """Register a new user."""
     email = _normalize_email(str(user_data.email))
     # Check if user already exists
     existing_user = db.query(User).filter(User.email == email).first()
@@ -150,7 +148,6 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
         categories=json.dumps(user_data.categories) if user_data.categories else None,
         role="Admin",
         is_active=True,
-        email_verified=True,
     )
 
     db.add(new_user)
@@ -220,7 +217,6 @@ def get_current_user_info(
         categories=categories,
         branch_id=getattr(current_user, "branch_id", None),
         is_active=current_user.is_active,
-        email_verified=getattr(current_user, "email_verified", True),
     )
 
 

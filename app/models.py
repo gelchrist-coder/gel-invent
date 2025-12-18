@@ -23,8 +23,6 @@ class User(Base):
     # JSON string (list of categories). Kept as Text for portability.
     categories: Mapped[str | None] = mapped_column(Text, default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    # Email verification (Admin signup flow). Existing users default to verified.
-    email_verified: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -46,17 +44,6 @@ class Branch(Base):
 
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    code_hash: Mapped[str] = mapped_column(String(255))
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class EmailVerificationToken(Base):
-    __tablename__ = "email_verification_tokens"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -205,27 +192,6 @@ class SystemSettings(Base):
     expiry_warning_days: Mapped[int] = mapped_column(Integer, default=180)
     auto_backup: Mapped[bool] = mapped_column(Boolean, default=True)
     email_notifications: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-
-class PendingSignup(Base):
-    __tablename__ = "pending_signups"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(255))
-    hashed_password: Mapped[str] = mapped_column(String(255))
-    business_name: Mapped[str | None] = mapped_column(String(255), default=None)
-    categories: Mapped[str | None] = mapped_column(Text, default=None)
-
-    code_hash: Mapped[str] = mapped_column(String(255))
-    code_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    code_sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    code_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

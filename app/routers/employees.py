@@ -94,7 +94,6 @@ def create_employee(
         branch_id=branch_id,
         business_name=current_user.business_name,  # Inherit owner's business
         is_active=True,
-        email_verified=True,
     )
     
     db.add(new_employee)

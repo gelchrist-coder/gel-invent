@@ -48,9 +48,11 @@ async def on_startup() -> None:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
 
-            # Email verification (defaults TRUE for existing accounts)
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT TRUE"))
-            conn.execute(text("UPDATE users SET email_verified = TRUE WHERE email_verified IS NULL"))
+            # Email verification was removed. Clean up old schema objects if present.
+            # Safe/idempotent for existing databases.
+            conn.execute(text("DROP TABLE IF EXISTS pending_signups CASCADE"))
+            conn.execute(text("DROP TABLE IF EXISTS email_verification_tokens CASCADE"))
+            conn.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS email_verified"))
 
             # Branch support (multi-branch / separate product lists per branch)
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
