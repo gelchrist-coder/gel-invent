@@ -48,6 +48,10 @@ async def on_startup() -> None:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
 
+            # Email verification (defaults TRUE for existing accounts)
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT TRUE"))
+            conn.execute(text("UPDATE users SET email_verified = TRUE WHERE email_verified IS NULL"))
+
             # Branch support (multi-branch / separate product lists per branch)
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
             conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS branch_id INTEGER"))

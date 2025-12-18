@@ -1,5 +1,5 @@
 -- Supabase Schema for GelInvent
--- Run this in Supabase SQL Editor: https://app.supabase.com/project/txwwchrabiavonknotze/sql
+-- Run this in Supabase SQL Editor (your project): https://app.supabase.com/
 
 -- Create users table
 CREATE TABLE users (

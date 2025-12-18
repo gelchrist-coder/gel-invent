@@ -52,6 +52,29 @@ pip install -r requirements.txt
 - `POST /data/import?force=true|false` – imports a prior JSON backup (with optional replace).
 - `GET /data/export/xlsx?days=30` – downloads an Excel workbook with recent Products, Sales, and Inventory Movements.
 
+## Migrate Railway Postgres → Supabase
+
+This project runs on PostgreSQL. To migrate an existing Postgres database (e.g. Railway) into Supabase Postgres:
+
+1) Create your Supabase project and copy the DB connection string (Settings → Database).
+2) Create the destination schema (recommended): temporarily set `DATABASE_URL` to the Supabase URL and start the backend once so it runs `Base.metadata.create_all(...)`.
+3) Run the migrator:
+
+```bash
+cd /Users/gelchristboateng/Documents/gel-invent
+
+export SOURCE_DATABASE_URL='postgresql://...'
+export DEST_DATABASE_URL='postgresql://postgres:<PASSWORD>@db.<PROJECT_REF>.supabase.co:5432/postgres?sslmode=require'
+
+# optional: create tables in destination via SQLAlchemy
+export MIGRATE_SCHEMA=1
+
+# optional: wipe destination tables first
+# export MIGRATE_TRUNCATE=1
+
+/Users/gelchristboateng/Documents/gel-invent/.venv/bin/python scripts/migrate_postgres_to_supabase.py
+```
+
 ### Example curl flow
 ```bash
 curl -X POST http://127.0.0.1:8000/products \

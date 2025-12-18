@@ -55,8 +55,10 @@ def create_employee(
             detail="Only business owners can add employees"
         )
     
+    email = str(employee_data.email).strip().lower()
+
     # Check if email already exists
-    existing_user = db.query(User).filter(User.email == employee_data.email).first()
+    existing_user = db.query(User).filter(User.email == email).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -84,14 +86,15 @@ def create_employee(
 
     hashed_password = get_password_hash(employee_data.password)
     new_employee = User(
-        email=employee_data.email,
+        email=email,
         name=employee_data.name,
         hashed_password=hashed_password,
         role=employee_data.role,
         created_by=current_user.id,
         branch_id=branch_id,
         business_name=current_user.business_name,  # Inherit owner's business
-        is_active=True
+        is_active=True,
+        email_verified=True,
     )
     
     db.add(new_employee)

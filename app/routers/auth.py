@@ -10,7 +10,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User, PasswordResetToken, Branch
+from app.models import User, PasswordResetToken, EmailVerificationToken, Branch
 from app.auth import (
     create_access_token,
     get_password_hash,
@@ -18,6 +18,7 @@ from app.auth import (
     get_current_active_user,
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
+from app.utils.email import send_email, smtp_configured
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -54,9 +55,14 @@ class UserResponse(BaseModel):
     categories: Optional[list[str]] = None
     branch_id: Optional[int] = None
     is_active: bool
+    email_verified: bool = True
 
     class Config:
         from_attributes = True
+
+
+class SignupResponse(UserResponse):
+    verification_code: Optional[str] = None
 
 
 def _parse_categories(value: Optional[str]) -> Optional[list[str]]:
@@ -84,7 +90,71 @@ def _serialize_user(user: User) -> UserResponse:
         categories=_parse_categories(getattr(user, "categories", None)),
         branch_id=getattr(user, "branch_id", None),
         is_active=user.is_active,
+        email_verified=getattr(user, "email_verified", True),
     )
+
+
+def _normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def _send_verification_code(*, user: User, db: Session) -> Optional[str]:
+    """Create a verification token and send the code via email.
+
+    Returns the raw code only in debug mode.
+    """
+    now = datetime.now(timezone.utc)
+
+    # Throttle: 1 code/minute
+    recent = (
+        db.query(EmailVerificationToken)
+        .filter(
+            EmailVerificationToken.user_id == user.id,
+            EmailVerificationToken.created_at > (now - timedelta(seconds=60)),
+        )
+        .order_by(EmailVerificationToken.created_at.desc())
+        .first()
+    )
+    if recent:
+        return None
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    token = EmailVerificationToken(
+        user_id=user.id,
+        code_hash=get_password_hash(code),
+        expires_at=now + timedelta(minutes=15),
+        used_at=None,
+    )
+    db.add(token)
+    db.commit()
+
+    subject = "Verify your Gel Invent email"
+    body = (
+        f"Hello {user.name},\n\n"
+        f"Your Gel Invent verification code is: {code}\n\n"
+        "This code expires in 15 minutes.\n"
+        "If you did not create an account, you can ignore this email.\n"
+    )
+
+    if smtp_configured():
+        send_email(to_email=user.email, subject=subject, body_text=body)
+
+    debug = os.getenv("EMAIL_VERIFICATION_DEBUG") == "1"
+    return code if debug else None
+
+
+class EmailVerifyRequest(BaseModel):
+    email: EmailStr
+    code: str
+
+
+class EmailResendRequest(BaseModel):
+    email: EmailStr
+
+
+class EmailResendResponse(BaseModel):
+    message: str
+    verification_code: Optional[str] = None
 
 
 class Token(BaseModel):
@@ -116,11 +186,12 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
-@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     """Register a new user"""
+    email = _normalize_email(str(user_data.email))
     # Check if user already exists
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
+    existing_user = db.query(User).filter(User.email == email).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -134,13 +205,14 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     # Create new user
     hashed_password = get_password_hash(user_data.password)
     new_user = User(
-        email=user_data.email,
+        email=email,
         name=user_data.name,
         hashed_password=hashed_password,
         business_name=user_data.business_name,
         categories=json.dumps(user_data.categories) if user_data.categories else None,
         role="Admin",
-        is_active=True
+        is_active=True,
+        email_verified=False,
     )
     
     db.add(new_user)
@@ -151,8 +223,16 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     main_branch = Branch(owner_user_id=new_user.id, name="Main Branch", is_active=True)
     db.add(main_branch)
     db.commit()
-    
-    return _serialize_user(new_user)
+
+    # Send verification code
+    verification_code: Optional[str] = None
+    try:
+        verification_code = _send_verification_code(user=new_user, db=db)
+    except Exception as e:
+        # Don't block signup if email provider isn't configured.
+        print(f"⚠️  Could not send verification email: {e}")
+
+    return SignupResponse(**_serialize_user(new_user).model_dump(), verification_code=verification_code)
 
 
 @router.post("/login", response_model=Token)
@@ -162,7 +242,8 @@ def login(
 ):
     """Login and get access token"""
     # Find user by email (username field in OAuth2PasswordRequestForm)
-    user = db.query(User).filter(User.email == form_data.username).first()
+    email = _normalize_email(form_data.username)
+    user = db.query(User).filter(User.email == email).first()
     
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
@@ -175,6 +256,12 @@ def login(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user"
+        )
+
+    if not getattr(user, "email_verified", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified. Please verify your email.",
         )
     
     # Create access token
@@ -208,7 +295,63 @@ def get_current_user_info(
         categories=categories,
         branch_id=getattr(current_user, "branch_id", None),
         is_active=current_user.is_active,
+        email_verified=getattr(current_user, "email_verified", True),
     )
+
+
+@router.post("/email/verify")
+def verify_email(payload: EmailVerifyRequest, db: Session = Depends(get_db)):
+    """Verify a user's email using a 6-digit code."""
+    email = _normalize_email(str(payload.email))
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+
+    if getattr(user, "email_verified", True):
+        return {"message": "Email already verified"}
+
+    now = datetime.now(timezone.utc)
+    token = (
+        db.query(EmailVerificationToken)
+        .filter(
+            EmailVerificationToken.user_id == user.id,
+            EmailVerificationToken.used_at.is_(None),
+            EmailVerificationToken.expires_at > now,
+        )
+        .order_by(EmailVerificationToken.created_at.desc())
+        .first()
+    )
+
+    if not token or not verify_password(payload.code, token.code_hash):
+        raise HTTPException(status_code=400, detail="Invalid verification code")
+
+    user.email_verified = True
+    token.used_at = now
+    db.commit()
+    return {"message": "Email verified successfully"}
+
+
+@router.post("/email/resend", response_model=EmailResendResponse)
+def resend_verification(payload: EmailResendRequest, db: Session = Depends(get_db)):
+    """Resend email verification code. Always responds 200 to avoid email enumeration."""
+    email = _normalize_email(str(payload.email))
+    user = db.query(User).filter(User.email == email).first()
+
+    message = "If an account exists for this email, a verification code has been sent."
+    if not user or not user.is_active:
+        return EmailResendResponse(message=message)
+
+    if getattr(user, "email_verified", True):
+        return EmailResendResponse(message="Email already verified")
+
+    verification_code: Optional[str] = None
+
+    try:
+        verification_code = _send_verification_code(user=user, db=db)
+    except Exception as e:
+        print(f"⚠️  Could not send verification email: {e}")
+
+    return EmailResendResponse(message=message, verification_code=verification_code)
 
 
 @router.post("/password-reset/request", response_model=PasswordResetRequestResponse)

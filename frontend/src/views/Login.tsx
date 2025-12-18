@@ -69,6 +69,10 @@ export default function Login({ onLogin }: LoginProps) {
     businessName: "",
     categories: [] as string[],
   });
+  const [showVerify, setShowVerify] = useState(false);
+  const [verifyEmail, setVerifyEmail] = useState("");
+  const [verifyCode, setVerifyCode] = useState("");
+  const [pendingLogin, setPendingLogin] = useState<{ email: string; password: string } | null>(null);
   const [categoryInput, setCategoryInput] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -103,6 +107,64 @@ export default function Login({ onLogin }: LoginProps) {
     if (!/\d/.test(password)) return "Password must include a number";
     if (!/[^A-Za-z0-9]/.test(password)) return "Password must include a special character";
     return null;
+  };
+
+  const performLogin = async (email: string, password: string) => {
+    const loginFormData = new FormData();
+    loginFormData.append("username", email);
+    loginFormData.append("password", password);
+
+    const loginResponse = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      body: loginFormData,
+    });
+
+    if (!loginResponse.ok) {
+      const errorData = await safeJson(loginResponse);
+      const detail = isRecord(errorData) && typeof errorData.detail === "string" ? errorData.detail : null;
+      if (loginResponse.status === 403) {
+        setShowVerify(true);
+        setVerifyEmail(email);
+        setVerifyCode("");
+        setPendingLogin({ email, password });
+        setInfo(detail || "Email not verified. Please verify your email.");
+        return;
+      }
+      setError(detail || "Invalid email or password");
+      return;
+    }
+
+    const loginData = await loginResponse.json();
+    localStorage.setItem("token", loginData.access_token);
+
+    const userResponse = await fetch(`${API_BASE}/auth/me`, {
+      headers: { Authorization: `Bearer ${loginData.access_token}` },
+    });
+
+    if (userResponse.ok) {
+      const userData = await userResponse.json();
+      localStorage.setItem("user", JSON.stringify(userData));
+
+      if (userData?.business_name || userData?.name || userData?.email) {
+        localStorage.setItem(
+          "businessInfo",
+          JSON.stringify({
+            name: userData.business_name || formData.businessName,
+            owner: userData.name,
+            phone: "",
+            email: userData.email,
+            address: "",
+            taxId: "",
+            currency: "GHS",
+            logo: "",
+          })
+        );
+      }
+
+      window.dispatchEvent(new CustomEvent("userChanged", { detail: userData }));
+    }
+
+    onLogin(email, password);
   };
 
   const COMMON_CATEGORIES = [
@@ -143,6 +205,51 @@ export default function Login({ onLogin }: LoginProps) {
     setLoading(true);
 
     try {
+      if (showVerify) {
+        const email = (verifyEmail || formData.email).trim();
+        const code = verifyCode.trim();
+        if (!email) {
+          setError("Please enter your email");
+          setLoading(false);
+          return;
+        }
+        if (!code) {
+          setError("Please enter the verification code");
+          setLoading(false);
+          return;
+        }
+
+        const res = await fetch(`${API_BASE}/auth/email/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, code }),
+        });
+
+        const data = await safeJson(res);
+        if (!res.ok) {
+          const detail = isRecord(data) && typeof data.detail === "string" ? data.detail : null;
+          setError(detail || "Verification failed. Check your code and try again.");
+          setLoading(false);
+          return;
+        }
+
+        const message =
+          isRecord(data) && typeof data.message === "string" ? data.message : "Email verified.";
+        setInfo(message);
+
+        const password = pendingLogin?.password || formData.password;
+        if (!password) {
+          setShowVerify(false);
+          setIsSignUp(false);
+          setLoading(false);
+          return;
+        }
+
+        await performLogin(email, password);
+        setLoading(false);
+        return;
+      }
+
       if (showReset) {
         const email = (resetEmail || formData.email).trim();
         if (!email) {
@@ -271,49 +378,11 @@ export default function Login({ onLogin }: LoginProps) {
           return;
         }
 
-        // After successful signup, login automatically
-        const loginFormData = new FormData();
-        loginFormData.append("username", formData.email);
-        loginFormData.append("password", formData.password);
-
-        const loginResponse = await fetch(`${API_BASE}/auth/login`, {
-          method: "POST",
-          body: loginFormData,
-        });
-
-        if (!loginResponse.ok) {
-          setError("Account created but login failed. Please sign in manually.");
-          setLoading(false);
-          return;
-        }
-
-        const loginData = await loginResponse.json();
-        localStorage.setItem("token", loginData.access_token);
-
-        // Get user info
-        const userResponse = await fetch(`${API_BASE}/auth/me`, {
-          headers: { Authorization: `Bearer ${loginData.access_token}` },
-        });
-
-        if (userResponse.ok) {
-          const userData = await userResponse.json();
-          localStorage.setItem("user", JSON.stringify(userData));
-          localStorage.setItem("businessInfo", JSON.stringify({
-            name: userData.business_name || formData.businessName,
-            owner: userData.name,
-            phone: "",
-            email: userData.email,
-            address: "",
-            taxId: "",
-            currency: "GHS",
-            logo: "",
-          }));
-          
-          // Dispatch custom event for same-tab user change detection
-          window.dispatchEvent(new CustomEvent("userChanged", { detail: userData }));
-        }
-
-        onLogin(formData.email, formData.password);
+        setShowVerify(true);
+        setVerifyEmail(formData.email);
+        setVerifyCode("");
+        setPendingLogin({ email: formData.email, password: formData.password });
+        setInfo("Account created. Check your email for the verification code.");
       } else {
         // Sign in validation
         if (!formData.email.trim() || !formData.password.trim()) {
@@ -322,40 +391,8 @@ export default function Login({ onLogin }: LoginProps) {
           return;
         }
 
-        // Call login API
-        const loginFormData = new FormData();
-        loginFormData.append("username", formData.email);
-        loginFormData.append("password", formData.password);
-
-        const loginResponse = await fetch(`${API_BASE}/auth/login`, {
-          method: "POST",
-          body: loginFormData,
-        });
-
-        if (!loginResponse.ok) {
-          const errorData = await loginResponse.json();
-          setError(errorData.detail || "Invalid email or password");
-          setLoading(false);
-          return;
-        }
-
-        const loginData = await loginResponse.json();
-        localStorage.setItem("token", loginData.access_token);
-
-        // Get user info
-        const userResponse = await fetch(`${API_BASE}/auth/me`, {
-          headers: { Authorization: `Bearer ${loginData.access_token}` },
-        });
-
-        if (userResponse.ok) {
-          const userData = await userResponse.json();
-          localStorage.setItem("user", JSON.stringify(userData));
-          
-          // Dispatch custom event for same-tab user change detection
-          window.dispatchEvent(new CustomEvent("userChanged", { detail: userData }));
-        }
-
-        onLogin(formData.email, formData.password);
+        setPendingLogin({ email: formData.email, password: formData.password });
+        await performLogin(formData.email, formData.password);
       }
       setLoading(false);
     } catch (err) {
@@ -406,12 +443,14 @@ export default function Login({ onLogin }: LoginProps) {
         <form onSubmit={handleSubmit} style={{ padding: "32px 24px" }}>
           <div style={{ marginBottom: 24, textAlign: "center" }}>
             <h2 style={{ margin: "0 0 8px", fontSize: 24, fontWeight: 600, color: "#1a2235" }}>
-              {isSignUp ? "Create Account" : "Welcome Back"}
+              {showVerify ? "Verify Email" : isSignUp ? "Create Account" : "Welcome Back"}
             </h2>
             <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>
-              {isSignUp
-                ? "Sign up to start managing your inventory"
-                : "Sign in to continue to your account"}
+              {showVerify
+                ? "Enter the code sent to your email"
+                : isSignUp
+                  ? "Sign up to start managing your inventory"
+                  : "Sign in to continue to your account"}
             </p>
           </div>
 
@@ -448,7 +487,103 @@ export default function Login({ onLogin }: LoginProps) {
           )}
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {isSignUp && !showReset && (
+            {showVerify && !showReset && (
+              <>
+                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    Email Address
+                  </span>
+                  <input
+                    type="email"
+                    value={verifyEmail || formData.email}
+                    onChange={(e) => setVerifyEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    required
+                    className="input"
+                    style={{ padding: 12 }}
+                    disabled
+                  />
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    Verification Code
+                  </span>
+                  <input
+                    type="text"
+                    value={verifyCode}
+                    onChange={(e) => setVerifyCode(e.target.value)}
+                    placeholder="Enter the 6-digit code"
+                    className="input"
+                    style={{ padding: 12 }}
+                  />
+                </label>
+
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setError("");
+                      setInfo("");
+                      const email = (verifyEmail || formData.email).trim();
+                      if (!email) {
+                        setError("Please enter your email");
+                        return;
+                      }
+                      setLoading(true);
+                      try {
+                        const res = await fetch(`${API_BASE}/auth/email/resend`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ email }),
+                        });
+                        const data = await safeJson(res);
+                        const message =
+                          isRecord(data) && typeof data.message === "string"
+                            ? data.message
+                            : "If an account exists for this email, a verification code has been sent.";
+                        setInfo(message);
+                      } catch {
+                        setError("Network error. Please try again.");
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="button"
+                    style={{ padding: "10px 12px", background: "#eef2ff", color: "#3730a3" }}
+                    disabled={loading}
+                  >
+                    Resend code
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowVerify(false);
+                      setVerifyCode("");
+                      setPendingLogin(null);
+                      setIsSignUp(false);
+                      setError("");
+                      setInfo("");
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#1f7aff",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                      padding: 0,
+                    }}
+                  >
+                    Back to Sign In
+                  </button>
+                </div>
+              </>
+            )}
+
+            {isSignUp && !showReset && !showVerify && (
               <>
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
@@ -637,7 +772,7 @@ export default function Login({ onLogin }: LoginProps) {
               </>
             )}
 
-            {!showReset && (
+            {!showReset && !showVerify && (
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                 Email Address *
@@ -654,7 +789,7 @@ export default function Login({ onLogin }: LoginProps) {
             </label>
             )}
 
-            {!showReset && (
+            {!showReset && !showVerify && (
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                 Password *
@@ -671,12 +806,13 @@ export default function Login({ onLogin }: LoginProps) {
             </label>
             )}
 
-            {!isSignUp && !showReset && (
+            {!isSignUp && !showReset && !showVerify && (
               <div style={{ marginTop: -8, textAlign: "right" }}>
                 <button
                   type="button"
                   onClick={() => {
                     setShowReset(true);
+                    setShowVerify(false);
                     setError("");
                     setInfo("");
                     setResetEmail(formData.email);
@@ -700,7 +836,7 @@ export default function Login({ onLogin }: LoginProps) {
               </div>
             )}
 
-            {isSignUp && (
+            {isSignUp && !showVerify && (
               <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                   Confirm Password *
@@ -735,7 +871,9 @@ export default function Login({ onLogin }: LoginProps) {
           >
             {loading
               ? "Processing..."
-              : showReset
+              : showVerify
+                ? "Verify Email"
+                : showReset
                 ? (resetCode ? "Reset Password" : "Send Reset Code")
                 : isSignUp
                   ? "Sign Up"
@@ -767,7 +905,7 @@ export default function Login({ onLogin }: LoginProps) {
           )}
 
           {/* Toggle Sign In/Sign Up */}
-          {!showReset && (
+          {!showReset && !showVerify && (
           <div style={{ marginTop: 24, textAlign: "center" }}>
             <button
               type="button"
@@ -775,6 +913,10 @@ export default function Login({ onLogin }: LoginProps) {
                 setIsSignUp(!isSignUp);
                 setError("");
                 setInfo("");
+                setShowVerify(false);
+                setVerifyEmail("");
+                setVerifyCode("");
+                setPendingLogin(null);
                 setFormData({
                   name: "",
                   email: "",
