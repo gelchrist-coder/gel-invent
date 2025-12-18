@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { NewSale, Product } from "../types";
 import { useAppCategories } from "../categories";
+import { updateMyCategories } from "../api";
 
 type POSSaleFormProps = {
   products: Product[];
@@ -25,6 +26,9 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const [notes, setNotes] = useState("");
 
   const userCategories = useAppCategories();
+
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
   
   // Credit sale states
   const [showCreditModal, setShowCreditModal] = useState(false);
@@ -265,7 +269,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
         </div>
 
         {/* Category Tabs */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {categories.map(category => (
             <button
               key={category}
@@ -285,7 +289,91 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
               {category === "all" ? "All Products" : category}
             </button>
           ))}
+
+          <button
+            type="button"
+            onClick={() => {
+              setAddingCategory(true);
+              setNewCategoryName("");
+            }}
+            style={{
+              padding: "8px 16px",
+              border: "1px dashed #d1d5db",
+              background: "white",
+              color: "#6b7280",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontWeight: 600,
+              fontSize: 13,
+            }}
+          >
+            + Add category…
+          </button>
         </div>
+
+        {addingCategory && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              type="text"
+              placeholder="Type a category"
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              style={{
+                flex: 1,
+                padding: "10px 12px",
+                border: "2px solid #e5e7eb",
+                borderRadius: 8,
+                fontSize: 14,
+              }}
+            />
+            <button
+              type="button"
+              onClick={async () => {
+                const value = newCategoryName.trim();
+                if (!value) return;
+                setAddingCategory(false);
+                setNewCategoryName("");
+                try {
+                  await updateMyCategories([...userCategories, value]);
+                } catch {
+                  // Ignore; user may not be admin.
+                }
+                setSelectedCategory(value);
+              }}
+              style={{
+                padding: "10px 12px",
+                border: "1px solid #d1d5db",
+                borderRadius: 8,
+                background: "white",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#374151",
+              }}
+            >
+              Add
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAddingCategory(false);
+                setNewCategoryName("");
+              }}
+              style={{
+                padding: "10px 12px",
+                border: "1px solid #d1d5db",
+                borderRadius: 8,
+                background: "white",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#6b7280",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
 
         {/* Products Grid */}
         <div style={{

@@ -124,6 +124,10 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class UpdateMeRequest(BaseModel):
+    categories: Optional[list[str]] = None
+
+
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     """Register a new user."""
@@ -218,6 +222,41 @@ def get_current_user_info(
         branch_id=getattr(current_user, "branch_id", None),
         is_active=current_user.is_active,
     )
+
+
+@router.put("/me", response_model=UserResponse)
+def update_current_user_info(
+    payload: UpdateMeRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Update current user's info.
+
+    Currently supports updating business categories (Admin only).
+    """
+    if payload.categories is None:
+        return _serialize_user(current_user)
+
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Admin can update categories")
+
+    cleaned: list[str] = []
+    seen = set()
+    for raw in payload.categories:
+        value = str(raw).strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(value)
+
+    current_user.categories = json.dumps(cleaned) if cleaned else None
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    return _serialize_user(current_user)
 
 
 

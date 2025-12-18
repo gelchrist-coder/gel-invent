@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 
 import { Branch, NewProduct } from "../types";
 import { useAppCategories } from "../categories";
+import { updateMyCategories } from "../api";
 
 type Props = {
   onCreate: (payload: NewProduct, branchIdOverride?: number | null) => Promise<void>;
@@ -21,6 +22,9 @@ export default function ProductForm({
   activeBranchId,
 }: Props) {
   const categoryOptions = useAppCategories();
+
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
 
@@ -89,6 +93,19 @@ export default function ProductForm({
     setSubmittingMode(mode);
     setError(null);
     try {
+      // If user typed a new category, persist it to the business categories list (Admin only).
+      const selectedCategory = (form.category ?? "").trim();
+      if (selectedCategory) {
+        const exists = categoryOptions.some((c) => c.toLowerCase() === selectedCategory.toLowerCase());
+        if (!exists) {
+          try {
+            await updateMyCategories([...categoryOptions, selectedCategory]);
+          } catch {
+            // Don't block product creation if categories can't be persisted.
+          }
+        }
+      }
+
       // Calculate actual stock based on unit type
       let actualStock = form.initialStock ? parseFloat(form.initialStock) : undefined;
       
@@ -202,25 +219,72 @@ export default function ProductForm({
             <div className="form-row">
               <label>
                 Category
-                {categoryOptions.length > 0 ? (
+                {categoryOptions.length > 0 && !addingCategory ? (
                   <select
                     className="input"
                     value={form.category}
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "__add_new__") {
+                        setAddingCategory(true);
+                        setNewCategoryName("");
+                        return;
+                      }
+                      setForm({ ...form, category: value });
+                    }}
                   >
                     {categoryOptions.map((cat) => (
                       <option key={cat} value={cat}>
                         {cat}
                       </option>
                     ))}
+                    <option value="__add_new__">+ Add new category…</option>
                   </select>
                 ) : (
-                  <input
-                    className="input"
-                    value={form.category ?? ""}
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
-                    placeholder="Type a category"
-                  />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      className="input"
+                      value={addingCategory ? newCategoryName : (form.category ?? "")}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (addingCategory) setNewCategoryName(value);
+                        else setForm({ ...form, category: value });
+                      }}
+                      placeholder="Type a category"
+                    />
+                    {categoryOptions.length > 0 && addingCategory && (
+                      <>
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={async () => {
+                            const value = newCategoryName.trim();
+                            if (!value) return;
+                            setForm({ ...form, category: value });
+                            setAddingCategory(false);
+                            setNewCategoryName("");
+                            try {
+                              await updateMyCategories([...categoryOptions, value]);
+                            } catch {
+                              // Ignore; category will still be saved on the product.
+                            }
+                          }}
+                        >
+                          Add
+                        </button>
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={() => {
+                            setAddingCategory(false);
+                            setNewCategoryName("");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
+                  </div>
                 )}
               </label>
               <label>

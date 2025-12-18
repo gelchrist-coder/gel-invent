@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Product } from "../types";
-import { fetchMovements } from "../api";
+import { fetchMovements, updateMyCategories } from "../api";
 import { useAppCategories } from "../categories";
 
 type Props = {
@@ -115,6 +115,18 @@ export default function ProductList({
     }
     setBusy(true);
     try {
+          const selectedCategory = (editForm.category ?? "").trim();
+          if (selectedCategory) {
+            const exists = categoryOptions.some((c) => c.toLowerCase() === selectedCategory.toLowerCase());
+            if (!exists) {
+              try {
+                await updateMyCategories([...categoryOptions, selectedCategory]);
+              } catch {
+                // Don't block product edits if categories can't be persisted.
+              }
+            }
+          }
+
       await onEdit(id, editForm);
       setEditingId(null);
       setEditForm({});

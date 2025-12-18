@@ -5,6 +5,7 @@ import Layout from "./components/Layout";
 import ProductForm from "./components/ProductForm";
 import ProductList from "./components/ProductList";
 import { useAppCategories } from "./categories";
+import { updateMyCategories } from "./api";
 import { Branch, NewProduct, Product } from "./types";
 import Creditors from "./views/Creditors";
 import Dashboard from "./views/Dashboard";
@@ -37,6 +38,9 @@ export default function App() {
     return Number.isFinite(parsed) ? parsed : null;
   });
   const categoryOptions = useAppCategories();
+
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   const logoutAndReset = () => {
     setIsAuthenticated(false);
@@ -381,7 +385,15 @@ export default function App() {
                   <select
                     className="input"
                     value={filterCategory}
-                    onChange={(e) => setFilterCategory(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "__add_new__") {
+                        setAddingCategory(true);
+                        setNewCategoryName("");
+                        return;
+                      }
+                      setFilterCategory(value);
+                    }}
                     style={{ padding: 10 }}
                   >
                     <option value="all">All Categories</option>
@@ -390,8 +402,56 @@ export default function App() {
                         {cat}
                       </option>
                     ))}
+                    <option value="__add_new__">+ Add new category…</option>
                   </select>
                 </label>
+                {addingCategory && (
+                  <div style={{ gridColumn: "1 / -1", display: "flex", gap: 8, alignItems: "end" }}>
+                    <label style={{ margin: 0, flex: 1 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                        New category
+                      </span>
+                      <input
+                        className="input"
+                        type="text"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        placeholder="Type a category"
+                        style={{ padding: 10 }}
+                      />
+                    </label>
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={async () => {
+                        const value = newCategoryName.trim();
+                        if (!value) return;
+                        setAddingCategory(false);
+                        setNewCategoryName("");
+                        try {
+                          await updateMyCategories([...categoryOptions, value]);
+                        } catch {
+                          // Ignore; user may not be admin.
+                        }
+                        setFilterCategory(value);
+                      }}
+                      style={{ padding: "10px 14px" }}
+                    >
+                      Add
+                    </button>
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={() => {
+                        setAddingCategory(false);
+                        setNewCategoryName("");
+                      }}
+                      style={{ padding: "10px 14px" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
                 <label style={{ margin: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Expiry Status

@@ -23,6 +23,16 @@ export type AuthUser = {
   is_active: boolean;
 };
 
+export async function updateMyCategories(categories: string[]): Promise<AuthUser> {
+  const updated = await jsonRequest<AuthUser>("/auth/me", {
+    method: "PUT",
+    body: JSON.stringify({ categories }),
+  });
+  localStorage.setItem("user", JSON.stringify(updated));
+  window.dispatchEvent(new CustomEvent("userChanged", { detail: updated }));
+  return updated;
+}
+
 export type SystemSettings = {
   low_stock_threshold: number;
   expiry_warning_days: number;
