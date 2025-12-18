@@ -68,7 +68,8 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
     if not host:
         raise RuntimeError("SMTP_HOST not configured")
 
-    # Ports: either a single SMTP_PORT or a fallback list SMTP_PORTS
+    # Ports: either a fallback list SMTP_PORTS, or SMTP_PORT.
+    # Backward-compat: allow SMTP_PORT to be comma-separated (e.g. "587,465").
     ports_env = os.getenv("SMTP_PORTS")
     if ports_env:
         ports: list[int] = []
@@ -80,7 +81,13 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
         if not ports:
             raise RuntimeError("SMTP_PORTS is set but empty")
     else:
-        ports = [int(os.getenv("SMTP_PORT", "587"))]
+        raw_port = os.getenv("SMTP_PORT", "587").strip()
+        if "," in raw_port:
+            ports = [int(p.strip()) for p in raw_port.split(",") if p.strip()]
+            if not ports:
+                raise RuntimeError("SMTP_PORT is set but empty")
+        else:
+            ports = [int(raw_port)]
 
     user = os.getenv("SMTP_USER")
     password = os.getenv("SMTP_PASSWORD") or os.getenv("SMTP_PASS")
