@@ -62,6 +62,7 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
     - SMTP_TIMEOUT (seconds, default 20)
     - SMTP_CONNECT_RETRIES (default 2)
     - SMTP_RETRY_BACKOFF_SECONDS (default 1)
+    - SMTP_DEBUG (default 0)
     """
 
     host = os.getenv("SMTP_HOST")
@@ -106,6 +107,18 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
     smtp_timeout = float(os.getenv("SMTP_TIMEOUT", "20"))
     connect_retries = int(os.getenv("SMTP_CONNECT_RETRIES", "2"))
     backoff_seconds = float(os.getenv("SMTP_RETRY_BACKOFF_SECONDS", "1"))
+    debug = os.getenv("SMTP_DEBUG", "0") == "1"
+
+    if debug:
+        try:
+            infos = socket.getaddrinfo(host, ports[0], 0, socket.SOCK_STREAM)
+            addrs = sorted({info[4][0] for info in infos if info and info[4]})
+            print(
+                f"📧 SMTP_DEBUG: host={host} resolved_addrs={addrs} ports={ports} "
+                f"timeout={smtp_timeout}s force_ipv4={force_ipv4}"
+            )
+        except Exception as e:
+            print(f"📧 SMTP_DEBUG: could not resolve host={host}: {type(e).__name__}: {e}")
 
     last_error: Exception | None = None
 
@@ -122,18 +135,26 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
             server = (IPv4SMTP if force_ipv4 else smtplib.SMTP)(host, port, timeout=smtp_timeout)
 
         try:
+            step = "ehlo"
             server.ehlo()
             if use_tls:
+                step = "starttls"
                 server.starttls()
+                step = "ehlo_after_starttls"
                 server.ehlo()
 
             if user and password:
+                step = "login"
                 server.login(user, password)
 
+            step = "send_message"
             server.send_message(msg)
         except Exception as e:
             last_error = e
-            raise
+            raise RuntimeError(
+                f"SMTP step failed: step={locals().get('step', 'connect')} host={host} port={port} "
+                f"use_ssl={use_ssl} use_tls={use_tls} timeout={smtp_timeout}s error={type(e).__name__}: {e}"
+            ) from e
         finally:
             try:
                 server.quit()
@@ -146,7 +167,7 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
             try:
                 _attempt_send(port)
                 return
-            except (socket.timeout, TimeoutError, smtplib.SMTPServerDisconnected, OSError) as e:
+            except (socket.timeout, TimeoutError, smtplib.SMTPServerDisconnected, OSError, RuntimeError) as e:
                 last_error = e
                 print(
                     "⚠️  SMTP send attempt failed: "
