@@ -53,6 +53,40 @@ def _chunk_size() -> int:
         return 5000
 
 
+def _connect_timeout_s() -> int:
+    try:
+        value = int(os.getenv("MIGRATE_CONNECT_TIMEOUT_S", "10"))
+        return max(1, value)
+    except Exception:
+        return 10
+
+
+def _statement_timeout_ms() -> int | None:
+    raw = os.getenv("MIGRATE_STATEMENT_TIMEOUT_MS")
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        value = int(raw)
+        return value if value > 0 else None
+    except Exception:
+        return None
+
+
+def _ping(engine: Engine, label: str) -> None:
+    print(f"🔌 Connecting to {label}...", flush=True)
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    print(f"✅ Connected to {label}", flush=True)
+
+
+def _apply_session_timeouts(engine: Engine) -> None:
+    timeout_ms = _statement_timeout_ms()
+    if not timeout_ms:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("SET statement_timeout = :ms"), {"ms": timeout_ms})
+
+
 TABLES_IN_ORDER: list[str] = [
     # core
     "users",
@@ -92,6 +126,8 @@ def _truncate_tables(dest: Engine, tables: Iterable[str]) -> None:
 def _copy_table(*, source: Engine, dest: Engine, table: str) -> int:
     chunk_size = _chunk_size()
     inserted_total = 0
+
+    print(f"➡️  {table}: querying source...", flush=True)
 
     with source.connect() as src:
         # Stream results so big tables don't load into RAM at once.
@@ -133,7 +169,7 @@ def _copy_table(*, source: Engine, dest: Engine, table: str) -> int:
             inserted_total += len(batch)
 
             if inserted_total % (chunk_size * 5) == 0:
-                print(f"   ... {table}: copied {inserted_total} rows so far")
+                print(f"   ... {table}: copied {inserted_total} rows so far", flush=True)
 
             batch = []
 
@@ -173,13 +209,30 @@ def main() -> None:
     source_url = _normalize_pg_url(_env("SOURCE_DATABASE_URL"))
     dest_url = _normalize_pg_url(_env("DEST_DATABASE_URL"))
 
-    source = create_engine(source_url, pool_pre_ping=True, future=True)
-    dest = create_engine(dest_url, pool_pre_ping=True, future=True)
+    connect_timeout = _connect_timeout_s()
+    source = create_engine(
+        source_url,
+        pool_pre_ping=True,
+        future=True,
+        connect_args={"connect_timeout": connect_timeout},
+    )
+    dest = create_engine(
+        dest_url,
+        pool_pre_ping=True,
+        future=True,
+        connect_args={"connect_timeout": connect_timeout},
+    )
+
+    _ping(source, "SOURCE")
+    _ping(dest, "DEST")
+    _apply_session_timeouts(source)
+    _apply_session_timeouts(dest)
 
     migrate_schema = os.getenv("MIGRATE_SCHEMA") == "1"
     truncate = os.getenv("MIGRATE_TRUNCATE") == "1"
 
     if migrate_schema:
+        print("🧱 Ensuring destination schema exists...", flush=True)
         # Import inside to avoid side effects unless explicitly requested.
         from app.database import Base
         from app import models  # noqa: F401
@@ -201,15 +254,16 @@ def main() -> None:
         raise RuntimeError("No matching tables found to migrate. Create schema in Supabase first.")
 
     if truncate:
-        print("🧹 Truncating destination tables...")
+        print("🧹 Truncating destination tables...", flush=True)
         _truncate_tables(dest, tables)
 
-    print("🔄 Migrating tables...")
+    print("🔄 Migrating tables...", flush=True)
     for t in tables:
+        print(f"➡️  Starting {t}...", flush=True)
         count = _copy_table(source=source, dest=dest, table=t)
         print(f"✅ {t}: {count} rows")
 
-    print("🎉 Migration complete")
+    print("🎉 Migration complete", flush=True)
 
 
 if __name__ == "__main__":
