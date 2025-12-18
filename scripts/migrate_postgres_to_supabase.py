@@ -22,6 +22,7 @@ Notes
 
 from __future__ import annotations
 
+import getpass
 import os
 from typing import Iterable
 
@@ -206,8 +207,18 @@ def _copy_table(*, source: Engine, dest: Engine, table: str) -> int:
 
 
 def main() -> None:
-    source_url = _normalize_pg_url(_env("SOURCE_DATABASE_URL"))
-    dest_url = _normalize_pg_url(_env("DEST_DATABASE_URL"))
+    # SOURCE can come from SOURCE_DATABASE_URL or fall back to DATABASE_URL (common local setup).
+    source_raw = os.getenv("SOURCE_DATABASE_URL") or os.getenv("DATABASE_URL")
+    if not source_raw or source_raw.strip() == "":
+        raise RuntimeError("Missing SOURCE_DATABASE_URL (or DATABASE_URL) environment variable")
+
+    dest_raw = os.getenv("DEST_DATABASE_URL")
+    if not dest_raw or dest_raw.strip() == "":
+        # Prompting inside the script avoids leaking secrets to shell history.
+        dest_raw = getpass.getpass("DEST_DATABASE_URL (Supabase): ")
+
+    source_url = _normalize_pg_url(source_raw)
+    dest_url = _normalize_pg_url(dest_raw)
 
     connect_timeout = _connect_timeout_s()
     source = create_engine(
