@@ -45,6 +45,14 @@ def _normalize_pg_url(url: str) -> str:
     return url
 
 
+def _chunk_size() -> int:
+    try:
+        value = int(os.getenv("MIGRATE_CHUNK_SIZE", "5000"))
+        return max(100, value)
+    except Exception:
+        return 5000
+
+
 TABLES_IN_ORDER: list[str] = [
     # core
     "users",
@@ -82,27 +90,58 @@ def _truncate_tables(dest: Engine, tables: Iterable[str]) -> None:
 
 
 def _copy_table(*, source: Engine, dest: Engine, table: str) -> int:
+    chunk_size = _chunk_size()
+    inserted_total = 0
+
     with source.connect() as src:
-        rows = src.execute(text(f'SELECT * FROM "{table}"')).mappings().all()
+        # Stream results so big tables don't load into RAM at once.
+        result = (
+            src.execution_options(stream_results=True)
+            .execute(text(f'SELECT * FROM "{table}"'))
+            .mappings()
+        )
 
-    if not rows:
-        return 0
+        first = result.fetchone()
+        if first is None:
+            return 0
 
-    cols = list(rows[0].keys())
-    col_list = ", ".join([f'"{c}"' for c in cols])
-    values_list = ", ".join([f":{c}" for c in cols])
+        cols = list(first.keys())
+        col_list = ", ".join([f'"{c}"' for c in cols])
+        values_list = ", ".join([f":{c}" for c in cols])
 
-    # Use ON CONFLICT DO NOTHING to keep idempotent.
-    sql = text(
-        f"""
-        INSERT INTO "{table}" ({col_list})
-        VALUES ({values_list})
-        ON CONFLICT DO NOTHING
-        """
-    )
+        # Use ON CONFLICT DO NOTHING to keep reruns safe (relies on PK/unique constraints).
+        sql = text(
+            f"""
+            INSERT INTO "{table}" ({col_list})
+            VALUES ({values_list})
+            ON CONFLICT DO NOTHING
+            """
+        )
 
-    with dest.begin() as conn:
-        conn.execute(sql, rows)
+        batch: list[dict] = [dict(first)]
+        while True:
+            remaining = chunk_size - len(batch)
+            if remaining > 0:
+                batch.extend([dict(r) for r in result.fetchmany(remaining)])
+
+            if not batch:
+                break
+
+            with dest.begin() as conn:
+                conn.execute(sql, batch)
+
+            inserted_total += len(batch)
+
+            if inserted_total % (chunk_size * 5) == 0:
+                print(f"   ... {table}: copied {inserted_total} rows so far")
+
+            batch = []
+
+            # If fetchmany returned nothing, we're done.
+            peek = result.fetchmany(1)
+            if not peek:
+                break
+            batch.append(dict(peek[0]))
 
     # Best-effort sequence bump
     if "id" in cols:
@@ -127,7 +166,7 @@ def _copy_table(*, source: Engine, dest: Engine, table: str) -> int:
                 {"tname": table},
             )
 
-    return len(rows)
+    return inserted_total
 
 
 def main() -> None:
