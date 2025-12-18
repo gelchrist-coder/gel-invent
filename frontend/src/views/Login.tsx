@@ -382,7 +382,7 @@ export default function Login({ onLogin }: LoginProps) {
         setVerifyEmail(formData.email);
         setVerifyCode("");
         setPendingLogin({ email: formData.email, password: formData.password });
-        setInfo("Account created. Check your email for the verification code.");
+        setInfo("Verification code sent. Check your email to complete registration.");
       } else {
         // Sign in validation
         if (!formData.email.trim() || !formData.password.trim()) {

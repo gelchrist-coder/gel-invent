@@ -209,3 +209,24 @@ class SystemSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class PendingSignup(Base):
+    __tablename__ = "pending_signups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    hashed_password: Mapped[str] = mapped_column(String(255))
+    business_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    categories: Mapped[str | None] = mapped_column(Text, default=None)
+
+    code_hash: Mapped[str] = mapped_column(String(255))
+    code_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    code_sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    code_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
