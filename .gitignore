@@ -57,6 +57,4 @@ htmlcov/
 .AppleDouble
 .LSOverride
 
-# Migration scripts (temporary)
-migrate_to_supabase.py
-migrate_sqlalchemy.py
+
