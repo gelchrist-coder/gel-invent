@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import socket
 import smtplib
+import time
 from email.message import EmailMessage
 
 
@@ -51,25 +52,42 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
 
     Optional:
     - SMTP_PORT (default 587)
+    - SMTP_PORTS (comma-separated list, e.g. "587,465"; overrides SMTP_PORT)
     - SMTP_USER
     - SMTP_PASSWORD (or SMTP_PASS)
     - SMTP_FROM (default SMTP_USER or no-reply@localhost)
     - SMTP_USE_TLS (default 1)
-    - SMTP_USE_SSL (default 0)
+    - SMTP_USE_SSL (default 0; auto-enabled when port is 465 if unset)
     - SMTP_FORCE_IPV4 (default 1 on Railway, else 0)
+    - SMTP_TIMEOUT (seconds, default 20)
+    - SMTP_CONNECT_RETRIES (default 2)
+    - SMTP_RETRY_BACKOFF_SECONDS (default 1)
     """
 
     host = os.getenv("SMTP_HOST")
     if not host:
         raise RuntimeError("SMTP_HOST not configured")
 
-    port = int(os.getenv("SMTP_PORT", "587"))
+    # Ports: either a single SMTP_PORT or a fallback list SMTP_PORTS
+    ports_env = os.getenv("SMTP_PORTS")
+    if ports_env:
+        ports: list[int] = []
+        for raw in ports_env.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            ports.append(int(raw))
+        if not ports:
+            raise RuntimeError("SMTP_PORTS is set but empty")
+    else:
+        ports = [int(os.getenv("SMTP_PORT", "587"))]
+
     user = os.getenv("SMTP_USER")
     password = os.getenv("SMTP_PASSWORD") or os.getenv("SMTP_PASS")
     from_email = os.getenv("SMTP_FROM") or user or "no-reply@localhost"
 
-    use_tls = os.getenv("SMTP_USE_TLS", "1") == "1"
-    use_ssl = os.getenv("SMTP_USE_SSL", "0") == "1"
+    use_tls_default = os.getenv("SMTP_USE_TLS", "1") == "1"
+    use_ssl_env = os.getenv("SMTP_USE_SSL")
     force_ipv4 = os.getenv("SMTP_FORCE_IPV4", "1" if os.getenv("RAILWAY_ENVIRONMENT") else "0") == "1"
 
     msg = EmailMessage()
@@ -78,24 +96,65 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
     msg["Subject"] = subject
     msg.set_content(body_text)
 
-    smtp_timeout = 20
-    if use_ssl:
-        server: smtplib.SMTP = (IPv4SMTP_SSL if force_ipv4 else smtplib.SMTP_SSL)(host, port, timeout=smtp_timeout)
-    else:
-        server = (IPv4SMTP if force_ipv4 else smtplib.SMTP)(host, port, timeout=smtp_timeout)
+    smtp_timeout = float(os.getenv("SMTP_TIMEOUT", "20"))
+    connect_retries = int(os.getenv("SMTP_CONNECT_RETRIES", "2"))
+    backoff_seconds = float(os.getenv("SMTP_RETRY_BACKOFF_SECONDS", "1"))
 
-    try:
-        server.ehlo()
-        if use_tls and not use_ssl:
-            server.starttls()
-            server.ehlo()
+    last_error: Exception | None = None
 
-        if user and password:
-            server.login(user, password)
+    def _attempt_send(port: int) -> None:
+        nonlocal last_error
+        # If SMTP_USE_SSL is explicitly set, respect it; otherwise default SSL on port 465.
+        use_ssl = (use_ssl_env == "1") if use_ssl_env is not None else (port == 465)
+        use_tls = use_tls_default and (not use_ssl)
 
-        server.send_message(msg)
-    finally:
+        server: smtplib.SMTP
+        if use_ssl:
+            server = (IPv4SMTP_SSL if force_ipv4 else smtplib.SMTP_SSL)(host, port, timeout=smtp_timeout)
+        else:
+            server = (IPv4SMTP if force_ipv4 else smtplib.SMTP)(host, port, timeout=smtp_timeout)
+
         try:
-            server.quit()
-        except Exception:
-            pass
+            server.ehlo()
+            if use_tls:
+                server.starttls()
+                server.ehlo()
+
+            if user and password:
+                server.login(user, password)
+
+            server.send_message(msg)
+        except Exception as e:
+            last_error = e
+            raise
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
+
+    # Try ports sequentially; retry each port a few times.
+    for port in ports:
+        for attempt in range(1, connect_retries + 1):
+            try:
+                _attempt_send(port)
+                return
+            except (socket.timeout, TimeoutError, smtplib.SMTPServerDisconnected, OSError) as e:
+                last_error = e
+                print(
+                    "⚠️  SMTP send attempt failed: "
+                    f"host={host} port={port} attempt={attempt}/{connect_retries} "
+                    f"timeout={smtp_timeout}s force_ipv4={force_ipv4} error={type(e).__name__}: {e}"
+                )
+                if attempt < connect_retries:
+                    time.sleep(backoff_seconds)
+            except Exception as e:
+                # Non-retryable error (auth, TLS, etc.)
+                last_error = e
+                raise
+
+    raise RuntimeError(
+        "SMTP send failed after retries. "
+        f"host={host} ports={ports} timeout={smtp_timeout}s force_ipv4={force_ipv4}. "
+        f"Last error: {type(last_error).__name__}: {last_error}"
+    )
