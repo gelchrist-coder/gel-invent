@@ -64,12 +64,14 @@ class SaleBase(BaseModel):
 
 
 class SaleCreate(SaleBase):
+    client_sale_id: str | None = Field(default=None, max_length=80)
     amount_paid: Decimal | None = Field(default=None, decimal_places=2)
     partial_payment_method: str | None = Field(default=None, max_length=50)
 
 
 class SaleRead(SaleBase):
     id: int
+    client_sale_id: str | None = None
     created_at: datetime
     created_by_name: str | None = None
 

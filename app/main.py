@@ -59,8 +59,21 @@ async def on_startup() -> None:
             conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
             conn.execute(text("ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
             conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+            conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS client_sale_id VARCHAR(80)"))
             conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
             conn.execute(text("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+
+            # Offline/poor-network idempotency for sales
+            try:
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_branch_client_sale_id_unique "
+                        "ON sales (branch_id, client_sale_id) "
+                        "WHERE client_sale_id IS NOT NULL"
+                    )
+                )
+            except Exception as e:
+                print(f"⚠️  Could not create unique index for offline sales idempotency: {e}")
 
             # Prevent duplicate product names within a branch (case-insensitive)
             try:

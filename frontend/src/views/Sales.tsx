@@ -1,8 +1,17 @@
 import { useEffect, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
-import { fetchSales, createSale, deleteSale, fetchProducts } from "../api";
+import { fetchSales, createSale, createSaleForBranch, deleteSale, fetchProducts } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
+import {
+  applyLocalSaleToCachedProducts,
+  cacheProducts,
+  enqueueSales,
+  getSalesOutboxCount,
+  getSalesOutbox,
+  removeOutboxItem,
+  loadCachedProducts,
+} from "../offline/storage";
 
 export default function Sales() {
   const [sales, setSales] = useState<Sale[]>([]);
@@ -13,6 +22,8 @@ export default function Sales() {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [saleConfirmed, setSaleConfirmed] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
+  const [outboxCount, setOutboxCount] = useState<number>(() => getSalesOutboxCount());
 
   // Get user and business info for receipt
   const currentUser = localStorage.getItem("user");
@@ -24,11 +35,25 @@ export default function Sales() {
     setLoading(true);
     setError(null);
     try {
-      const [salesData, productsData] = await Promise.all([fetchSales(), fetchProducts()]);
-      setSales(salesData);
+      const productsData = await fetchProducts();
       setProducts(productsData);
+      cacheProducts(productsData);
+
+      try {
+        const salesData = await fetchSales();
+        setSales(salesData);
+      } catch {
+        // Sales list is optional for offline selling.
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load data");
+      // If products can't be fetched, fall back to cached products so POS can still work.
+      const cached = loadCachedProducts();
+      if (cached?.length) {
+        setProducts(cached);
+        setOfflineNotice("Offline mode: using cached products. Sales will sync when internet returns.");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to load data");
+      }
     } finally {
       setLoading(false);
     }
@@ -38,9 +63,60 @@ export default function Sales() {
     loadData();
   }, []);
 
+  useEffect(() => {
+    const handler = () => setOutboxCount(getSalesOutboxCount());
+    window.addEventListener("offlineOutboxChanged", handler);
+    window.addEventListener("online", handler);
+    window.addEventListener("offline", handler);
+    return () => {
+      window.removeEventListener("offlineOutboxChanged", handler);
+      window.removeEventListener("online", handler);
+      window.removeEventListener("offline", handler);
+    };
+  }, []);
+
+  const syncOutboxOnce = async () => {
+    if (!navigator.onLine) return;
+    const outbox = getSalesOutbox().sort((a, b) => a.createdAt - b.createdAt);
+    if (!outbox.length) return;
+
+    for (const item of outbox) {
+      try {
+        await createSaleForBranch(item.sale, item.branchId);
+        removeOutboxItem(item.id);
+      } catch {
+        // Stop on first failure (likely network/auth). We'll retry later.
+        break;
+      }
+    }
+
+    // Refresh products/sales after syncing.
+    try {
+      await loadData();
+      setOfflineNotice(null);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    const onOnline = () => {
+      void syncOutboxOnce();
+    };
+    window.addEventListener("online", onOnline);
+    // Also try syncing shortly after mount.
+    void syncOutboxOnce();
+    return () => window.removeEventListener("online", onOnline);
+  }, []);
+
   const handleCreateSale = async (salesArray: NewSale[]) => {
     // Show confirmation modal instead of submitting immediately
-    setPendingSales(salesArray);
+    const receiptId = (globalThis.crypto as Crypto | undefined)?.randomUUID?.() ?? `sale_${Date.now()}`;
+    const withClientIds = salesArray.map((s, idx) => ({
+      ...s,
+      client_sale_id: s.client_sale_id ?? `${receiptId}:${idx}`,
+    }));
+    setPendingSales(withClientIds);
     setShowConfirmation(true);
     setSaleConfirmed(false); // Reset confirmed state for new sale
   };
@@ -49,6 +125,10 @@ export default function Sales() {
     if (pendingSales.length === 0) return;
     setConfirming(true);
     try {
+      if (!navigator.onLine) {
+        throw new Error("Offline");
+      }
+
       // Create all sales
       for (const sale of pendingSales) {
         await createSale(sale);
@@ -56,7 +136,12 @@ export default function Sales() {
       await loadData(); // Refresh sales and products (to update stock)
       setSaleConfirmed(true); // Show success state with print/done buttons
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to create sale");
+      // Network issue: queue sale locally and sync later.
+      enqueueSales(pendingSales);
+      const updated = applyLocalSaleToCachedProducts(pendingSales);
+      if (updated) setProducts(updated);
+      setOfflineNotice("Offline mode: sale saved locally. It will sync when internet returns.");
+      setSaleConfirmed(true);
     } finally {
       setConfirming(false);
     }
@@ -230,6 +315,23 @@ export default function Sales() {
   return (
     <div className="app-shell">
       <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>💳 Point of Sale</h1>
+
+      {outboxCount > 0 && (
+        <div className="card" style={{ marginBottom: 16, border: "1px solid #fde68a", background: "#fffbeb" }}>
+          <p style={{ margin: 0, color: "#92400e" }}>
+            Pending sync: {outboxCount} sale{outboxCount === 1 ? "" : "s"}. Connect to internet to auto-sync.
+          </p>
+          <button onClick={() => void syncOutboxOnce()} style={{ marginTop: 8 }}>
+            Sync now
+          </button>
+        </div>
+      )}
+
+      {offlineNotice && (
+        <div className="card" style={{ marginBottom: 16, border: "1px solid #bae6fd", background: "#eff6ff" }}>
+          <p style={{ margin: 0, color: "#1d4ed8" }}>{offlineNotice}</p>
+        </div>
+      )}
 
       {error && (
         <div className="card" style={{ marginBottom: 16, border: "1px solid #fecaca", background: "#fef2f2" }}>

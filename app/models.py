@@ -120,6 +120,8 @@ class Sale(Base):
     payment_method: Mapped[str] = mapped_column(String(50), default="cash")
     amount_paid: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     notes: Mapped[str | None] = mapped_column(default=None)
+    # Optional client-generated id for offline/poor-network idempotency.
+    client_sale_id: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

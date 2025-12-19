@@ -299,6 +299,18 @@ export async function createSale(payload: NewSale): Promise<Sale> {
   });
 }
 
+export async function createSaleForBranch(payload: NewSale, branchIdOverride: string | number | null): Promise<Sale> {
+  const headers: Record<string, string> = {};
+  if (branchIdOverride != null) {
+    headers["X-Branch-Id"] = String(branchIdOverride);
+  }
+  return jsonRequest<Sale>("/sales", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function deleteSale(saleId: number): Promise<void> {
   await jsonRequest<void>(`/sales/${saleId}`, { method: "DELETE" });
 }

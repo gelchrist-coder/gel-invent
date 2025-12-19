@@ -66,6 +66,7 @@ export type Sale = {
 };
 
 export type NewSale = {
+  client_sale_id?: string;
   product_id: number;
   quantity: number;
   unit_price: number;

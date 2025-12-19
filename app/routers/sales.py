@@ -27,6 +27,19 @@ def create_sale(
     For partial payments, only the unpaid portion is recorded as credit.
     """
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+
+    # Idempotency for offline/poor-network retries
+    if payload.client_sale_id:
+        existing = db.scalar(
+            select(models.Sale).where(
+                models.Sale.branch_id == active_branch_id,
+                models.Sale.user_id.in_(tenant_user_ids),
+                models.Sale.client_sale_id == payload.client_sale_id,
+            )
+        )
+        if existing:
+            return existing
+
     # Verify product exists and belongs to current user's tenant
     product = db.scalar(
         select(models.Product).where(
@@ -64,6 +77,7 @@ def create_sale(
         customer_name=payload.customer_name,
         payment_method=payload.payment_method,
         notes=payload.notes,
+        client_sale_id=payload.client_sale_id,
     )
     db.add(sale)
     db.flush()  # Flush to get sale.id
