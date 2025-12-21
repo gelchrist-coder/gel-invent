@@ -645,7 +645,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
 
         {/* Checkout Form */}
         {cart.length > 0 && (
-          <form onSubmit={handleSubmit} style={{
+          <form className="pos-checkout" onSubmit={handleSubmit} style={{
             padding: 16,
             borderTop: "2px solid #e5e7eb",
             background: "white",
