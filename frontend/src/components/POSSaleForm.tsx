@@ -378,6 +378,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
         {/* Products Grid */}
         <div style={{
           flex: 1,
+          minHeight: 0,
           overflowY: "auto",
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",

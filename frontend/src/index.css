@@ -163,6 +163,7 @@ label {
 .pos-left {
   flex: 2 1 560px;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -171,14 +172,16 @@ label {
 .pos-right {
   flex: 1 1 360px;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .pos-cart-items {
-  /* Prevent collapse when parent height is auto (stacked layout) */
-  flex: 1 1 auto;
-  min-height: 180px;
+  /* Desktop: fill remaining height and scroll within panel */
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 @media (max-width: 1100px) {
