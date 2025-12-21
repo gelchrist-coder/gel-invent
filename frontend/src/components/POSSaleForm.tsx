@@ -248,9 +248,9 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   };
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 200px)", gap: 16 }}>
+    <div className="pos-layout">
       {/* Left Side - Product Selection */}
-      <div style={{ flex: 2, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="pos-left">
         {/* Search and Category Filter */}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -482,11 +482,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
       </div>
 
       {/* Right Side - Cart & Checkout */}
-      <div style={{
-        flex: 1,
-        minWidth: 350,
-        display: "flex",
-        flexDirection: "column",
+      <div className="pos-right" style={{
         border: "2px solid #e5e7eb",
         borderRadius: 12,
         background: "#f9fafb",
