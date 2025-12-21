@@ -175,6 +175,12 @@ label {
   flex-direction: column;
 }
 
+.pos-cart-items {
+  /* Prevent collapse when parent height is auto (stacked layout) */
+  flex: 1 1 auto;
+  min-height: 180px;
+}
+
 @media (max-width: 1100px) {
   .pos-layout {
     flex-direction: column;
@@ -184,6 +190,11 @@ label {
   .pos-left,
   .pos-right {
     min-width: 0;
+  }
+
+  .pos-cart-items {
+    min-height: 220px;
+    max-height: 340px;
   }
 }
 

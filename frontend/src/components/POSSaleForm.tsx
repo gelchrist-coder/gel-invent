@@ -517,7 +517,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
         </div>
 
         {/* Cart Items */}
-        <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
+        <div className="pos-cart-items" style={{ overflowY: "auto", padding: 12 }}>
           {cart.length === 0 ? (
             <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>🛍️</div>
