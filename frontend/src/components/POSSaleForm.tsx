@@ -276,6 +276,8 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
       return {
         product_id: item.product.id,
         quantity: pieceQuantity, // Always store in pieces for inventory
+        sale_unit_type: item.sellingUnit,
+        pack_quantity: item.sellingUnit === 'pack' ? item.quantity : undefined,
         unit_price: unitPrice,
         total_price: unitPrice * item.quantity,
         customer_name: paymentMethod === "credit" ? creditorName : (customerName || null),

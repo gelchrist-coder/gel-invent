@@ -48,6 +48,7 @@ class StockMovementCreate(StockMovementBase):
 class StockMovementRead(StockMovementBase):
     id: int
     product_id: int
+    sale_id: int | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -56,6 +57,8 @@ class StockMovementRead(StockMovementBase):
 class SaleBase(BaseModel):
     product_id: int = Field(..., gt=0)
     quantity: Decimal = Field(..., gt=0, decimal_places=2)
+    sale_unit_type: str = Field(default="piece", max_length=10)
+    pack_quantity: int | None = Field(default=None, ge=1)
     unit_price: Decimal = Field(..., ge=0, decimal_places=2)
     total_price: Decimal = Field(..., ge=0, decimal_places=2)
     customer_name: str | None = Field(default=None, max_length=255)
@@ -74,5 +77,6 @@ class SaleRead(SaleBase):
     client_sale_id: str | None = None
     created_at: datetime
     created_by_name: str | None = None
+    deducted_batches: list[dict[str, object]] | None = None
 
     model_config = ConfigDict(from_attributes=True)

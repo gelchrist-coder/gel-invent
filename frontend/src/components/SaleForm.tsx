@@ -147,6 +147,8 @@ export default function SaleForm({ products, onSubmit, onCancel }: SaleFormProps
     const sale: NewSale = {
       product_id: form.product_id,
       quantity,
+      sale_unit_type: saleUnitType,
+      pack_quantity: saleUnitType === "pack" && packQuantity ? Number(packQuantity) : undefined,
       unit_price: Number(form.unit_price),
       total_price: Number(form.total_price),
       customer_name: form.customer_name || null,

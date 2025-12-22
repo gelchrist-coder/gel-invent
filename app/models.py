@@ -92,6 +92,9 @@ class StockMovement(Base):
     product_id: Mapped[int] = mapped_column(
         ForeignKey("products.id", ondelete="CASCADE"), index=True
     )
+    sale_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sales.id", ondelete="SET NULL"), index=True, default=None
+    )
     change: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     reason: Mapped[str] = mapped_column(String(255), default="adjustment")
     batch_number: Mapped[str | None] = mapped_column(String(100), default=None)
@@ -102,6 +105,7 @@ class StockMovement(Base):
     )
 
     product: Mapped[Product] = relationship(back_populates="movements")
+    sale: Mapped["Sale" | None] = relationship()
 
 
 class Sale(Base):
@@ -114,6 +118,9 @@ class Sale(Base):
         ForeignKey("products.id", ondelete="CASCADE"), index=True
     )
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    # How the customer bought this item (POS can sell by pack, but quantity is stored in pieces).
+    sale_unit_type: Mapped[str] = mapped_column(String(10), default="piece")
+    pack_quantity: Mapped[int | None] = mapped_column(Integer, default=None)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     customer_name: Mapped[str | None] = mapped_column(String(255), default=None)

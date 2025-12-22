@@ -56,6 +56,8 @@ export type Sale = {
   id: number;
   product_id: number;
   quantity: number;
+  sale_unit_type?: "piece" | "pack";
+  pack_quantity?: number | null;
   unit_price: number;
   total_price: number;
   customer_name?: string | null;
@@ -63,12 +65,20 @@ export type Sale = {
   notes?: string | null;
   created_at: string;
   created_by_name?: string | null;
+  deducted_batches?: Array<{
+    batch_number?: string | null;
+    expiry_date?: string | null;
+    quantity: number;
+    location?: string | null;
+  }> | null;
 };
 
 export type NewSale = {
   client_sale_id?: string;
   product_id: number;
   quantity: number;
+  sale_unit_type?: "piece" | "pack";
+  pack_quantity?: number;
   unit_price: number;
   total_price: number;
   customer_name?: string | null;

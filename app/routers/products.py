@@ -12,6 +12,7 @@ from app.auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.movement_reasons import validate_reason_and_change
+from app.utils.expiry import writeoff_expired_batches
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -105,6 +106,17 @@ def list_products(
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+
+    # Auto-writeoff any expired batches so stock totals stay accurate.
+    writeoff_expired_batches(
+        db=db,
+        actor_user_id=current_user.id,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=None,
+    )
+    db.commit()
+
     products = db.query(models.Product).filter(
         models.Product.user_id.in_(tenant_user_ids),
         models.Product.branch_id == active_branch_id,
@@ -145,6 +157,16 @@ def get_product(
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+
+    writeoff_expired_batches(
+        db=db,
+        actor_user_id=current_user.id,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=product_id,
+    )
+    db.commit()
+
     product = db.query(models.Product).filter(
         models.Product.id == product_id,
         models.Product.user_id.in_(tenant_user_ids),
@@ -180,6 +202,17 @@ def record_movement(
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+
+    # Before any new movement, write off expired batches for this product.
+    writeoff_expired_batches(
+        db=db,
+        actor_user_id=current_user.id,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=product_id,
+    )
+    db.commit()
+
     product = db.query(models.Product).filter(
         models.Product.id == product_id,
         models.Product.user_id.in_(tenant_user_ids),
@@ -211,17 +244,17 @@ def record_movement(
                 detail=f"Insufficient stock. Available: {available_stock}",
             )
 
-    # Auto-generate batch number: BATCH-{SKU}-{TIMESTAMP}
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    batch_number = f"BATCH-{product.sku}-{timestamp}"
-    
     movement_data = payload.model_dump()
-    movement_data["batch_number"] = batch_number
+    # Only auto-generate batch numbers for stock-in so each batch keeps its own expiry.
+    if payload.change > 0:
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        movement_data["batch_number"] = f"BATCH-{product.sku}-{timestamp}"
+    else:
+        movement_data["batch_number"] = movement_data.get("batch_number")
     movement_data["user_id"] = current_user.id
     movement_data["branch_id"] = active_branch_id
-    # If client didn't provide an expiry_date, fall back to product expiry_date
-    if movement_data.get("expiry_date") is None and product.expiry_date:
-        movement_data["expiry_date"] = product.expiry_date
+    # IMPORTANT: do not fall back to product.expiry_date for new stock.
+    # Expiry must be recorded per batch (movement), not inherited from a previous batch.
     
     movement = models.StockMovement(product_id=product_id, **movement_data)
     db.add(movement)

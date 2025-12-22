@@ -12,6 +12,7 @@ export default function MovementForm({ productName, onCreate, disabled }: Props)
   const [form, setForm] = useState<NewMovement>({ 
     change: 0, 
     reason: "adjustment",
+    expiry_date: null,
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,10 +26,12 @@ export default function MovementForm({ productName, onCreate, disabled }: Props)
       await onCreate({ 
         change: Number(form.change),
         reason: form.reason,
+        expiry_date: form.expiry_date || null,
       });
       setForm({ 
         change: 0, 
         reason: "adjustment",
+        expiry_date: null,
       });
     } catch (err) {
       setError((err as Error).message || "Failed to record movement");
@@ -66,6 +69,21 @@ export default function MovementForm({ productName, onCreate, disabled }: Props)
             />
           </label>
         </div>
+
+        {Number(form.change) > 0 ? (
+          <div className="form-row">
+            <label>
+              Batch expiry (recommended for new stock)
+              <input
+                className="input"
+                type="date"
+                value={form.expiry_date ?? ""}
+                onChange={(e) => setForm({ ...form, expiry_date: e.target.value || null })}
+                disabled={disabled}
+              />
+            </label>
+          </div>
+        ) : null}
         {error ? <p style={{ color: "#d14343", margin: 0 }}>{error}</p> : null}
         <button className="button" type="submit" disabled={busy || disabled}>
           {busy ? "Saving..." : "Record movement"}

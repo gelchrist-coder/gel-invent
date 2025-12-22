@@ -11,6 +11,7 @@ from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.movement_reasons import classify_movement
+from app.utils.expiry import get_batch_balances, writeoff_expired_batches
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
@@ -50,6 +51,16 @@ def get_inventory_analytics(
     settings = _get_or_create_settings(db, _get_tenant_owner_id(current_user))
     low_stock_threshold = settings.low_stock_threshold
     expiry_warning_days = settings.expiry_warning_days
+
+    # Auto-writeoff expired batches so analytics reflect real stock.
+    writeoff_expired_batches(
+        db=db,
+        actor_user_id=current_user.id,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=None,
+    )
+    db.commit()
     
     # Get all products with their stock levels
     products = db.scalars(
@@ -104,36 +115,39 @@ def get_inventory_analytics(
                 "category": product.category,
             })
         
-        # Expiring batches (estimate remaining by allocating total_stock to newest stock-in batches)
+        # Expiring batches (true remaining per batch)
         if total_stock > 0:
-            positive_batches = [
-                m
-                for m in movements
-                if m.change > 0 and m.expiry_date is not None
-            ]
-            positive_batches.sort(key=lambda m: m.created_at, reverse=True)
-
-            remaining = total_stock
-            for movement in positive_batches:
-                if remaining <= 0:
-                    break
-
-                batch_remaining = movement.change if movement.change <= remaining else remaining
-                remaining = remaining - batch_remaining
-
-                days_to_expiry = (movement.expiry_date - today).days
-                if days_to_expiry <= expiry_warning_days and batch_remaining > 0:
-                    expiring_batches.append({
-                        "product_id": product.id,
-                        "product_name": product.name,
-                        "sku": product.sku,
-                        "batch_number": movement.batch_number,
-                        "quantity": float(batch_remaining),
-                        "expiry_date": movement.expiry_date.isoformat(),
-                        "days_to_expiry": days_to_expiry,
-                        "status": "expired" if days_to_expiry < 0 else "expiring_soon" if days_to_expiry <= 7 else "expiring_30" if days_to_expiry <= 30 else "expiring_90",
-                        "location": movement.location or "Main Store",
-                    })
+            balances = get_batch_balances(
+                db=db,
+                tenant_user_ids=tenant_user_ids,
+                branch_id=active_branch_id,
+                product_id=product.id,
+                include_null_expiry=False,
+            )
+            for b in balances:
+                if b.balance <= 0 or b.expiry_date is None:
+                    continue
+                days_to_expiry = (b.expiry_date - today).days
+                if days_to_expiry <= expiry_warning_days:
+                    expiring_batches.append(
+                        {
+                            "product_id": product.id,
+                            "product_name": product.name,
+                            "sku": product.sku,
+                            "batch_number": b.batch_number,
+                            "quantity": float(b.balance),
+                            "expiry_date": b.expiry_date.isoformat(),
+                            "days_to_expiry": days_to_expiry,
+                            "status": "expired"
+                            if days_to_expiry < 0
+                            else "expiring_soon"
+                            if days_to_expiry <= 7
+                            else "expiring_30"
+                            if days_to_expiry <= 30
+                            else "expiring_90",
+                            "location": b.location or "Main Store",
+                        }
+                    )
         
         # Add to location breakdown
         for loc, qty in location_stock.items():

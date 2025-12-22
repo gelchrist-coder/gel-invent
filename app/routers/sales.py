@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,7 @@ from .. import models
 from ..schemas import SaleCreate, SaleRead
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
+from app.utils.expiry import get_batch_balances, writeoff_expired_batches
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -27,6 +29,16 @@ def create_sale(
     For partial payments, only the unpaid portion is recorded as credit.
     """
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+
+    # Auto-writeoff expired batches for this product before checking availability.
+    writeoff_expired_batches(
+        db=db,
+        actor_user_id=current_user.id,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=payload.product_id,
+    )
+    db.flush()
 
     # Idempotency for offline/poor-network retries
     if payload.client_sale_id:
@@ -72,6 +84,8 @@ def create_sale(
         branch_id=active_branch_id,
         product_id=payload.product_id,
         quantity=payload.quantity,
+        sale_unit_type=(payload.sale_unit_type or "piece"),
+        pack_quantity=payload.pack_quantity,
         unit_price=payload.unit_price,
         total_price=payload.total_price,
         customer_name=payload.customer_name,
@@ -82,16 +96,85 @@ def create_sale(
     db.add(sale)
     db.flush()  # Flush to get sale.id
 
-    # Deduct stock by creating a negative stock movement
-    stock_movement = models.StockMovement(
-        user_id=current_user.id,
+    # Deduct stock FIFO by earliest expiry date (non-expiring batches are sold last).
+    today = date.today()
+    balances = get_batch_balances(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=payload.product_id,
-        change=-payload.quantity,  # Negative to deduct stock
-        reason="Sale",
-        location="Main Store",  # Default location for sales
+        include_null_expiry=True,
     )
-    db.add(stock_movement)
+
+    # Only consider batches that have stock remaining and are not expired.
+    available_batches = [
+        b
+        for b in balances
+        if b.balance > 0 and (b.expiry_date is None or b.expiry_date >= today)
+    ]
+    available_batches.sort(
+        key=lambda b: (
+            1 if b.expiry_date is None else 0,
+            b.expiry_date or date.max,
+        )
+    )
+
+    remaining = payload.quantity
+    deducted_batches: list[dict[str, object]] = []
+
+    for b in available_batches:
+        if remaining <= 0:
+            break
+        take = b.balance if b.balance <= remaining else remaining
+        if take <= 0:
+            continue
+
+        db.add(
+            models.StockMovement(
+                user_id=current_user.id,
+                branch_id=active_branch_id,
+                product_id=payload.product_id,
+                sale_id=sale.id,
+                change=-take,
+                reason="Sale",
+                batch_number=b.batch_number,
+                expiry_date=b.expiry_date,
+                location=b.location or "Main Store",
+            )
+        )
+        deducted_batches.append(
+            {
+                "batch_number": b.batch_number,
+                "expiry_date": b.expiry_date.isoformat() if b.expiry_date else None,
+                "quantity": float(take),
+                "location": b.location or "Main Store",
+            }
+        )
+        remaining = remaining - take
+
+    # If we still have remaining quantity, it means some historical stock was not batch-tracked.
+    # Deduct the remainder without batch attribution (keeps stock accurate, but won't show expiry).
+    if remaining > 0:
+        db.add(
+            models.StockMovement(
+                user_id=current_user.id,
+                branch_id=active_branch_id,
+                product_id=payload.product_id,
+                sale_id=sale.id,
+                change=-remaining,
+                reason="Sale",
+                location="Main Store",
+            )
+        )
+        deducted_batches.append(
+            {
+                "batch_number": None,
+                "expiry_date": None,
+                "quantity": float(remaining),
+                "location": "Main Store",
+            }
+        )
+        remaining = Decimal(0)
 
     # Handle credit transactions
     credit_amount = Decimal(0)
@@ -170,6 +253,7 @@ def create_sale(
         
         # Create payment transaction if there's an initial payment
         if payload.amount_paid and payload.amount_paid > 0:
+            creditor.total_debt -= payload.amount_paid
             payment_transaction = models.CreditTransaction(
                 user_id=current_user.id,
                 branch_id=active_branch_id,
@@ -183,6 +267,9 @@ def create_sale(
 
     db.commit()
     db.refresh(sale)
+
+    # Attach batch deduction info for the client.
+    sale.deducted_batches = deducted_batches
     return sale
 
 
@@ -260,33 +347,48 @@ def delete_sale(
     if not sale:
         raise HTTPException(status_code=404, detail="Sale not found")
 
-    # Restore stock by creating a positive stock movement
-    stock_movement = models.StockMovement(
-        user_id=current_user.id,
-        branch_id=active_branch_id,
-        product_id=sale.product_id,
-        change=sale.quantity,  # Positive to restore stock
-        reason="Sale Reversal",
-        location="Main Store",
-    )
-    db.add(stock_movement)
+    # Restore stock: if this sale has linked movements, delete them (reverts the deduction precisely).
+    sale_movements = db.scalars(
+        select(models.StockMovement).where(
+            models.StockMovement.sale_id == sale_id,
+            models.StockMovement.branch_id == active_branch_id,
+            models.StockMovement.user_id.in_(tenant_user_ids),
+        )
+    ).all()
+
+    if sale_movements:
+        for m in sale_movements:
+            db.delete(m)
+    else:
+        # Backwards-compatible for older sales (no sale_id links).
+        db.add(
+            models.StockMovement(
+                user_id=current_user.id,
+                branch_id=active_branch_id,
+                product_id=sale.product_id,
+                change=sale.quantity,
+                reason="Sale Reversal",
+                location="Main Store",
+            )
+        )
 
     # If the sale was on credit or partial, reverse the credit transaction
     if sale.payment_method in ["credit", "partial"]:
-        credit_transaction = db.scalar(
+        txns = db.scalars(
             select(models.CreditTransaction).where(
                 models.CreditTransaction.sale_id == sale_id,
                 models.CreditTransaction.user_id.in_(tenant_user_ids),
                 models.CreditTransaction.branch_id == active_branch_id,
             )
-        )
-        if credit_transaction:
-            # Update creditor's total debt by the credit amount (not total price for partial payments)
-            creditor = db.get(models.Creditor, credit_transaction.creditor_id)
+        ).all()
+        for t in txns:
+            creditor = db.get(models.Creditor, t.creditor_id)
             if creditor:
-                creditor.total_debt -= credit_transaction.amount
-            # Delete the credit transaction
-            db.delete(credit_transaction)
+                if t.transaction_type == "debt":
+                    creditor.total_debt -= t.amount
+                else:
+                    creditor.total_debt += t.amount
+            db.delete(t)
 
     db.delete(sale)
     db.commit()
