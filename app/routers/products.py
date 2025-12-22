@@ -11,6 +11,7 @@ from app.deps import get_db
 from app.auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
+from app.utils.movement_reasons import validate_reason_and_change
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -187,12 +188,14 @@ def record_movement(
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
-    # Enforce stock restrictions for reductions and validate new stock metadata.
-    if payload.reason == "New Stock":
-        if payload.change <= 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New Stock must be a positive quantity")
-        if payload.expiry_date is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expiry date is required for New Stock")
+    # Validate reason rules.
+    error = validate_reason_and_change(payload.reason, payload.change)
+    if error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error)
+
+    # New Stock requires explicit expiry date for the new batch.
+    if (payload.reason or "").strip().lower() == "new stock" and payload.expiry_date is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expiry date is required for New Stock")
 
     if payload.change < 0:
         available_stock = db.query(func.coalesce(func.sum(models.StockMovement.change), 0)).filter(

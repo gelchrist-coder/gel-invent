@@ -171,6 +171,20 @@ export default function ProductList({
       alert("Please provide a reason for the adjustment");
       return;
     }
+
+    // Quick client-side sign validation to match backend rules
+    if (adjustment.reason === "Restock" && qty < 0) {
+      alert("Restock must be a positive quantity");
+      return;
+    }
+    if (adjustment.reason === "Returned" && qty < 0) {
+      alert("Returned must be a positive quantity");
+      return;
+    }
+    if (["Expired", "Damaged", "Lost/Stolen", "Write-off"].includes(adjustment.reason) && qty > 0) {
+      alert(`${adjustment.reason} must be a negative quantity`);
+      return;
+    }
     if (adjustment.reason === "Returned" && !adjustment.returned_by.trim()) {
       alert("Please enter who returned the item");
       return;
@@ -551,11 +565,14 @@ export default function ProductList({
                 >
                   <option value="">Select reason...</option>
                   <option value="New Stock">New Stock</option>
+                  <option value="Restock">Restock</option>
                   <option value="Expired">Expired</option>
                   <option value="Damaged">Damaged</option>
                   <option value="Returned">Returned</option>
+                  <option value="Stock Count">Stock Count</option>
                   <option value="Correction">Correction</option>
                   <option value="Lost/Stolen">Lost/Stolen</option>
+                  <option value="Write-off">Write-off</option>
                 </select>
               </label>
               {adjustment.reason === "Returned" && (

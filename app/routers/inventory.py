@@ -10,6 +10,7 @@ from ..models import Product, StockMovement, Sale, User, SystemSettings
 from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
+from app.utils.movement_reasons import classify_movement
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
@@ -169,16 +170,16 @@ def get_inventory_analytics(
     }
     
     for movement in recent_movements:
-        if movement.change > 0:
-            if movement.reason in ["Initial Stock", "New Stock", "Stock Transfer In", "Restock"]:
-                movement_summary["stock_in"] += float(movement.change)
-            elif movement.reason == "Stock Count":
-                movement_summary["adjustments"] += float(movement.change)
+        bucket = classify_movement(movement.reason, movement.change)
+        amount = float(abs(movement.change))
+        if bucket == "sales":
+            movement_summary["sales"] += amount
+        elif bucket == "adjustments":
+            movement_summary["adjustments"] += amount
+        elif bucket == "stock_in":
+            movement_summary["stock_in"] += amount
         else:
-            if movement.reason == "Sale":
-                movement_summary["sales"] += float(abs(movement.change))
-            else:
-                movement_summary["stock_out"] += float(abs(movement.change))
+            movement_summary["stock_out"] += amount
     
     return {
         "stock_by_location": list(stock_by_location.values()),
