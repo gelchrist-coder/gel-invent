@@ -105,7 +105,7 @@ class StockMovement(Base):
     )
 
     product: Mapped[Product] = relationship(back_populates="movements")
-    sale: Mapped["Sale" | None] = relationship()
+    sale: Mapped["Sale | None"] = relationship()
 
 
 class Sale(Base):
