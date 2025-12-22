@@ -187,8 +187,8 @@ export default function TopBar({
                 borderRadius: 12,
                 border: "1px solid #e6e9f2",
                 boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                minWidth: 200,
-                overflow: "hidden",
+                minWidth: 240,
+                padding: 8,
                 zIndex: 1000,
               }}
             >
@@ -200,24 +200,48 @@ export default function TopBar({
                   }}
                   style={{
                     width: "100%",
-                    padding: "12px 16px",
-                    background: "transparent",
-                    border: "none",
+                    padding: "10px 12px",
+                    background: "#fff5f5",
+                    border: "1px solid #fee2e2",
+                    borderRadius: 10,
                     textAlign: "left",
                     cursor: "pointer",
                     fontSize: 14,
-                    fontWeight: 500,
-                    color: "#ef4444",
+                    fontWeight: 600,
+                    color: "#b91c1c",
                     display: "flex",
                     alignItems: "center",
-                    gap: 8,
-                    transition: "background 0.2s",
+                    gap: 10,
+                    transition: "background 0.15s ease, border-color 0.15s ease",
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = "#fef2f2"}
-                  onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "#fee2e2";
+                    e.currentTarget.style.borderColor = "#fecaca";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "#fff5f5";
+                    e.currentTarget.style.borderColor = "#fee2e2";
+                  }}
                 >
-                  <span style={{ fontSize: 16 }}>🚪</span>
-                  Logout
+                  <span
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 999,
+                      background: "#fee2e2",
+                      border: "1px solid #fecaca",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 14,
+                      lineHeight: 1,
+                      flex: "0 0 auto",
+                    }}
+                    aria-hidden="true"
+                  >
+                    🚪
+                  </span>
+                  <span style={{ flex: 1 }}>Logout</span>
                 </button>
               )}
             </div>
