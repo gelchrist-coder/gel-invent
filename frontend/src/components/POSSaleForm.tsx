@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NewSale, Product } from "../types";
 import { useAppCategories } from "../categories";
 import { updateMyCategories } from "../api";
@@ -25,6 +25,11 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [notes, setNotes] = useState("");
 
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [clearArmed, setClearArmed] = useState(false);
+  const clearArmTimeoutRef = useRef<number | null>(null);
+  const [lastAdded, setLastAdded] = useState<{ productId: number; unit: 'piece' | 'pack' } | null>(null);
+
   const userCategories = useAppCategories();
 
   const [addingCategory, setAddingCategory] = useState(false);
@@ -35,6 +40,21 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const [creditorName, setCreditorName] = useState("");
   const [creditorPhone, setCreditorPhone] = useState("");
   const [initialPayment, setInitialPayment] = useState<number>(0);
+
+  useEffect(() => {
+    if (cart.length === 0) {
+      setCheckoutOpen(false);
+      setClearArmed(false);
+    }
+  }, [cart.length]);
+
+  useEffect(() => {
+    return () => {
+      if (clearArmTimeoutRef.current != null) {
+        window.clearTimeout(clearArmTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Get categories from user registration + existing products
   const categories = [
@@ -80,6 +100,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     
     if (existingItem) {
       // Increase quantity if already in cart
+      setLastAdded({ productId: product.id, unit });
       setCart(cart.map(item => 
         item.product.id === product.id && item.sellingUnit === unit
           ? { ...item, quantity: item.quantity + 1 }
@@ -87,6 +108,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
       ));
     } else {
       // Add new item
+      setLastAdded({ productId: product.id, unit });
       setCart([...cart, { product, quantity: 1, sellingUnit: unit }]);
     }
   };
@@ -140,6 +162,42 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     setCreditorName("");
     setCreditorPhone("");
     setInitialPayment(0);
+    setLastAdded(null);
+    setCheckoutOpen(false);
+    setClearArmed(false);
+  };
+
+  const armOrClearCart = () => {
+    if (!clearArmed) {
+      setClearArmed(true);
+      if (clearArmTimeoutRef.current != null) {
+        window.clearTimeout(clearArmTimeoutRef.current);
+      }
+      clearArmTimeoutRef.current = window.setTimeout(() => {
+        setClearArmed(false);
+        clearArmTimeoutRef.current = null;
+      }, 2500);
+      return;
+    }
+    clearCart();
+  };
+
+  const undoLastAdd = () => {
+    if (!lastAdded) return;
+    const match = cart.find(
+      (item) => item.product.id === lastAdded.productId && item.sellingUnit === lastAdded.unit,
+    );
+    if (!match) {
+      setLastAdded(null);
+      return;
+    }
+
+    if (match.quantity > 1) {
+      updateQuantity(match.product.id, match.sellingUnit, match.quantity - 1);
+    } else {
+      removeFromCart(match.product.id, match.sellingUnit);
+    }
+    setLastAdded(null);
   };
 
   // Calculate totals
@@ -497,23 +555,6 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <h3 style={{ margin: 0, fontSize: 18 }}>🛒 Cart ({totalItems} items)</h3>
-            {cart.length > 0 && (
-              <button
-                type="button"
-                onClick={clearCart}
-                style={{
-                  padding: "6px 12px",
-                  fontSize: 12,
-                  background: "#fee2e2",
-                  color: "#dc2626",
-                  border: "none",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                }}
-              >
-                Clear All
-              </button>
-            )}
           </div>
         </div>
 
@@ -643,111 +684,222 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
           )}
         </div>
 
-        {/* Checkout Form */}
+        {/* Sticky Summary / Checkout */}
         {cart.length > 0 && (
-          <form className="pos-checkout" onSubmit={handleSubmit} style={{
-            padding: 16,
-            borderTop: "2px solid #e5e7eb",
-            background: "white",
-            borderRadius: "0 0 12px 12px",
-          }}>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                Customer Name (Optional)
-              </label>
-              <input
-                type="text"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="Enter customer name"
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: "1px solid #d1d5db",
-                  borderRadius: 6,
-                  fontSize: 14,
-                }}
-              />
-            </div>
+          <div
+            style={{
+              borderTop: "2px solid #e5e7eb",
+              background: "white",
+              borderRadius: "0 0 12px 12px",
+              position: "sticky",
+              bottom: 0,
+              zIndex: 2,
+            }}
+          >
+            {!checkoutOpen ? (
+              <div style={{ padding: 12, display: "flex", gap: 10, alignItems: "center" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>
+                    Total ({totalItems} items)
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: "#059669" }}>
+                    GHS {cartTotal.toFixed(2)}
+                  </div>
+                </div>
 
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                Payment Method
-              </label>
-              <select
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
+                <button
+                  type="button"
+                  onClick={undoLastAdd}
+                  disabled={!lastAdded}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: "white",
+                    cursor: !lastAdded ? "not-allowed" : "pointer",
+                    opacity: !lastAdded ? 0.6 : 1,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#374151",
+                    whiteSpace: "nowrap",
+                  }}
+                  title="Undo last added item"
+                >
+                  Undo
+                </button>
+
+                <button
+                  type="button"
+                  onClick={armOrClearCart}
+                  style={{
+                    padding: "10px 12px",
+                    fontSize: 13,
+                    background: clearArmed ? "#dc2626" : "#fee2e2",
+                    color: clearArmed ? "white" : "#dc2626",
+                    border: "none",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    fontWeight: 800,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {clearArmed ? "Tap again" : "Clear"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCheckoutOpen(true)}
+                  style={{
+                    padding: "12px 14px",
+                    background: "linear-gradient(135deg, #10b981, #059669)",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 10,
+                    fontSize: 14,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Checkout
+                </button>
+              </div>
+            ) : (
+              <form
+                className="pos-checkout"
+                onSubmit={handleSubmit}
                 style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: "1px solid #d1d5db",
-                  borderRadius: 6,
-                  fontSize: 14,
+                  padding: 16,
                 }}
               >
-                {PAYMENT_METHODS.map(method => (
-                  <option key={method} value={method}>
-                    {method.charAt(0).toUpperCase() + method.slice(1)}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+                  <button
+                    type="button"
+                    onClick={() => setCheckoutOpen(false)}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "white",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "#374151",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ← Back
+                  </button>
 
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                Notes (Optional)
-              </label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Add notes..."
-                rows={2}
-                style={{
-                  width: "100%",
-                  padding: "8px 12px",
-                  border: "1px solid #d1d5db",
-                  borderRadius: 6,
-                  fontSize: 14,
-                  resize: "none",
-                }}
-              />
-            </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700 }}>Total</div>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: "#059669" }}>
+                      GHS {cartTotal.toFixed(2)}
+                    </div>
+                  </div>
 
-            {/* Total */}
-            <div style={{
-              padding: 12,
-              background: "#f0fdf4",
-              borderRadius: 8,
-              marginBottom: 12,
-              border: "2px solid #10b981",
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 16, fontWeight: 600 }}>Total:</span>
-                <span style={{ fontSize: 24, fontWeight: 700, color: "#059669" }}>
-                  GHS {cartTotal.toFixed(2)}
-                </span>
-              </div>
-            </div>
+                  <button
+                    type="button"
+                    onClick={armOrClearCart}
+                    style={{
+                      padding: "8px 10px",
+                      fontSize: 12,
+                      background: clearArmed ? "#dc2626" : "#fee2e2",
+                      color: clearArmed ? "white" : "#dc2626",
+                      border: "none",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontWeight: 800,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {clearArmed ? "Tap again" : "Clear"}
+                  </button>
+                </div>
 
-            {/* Submit Button */}
-            <button
-              type="submit"
-              style={{
-                width: "100%",
-                padding: 16,
-                background: "linear-gradient(135deg, #10b981, #059669)",
-                color: "white",
-                border: "none",
-                borderRadius: 8,
-                fontSize: 16,
-                fontWeight: 700,
-                cursor: "pointer",
-                boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
-              }}
-            >
-              💳 Complete Sale - GHS {cartTotal.toFixed(2)}
-            </button>
-          </form>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                    Payment Method
+                  </label>
+                  <select
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 8,
+                      fontSize: 14,
+                    }}
+                  >
+                    {PAYMENT_METHODS.map((method) => (
+                      <option key={method} value={method}>
+                        {method.charAt(0).toUpperCase() + method.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                    Customer Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder="Customer name (only needed for credit)"
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 8,
+                      fontSize: 14,
+                    }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                    Notes (Optional)
+                  </label>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Notes..."
+                    rows={2}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      resize: "none",
+                    }}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  style={{
+                    width: "100%",
+                    padding: 16,
+                    background: "linear-gradient(135deg, #10b981, #059669)",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 10,
+                    fontSize: 16,
+                    fontWeight: 900,
+                    cursor: "pointer",
+                    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
+                  }}
+                >
+                  💳 Complete Sale - GHS {cartTotal.toFixed(2)}
+                </button>
+              </form>
+            )}
+          </div>
         )}
       </div>
 
