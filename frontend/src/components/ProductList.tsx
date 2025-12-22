@@ -162,8 +162,8 @@ export default function ProductList({
   };
 
   const saveAdjustment = async (productId: number) => {
-    const qty = parseFloat(adjustment.quantity);
-    if (isNaN(qty) || qty === 0) {
+    const rawQty = parseFloat(adjustment.quantity);
+    if (isNaN(rawQty) || rawQty === 0) {
       alert("Please enter a valid quantity");
       return;
     }
@@ -172,18 +172,15 @@ export default function ProductList({
       return;
     }
 
-    // Quick client-side sign validation to match backend rules
-    if (adjustment.reason === "Restock" && qty < 0) {
-      alert("Restock must be a positive quantity");
-      return;
-    }
-    if (adjustment.reason === "Returned" && qty < 0) {
-      alert("Returned must be a positive quantity");
-      return;
-    }
-    if (["Expired", "Damaged", "Lost/Stolen", "Write-off"].includes(adjustment.reason) && qty > 0) {
-      alert(`${adjustment.reason} must be a negative quantity`);
-      return;
+    // Normalize sign based on reason so staff can enter a positive quantity.
+    const positiveReasons = new Set(["New Stock", "Restock", "Returned"]);
+    const negativeReasons = new Set(["Expired", "Damaged", "Lost/Stolen", "Write-off"]);
+
+    let qty = rawQty;
+    if (positiveReasons.has(adjustment.reason)) {
+      qty = Math.abs(rawQty);
+    } else if (negativeReasons.has(adjustment.reason)) {
+      qty = -Math.abs(rawQty);
     }
     if (adjustment.reason === "Returned" && !adjustment.returned_by.trim()) {
       alert("Please enter who returned the item");
@@ -191,11 +188,6 @@ export default function ProductList({
     }
     if (adjustment.reason === "New Stock" && !adjustment.expiry_date) {
       alert("Please set an expiry date for new stock");
-      return;
-    }
-
-    if (adjustment.reason === "New Stock" && qty < 0) {
-      alert("New Stock must be a positive quantity");
       return;
     }
 
@@ -543,7 +535,7 @@ export default function ProductList({
                   style={{ fontSize: 14, padding: 10 }}
                 />
                 <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
-                  Use + for adding stock, - for reducing stock
+                  Tip: For Damaged/Expired/Lost/Write-off just enter a quantity (we will deduct automatically).
                 </small>
               </label>
               <label>
