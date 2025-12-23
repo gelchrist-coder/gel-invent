@@ -48,6 +48,10 @@ async def on_startup() -> None:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
 
+            # Option B: per-batch pricing stored on stock movements (create_all won't add columns).
+            conn.execute(text("ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS unit_cost_price NUMERIC(10,2)"))
+            conn.execute(text("ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS unit_selling_price NUMERIC(10,2)"))
+
             # Email verification was removed. Clean up old schema objects if present.
             # Safe/idempotent for existing databases.
             conn.execute(text("DROP TABLE IF EXISTS pending_signups CASCADE"))
