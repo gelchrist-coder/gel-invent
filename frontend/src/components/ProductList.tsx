@@ -9,7 +9,15 @@ type Props = {
   onSelect: (id: number) => void;
   onEdit: (id: number, updates: Partial<Product>) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
-  onStockAdjust: (productId: number, change: number, reason: string, expiry_date?: string, location?: string) => Promise<void>;
+  onStockAdjust: (
+    productId: number,
+    change: number,
+    reason: string,
+    expiry_date?: string,
+    location?: string,
+    unit_cost_price?: number | null,
+    unit_selling_price?: number | null,
+  ) => Promise<void>;
   searchTerm: string;
   filterCategory: string;
   filterExpiry: string;
@@ -35,6 +43,9 @@ export default function ProductList({
     quantity: "",
     reason: "",
     expiry_date: "",
+    unit_type: "piece" as "piece" | "pack",
+    cost_price: "",
+    selling_price: "",
     location: "Main Store",
     returned_by: "",
   });
@@ -151,17 +162,39 @@ export default function ProductList({
     }
   };
 
-  const startAdjustment = (productId: number) => {
+  const startAdjustment = (productId: number, presetReason?: string) => {
+    const product = products.find((p) => p.id === productId);
     setAdjustingId(productId);
-    setAdjustment({ quantity: "", reason: "", expiry_date: "", location: "Main Store", returned_by: "" });
+    setAdjustment({
+      quantity: "",
+      reason: presetReason ?? "",
+      expiry_date: "",
+      unit_type: "piece",
+      cost_price: "",
+      selling_price: "",
+      location: "Main Store",
+      returned_by: "",
+    });
+
+    // Prefill cost/selling for stock-in using product defaults when available.
+    if (presetReason === "New Stock" || presetReason === "Restock") {
+      setAdjustment((prev) => ({
+        ...prev,
+        cost_price: product?.cost_price != null ? String(product.cost_price) : "",
+        selling_price: product?.selling_price != null ? String(product.selling_price) : "",
+      }));
+    }
   };
 
   const cancelAdjustment = () => {
     setAdjustingId(null);
-    setAdjustment({ quantity: "", reason: "", expiry_date: "", location: "Main Store", returned_by: "" });
+    setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: "Main Store", returned_by: "" });
   };
 
   const saveAdjustment = async (productId: number) => {
+    const product = products.find((p) => p.id === productId);
+    const packSize = product?.pack_size ?? null;
+
     const rawQty = parseFloat(adjustment.quantity);
     if (isNaN(rawQty) || rawQty === 0) {
       alert("Please enter a valid quantity");
@@ -181,6 +214,43 @@ export default function ProductList({
       qty = Math.abs(rawQty);
     } else if (negativeReasons.has(adjustment.reason)) {
       qty = -Math.abs(rawQty);
+    }
+
+    // Convert pack quantity into pieces for ledger accuracy.
+    // (We store all movement.change in pieces/units.)
+    const isStockIn = adjustment.reason === "New Stock" || adjustment.reason === "Restock";
+    let unitCostToSend: number | null = null;
+    let unitSellingToSend: number | null = null;
+
+    if (isStockIn && adjustment.unit_type === "pack") {
+      if (!packSize || packSize <= 0) {
+        alert("This product has no pack size. Set Pack Size on the product to stock by pack.");
+        return;
+      }
+      qty = qty * packSize;
+
+      const rawPackCost = parseFloat(adjustment.cost_price);
+      const rawPackSelling = parseFloat(adjustment.selling_price);
+
+      if (!isNaN(rawPackCost)) unitCostToSend = rawPackCost / packSize;
+      else if (product?.cost_price != null) unitCostToSend = Number(product.cost_price);
+      else if (product?.pack_cost_price != null) unitCostToSend = Number(product.pack_cost_price) / packSize;
+
+      if (!isNaN(rawPackSelling)) unitSellingToSend = rawPackSelling / packSize;
+      else if (product?.selling_price != null) unitSellingToSend = Number(product.selling_price);
+      else if (product?.pack_selling_price != null) unitSellingToSend = Number(product.pack_selling_price) / packSize;
+    } else if (isStockIn) {
+      // piece
+      const rawUnitCost = parseFloat(adjustment.cost_price);
+      const rawUnitSelling = parseFloat(adjustment.selling_price);
+
+      if (!isNaN(rawUnitCost)) unitCostToSend = rawUnitCost;
+      else if (product?.cost_price != null) unitCostToSend = Number(product.cost_price);
+      else if (product?.pack_cost_price != null && packSize && packSize > 0) unitCostToSend = Number(product.pack_cost_price) / packSize;
+
+      if (!isNaN(rawUnitSelling)) unitSellingToSend = rawUnitSelling;
+      else if (product?.selling_price != null) unitSellingToSend = Number(product.selling_price);
+      else if (product?.pack_selling_price != null && packSize && packSize > 0) unitSellingToSend = Number(product.pack_selling_price) / packSize;
     }
     if (adjustment.reason === "Returned" && !adjustment.returned_by.trim()) {
       alert("Please enter who returned the item");
@@ -204,9 +274,17 @@ export default function ProductList({
 
     setBusy(true);
     try {
-      await onStockAdjust(productId, qty, reasonToSend, adjustment.expiry_date || undefined, adjustment.location);
+      await onStockAdjust(
+        productId,
+        qty,
+        reasonToSend,
+        adjustment.expiry_date || undefined,
+        adjustment.location,
+        unitCostToSend,
+        unitSellingToSend,
+      );
       setAdjustingId(null);
-      setAdjustment({ quantity: "", reason: "", expiry_date: "", location: "Main Store", returned_by: "" });
+      setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: "Main Store", returned_by: "" });
       // Refresh stock data
       const movements = await fetchMovements(productId);
       const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
@@ -585,6 +663,60 @@ export default function ProductList({
                   </small>
                 </label>
               )}
+
+              {(adjustment.reason === "New Stock" || adjustment.reason === "Restock") && (
+                <label>
+                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                    Quantity Type
+                  </span>
+                  <select
+                    className="input"
+                    value={adjustment.unit_type}
+                    onChange={(e) => setAdjustment({ ...adjustment, unit_type: e.target.value as "piece" | "pack" })}
+                    style={{ fontSize: 14, padding: 10 }}
+                  >
+                    <option value="piece">Piece</option>
+                    <option value="pack">Pack</option>
+                  </select>
+                  <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
+                    Pack requires the product Pack Size to be set.
+                  </small>
+                </label>
+              )}
+
+              {(adjustment.reason === "New Stock" || adjustment.reason === "Restock") && (
+                <label>
+                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                    Cost Price ({adjustment.unit_type === "pack" ? "per pack" : "per piece"})
+                  </span>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={adjustment.cost_price}
+                    onChange={(e) => setAdjustment({ ...adjustment, cost_price: e.target.value })}
+                    placeholder="e.g., 12.50"
+                    style={{ fontSize: 14, padding: 10 }}
+                  />
+                </label>
+              )}
+
+              {(adjustment.reason === "New Stock" || adjustment.reason === "Restock") && (
+                <label>
+                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                    Selling Price ({adjustment.unit_type === "pack" ? "per pack" : "per piece"})
+                  </span>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    value={adjustment.selling_price}
+                    onChange={(e) => setAdjustment({ ...adjustment, selling_price: e.target.value })}
+                    placeholder="e.g., 15.00"
+                    style={{ fontSize: 14, padding: 10 }}
+                  />
+                </label>
+              )}
               <label>
                 <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                   Location/Warehouse
@@ -783,6 +915,23 @@ export default function ProductList({
                           ✏️ Edit
                           </button>
                         )}
+                        <button
+                          onClick={() => startAdjustment(p.id, "New Stock")}
+                          disabled={busy}
+                          style={{
+                            padding: "6px 12px",
+                            fontSize: 12,
+                            background: "#10b981",
+                            color: "white",
+                            border: "none",
+                            borderRadius: 6,
+                            cursor: busy ? "not-allowed" : "pointer",
+                            fontWeight: 500,
+                          }}
+                          title="New stock"
+                        >
+                          ➕ New Stock
+                        </button>
                         <button
                           onClick={() => startAdjustment(p.id)}
                           disabled={busy}

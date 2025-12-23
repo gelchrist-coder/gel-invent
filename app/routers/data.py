@@ -162,6 +162,8 @@ def export_data(
                 "reason": m.reason,
                 "batch_number": m.batch_number,
                 "expiry_date": _serialize_dt(m.expiry_date),
+                "unit_cost_price": _serialize_decimal(getattr(m, "unit_cost_price", None)),
+                "unit_selling_price": _serialize_decimal(getattr(m, "unit_selling_price", None)),
                 "location": m.location,
                 "created_at": _serialize_dt(m.created_at),
             }
@@ -173,6 +175,8 @@ def export_data(
                 "branch_id": s.branch_id,
                 "product_id": s.product_id,
                 "quantity": _serialize_decimal(s.quantity),
+                "sale_unit_type": getattr(s, "sale_unit_type", None),
+                "pack_quantity": getattr(s, "pack_quantity", None),
                 "unit_price": _serialize_decimal(s.unit_price),
                 "total_price": _serialize_decimal(s.total_price),
                 "customer_name": s.customer_name,
@@ -594,6 +598,8 @@ def import_data(
             reason=str(m.get("reason") or "adjustment"),
             batch_number=m.get("batch_number"),
             expiry_date=m.get("expiry_date"),
+            unit_cost_price=_as_decimal(m.get("unit_cost_price")) if m.get("unit_cost_price") is not None else None,
+            unit_selling_price=_as_decimal(m.get("unit_selling_price")) if m.get("unit_selling_price") is not None else None,
             location=m.get("location") or "Main Store",
         )
         db.add(movement)
@@ -621,6 +627,8 @@ def import_data(
             branch_id=new_branch_id,
             product_id=new_product_id,
             quantity=_as_decimal(s.get("quantity", 0)),
+            sale_unit_type=str(s.get("sale_unit_type") or "piece"),
+            pack_quantity=s.get("pack_quantity"),
             unit_price=_as_decimal(s.get("unit_price", 0)),
             total_price=_as_decimal(s.get("total_price", 0)),
             customer_name=s.get("customer_name"),

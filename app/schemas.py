@@ -38,6 +38,8 @@ class StockMovementBase(BaseModel):
     reason: str = Field(default="adjustment", max_length=255)
     batch_number: str | None = Field(default=None, max_length=100)
     expiry_date: date | None = Field(default=None)
+    unit_cost_price: Decimal | None = Field(default=None, decimal_places=2)
+    unit_selling_price: Decimal | None = Field(default=None, decimal_places=2)
     location: str | None = Field(default="Main Store", max_length=100)
 
 

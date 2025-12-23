@@ -119,6 +119,33 @@ def create_sale(
         )
     )
 
+    # Build a map of batch_number -> latest known unit_cost_price for stock-in movements.
+    batch_numbers = sorted({b.batch_number for b in available_batches if b.batch_number})
+    unit_cost_by_batch: dict[str, Decimal | None] = {}
+    if batch_numbers:
+        rows = db.execute(
+            select(
+                models.StockMovement.batch_number,
+                models.StockMovement.unit_cost_price,
+                models.StockMovement.created_at,
+            )
+            .where(
+                models.StockMovement.product_id == payload.product_id,
+                models.StockMovement.branch_id == active_branch_id,
+                models.StockMovement.user_id.in_(tenant_user_ids),
+                models.StockMovement.batch_number.in_(batch_numbers),
+                models.StockMovement.change > 0,
+            )
+            .order_by(models.StockMovement.batch_number.asc(), models.StockMovement.created_at.desc())
+        ).all()
+
+        for bn, unit_cost, _created_at in rows:
+            if bn is None:
+                continue
+            bn_str = str(bn)
+            if bn_str not in unit_cost_by_batch:
+                unit_cost_by_batch[bn_str] = unit_cost
+
     remaining = payload.quantity
     deducted_batches: list[dict[str, object]] = []
 
@@ -139,6 +166,8 @@ def create_sale(
                 reason="Sale",
                 batch_number=b.batch_number,
                 expiry_date=b.expiry_date,
+                unit_cost_price=unit_cost_by_batch.get(b.batch_number) if b.batch_number else (product.cost_price if product.cost_price is not None else None),
+                unit_selling_price=sale.unit_price,
                 location=b.location or "Main Store",
             )
         )
@@ -163,6 +192,8 @@ def create_sale(
                 sale_id=sale.id,
                 change=-remaining,
                 reason="Sale",
+                unit_cost_price=product.cost_price if product.cost_price is not None else None,
+                unit_selling_price=sale.unit_price,
                 location="Main Store",
             )
         )

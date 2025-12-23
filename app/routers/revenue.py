@@ -76,6 +76,37 @@ def get_revenue_analytics(
         Product.branch_id == active_branch_id,
     )
     sales = db.scalars(sales_query).all()
+
+    sale_ids = [s.id for s in sales]
+    cost_by_sale_id: dict[int, Decimal] = {}
+    if sale_ids:
+        cost_rows = db.execute(
+            select(
+                StockMovement.sale_id,
+                func.coalesce(
+                    func.sum(
+                        func.abs(StockMovement.change)
+                        * func.coalesce(StockMovement.unit_cost_price, Product.cost_price, 0)
+                    ),
+                    0,
+                ).label("cost"),
+            )
+            .select_from(StockMovement)
+            .join(Product, Product.id == StockMovement.product_id)
+            .where(
+                StockMovement.sale_id.in_(sale_ids),
+                StockMovement.reason == "Sale",
+                StockMovement.change < 0,
+                StockMovement.branch_id == active_branch_id,
+                Product.user_id.in_(tenant_user_ids),
+                Product.branch_id == active_branch_id,
+            )
+            .group_by(StockMovement.sale_id)
+        ).all()
+        for sid, cost in cost_rows:
+            if sid is None:
+                continue
+            cost_by_sale_id[int(sid)] = cost if isinstance(cost, Decimal) else Decimal(str(cost or 0))
     
     # Get losses/write-offs (stock movements with negative change for expired/damaged goods)
     loss_reasons = ["Expired", "Damaged", "Lost", "Lost/Stolen", "Write-off", "Spoiled", "Destroyed"]
@@ -130,8 +161,16 @@ def get_revenue_analytics(
             if not product:
                 continue
 
-            selling = Decimal(product.selling_price) if product.selling_price is not None else Decimal(0)
-            cost = Decimal(product.cost_price) if product.cost_price is not None else Decimal(0)
+            selling = (
+                Decimal(movement.unit_selling_price)
+                if getattr(movement, "unit_selling_price", None) is not None
+                else (Decimal(product.selling_price) if product.selling_price is not None else Decimal(0))
+            )
+            cost = (
+                Decimal(movement.unit_cost_price)
+                if getattr(movement, "unit_cost_price", None) is not None
+                else (Decimal(product.cost_price) if product.cost_price is not None else Decimal(0))
+            )
 
             revenue_value = movement.change * selling
             cost_value = movement.change * cost
@@ -160,17 +199,22 @@ def get_revenue_analytics(
         else:
             cash_revenue += sale.total_price
         
-        # Get product for cost calculation
-        product = db.scalar(select(Product).where(
-            Product.id == sale.product_id,
-            Product.user_id.in_(tenant_user_ids),
-            Product.branch_id == active_branch_id,
-        ))
-        if product and product.cost_price:
-            cost = product.cost_price * sale.quantity
-            profit = sale.total_price - cost
-            total_cost += cost
-            total_profit += profit
+        # Get product for naming/sku and fallback prices
+        product = db.scalar(
+            select(Product).where(
+                Product.id == sale.product_id,
+                Product.user_id.in_(tenant_user_ids),
+                Product.branch_id == active_branch_id,
+            )
+        )
+
+        cost = cost_by_sale_id.get(sale.id)
+        if cost is None:
+            fallback_cost = Decimal(product.cost_price) if (product and product.cost_price is not None) else Decimal(0)
+            cost = fallback_cost * sale.quantity
+        profit = sale.total_price - cost
+        total_cost += cost
+        total_profit += profit
         
         # Payment method breakdown
         payment_methods[sale.payment_method] = payment_methods.get(sale.payment_method, Decimal(0)) + sale.total_price
@@ -189,9 +233,8 @@ def get_revenue_analytics(
             }
         product_revenue[product_name]["quantity_sold"] += sale.quantity
         product_revenue[product_name]["revenue"] += sale.total_price
-        if product and product.cost_price:
-            product_revenue[product_name]["cost"] += product.cost_price * sale.quantity
-            product_revenue[product_name]["profit"] += sale.total_price - (product.cost_price * sale.quantity)
+        product_revenue[product_name]["cost"] += cost
+        product_revenue[product_name]["profit"] += sale.total_price - cost
         
         # Daily revenue
         day_key = sale.created_at.strftime("%Y-%m-%d")
@@ -239,9 +282,13 @@ def get_revenue_analytics(
             Product.user_id.in_(tenant_user_ids),
             Product.branch_id == active_branch_id,
         ))
-        if product and product.cost_price:
-            loss_value = abs(loss.change) * product.cost_price
-            total_losses += loss_value
+        unit_cost = (
+            Decimal(loss.unit_cost_price)
+            if getattr(loss, "unit_cost_price", None) is not None
+            else (Decimal(product.cost_price) if (product and product.cost_price is not None) else Decimal(0))
+        )
+        loss_value = abs(loss.change) * unit_cost
+        total_losses += loss_value
     
     # Calculate actual profit (profit - losses)
     actual_profit = total_profit - total_losses

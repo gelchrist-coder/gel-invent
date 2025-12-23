@@ -99,6 +99,9 @@ class StockMovement(Base):
     reason: Mapped[str] = mapped_column(String(255), default="adjustment")
     batch_number: Mapped[str | None] = mapped_column(String(100), default=None)
     expiry_date: Mapped[datetime | None] = mapped_column(Date, default=None)
+    # Per-batch pricing (stored per piece/unit). Useful for FIFO costing (Option B).
+    unit_cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    unit_selling_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     location: Mapped[str | None] = mapped_column(String(100), default="Main Store")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

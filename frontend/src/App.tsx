@@ -274,8 +274,23 @@ export default function App() {
     }
   };
 
-  const handleStockAdjustment = async (productId: number, change: number, reason: string, expiry_date?: string, location?: string) => {
-    await createMovement(productId, { change, reason, expiry_date: expiry_date || null, location: location || null });
+  const handleStockAdjustment = async (
+    productId: number,
+    change: number,
+    reason: string,
+    expiry_date?: string,
+    location?: string,
+    unit_cost_price?: number | null,
+    unit_selling_price?: number | null,
+  ) => {
+    await createMovement(productId, {
+      change,
+      reason,
+      expiry_date: expiry_date || null,
+      location: location || null,
+      unit_cost_price: unit_cost_price ?? null,
+      unit_selling_price: unit_selling_price ?? null,
+    });
   };
 
   const renderView = () => {

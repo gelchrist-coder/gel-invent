@@ -124,6 +124,23 @@ def writeoff_expired_batches(
         bal = balance if isinstance(balance, Decimal) else Decimal(str(balance or 0))
         if bal <= 0:
             continue
+
+        # Try to copy the latest known unit cost for this batch (from stock-in movements).
+        unit_cost_price = None
+        try:
+            unit_cost_price = db.scalar(
+                select(models.StockMovement.unit_cost_price)
+                .where(
+                    models.StockMovement.product_id == int(pid),
+                    models.StockMovement.branch_id == branch_id,
+                    models.StockMovement.user_id.in_(tenant_user_ids),
+                    models.StockMovement.batch_number == str(batch_number),
+                    models.StockMovement.change > 0,
+                )
+                .order_by(models.StockMovement.created_at.desc())
+            )
+        except Exception:
+            unit_cost_price = None
         db.add(
             models.StockMovement(
                 user_id=actor_user_id,
@@ -133,6 +150,7 @@ def writeoff_expired_batches(
                 reason="Expired",
                 batch_number=str(batch_number),
                 expiry_date=expiry_dt,
+                unit_cost_price=unit_cost_price,
                 location=location or "Main Store",
             )
         )

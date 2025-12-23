@@ -24,6 +24,8 @@ export type StockMovement = {
   reason: string;
   batch_number?: string | null;
   expiry_date?: string | null;
+  unit_cost_price?: number | null;
+  unit_selling_price?: number | null;
   location?: string | null;
   created_at: string;
 };
@@ -49,6 +51,8 @@ export type NewMovement = {
   reason?: string;
   batch_number?: string | null;
   expiry_date?: string | null;
+  unit_cost_price?: number | null;
+  unit_selling_price?: number | null;
   location?: string | null;
 };
 

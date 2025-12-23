@@ -101,9 +101,58 @@ def get_inventory_analytics(
             loc = movement.location or "Main Store"
             location_stock[loc] = location_stock.get(loc, Decimal(0)) + movement.change
         
-        # Stock value
-        if product.cost_price and total_stock > 0:
-            total_stock_value += product.cost_price * total_stock
+        # Stock value (prefer per-batch unit cost; fallback to product cost)
+        if total_stock > 0:
+            product_cost = Decimal(product.cost_price) if product.cost_price is not None else None
+            balances = get_batch_balances(
+                db=db,
+                tenant_user_ids=tenant_user_ids,
+                branch_id=active_branch_id,
+                product_id=product.id,
+                include_null_expiry=True,
+            )
+            tracked_total = sum((b.balance for b in balances), Decimal(0))
+
+            batch_numbers = sorted({b.batch_number for b in balances if b.batch_number})
+            unit_cost_by_batch: dict[str, Decimal | None] = {}
+            if batch_numbers:
+                rows = db.execute(
+                    select(
+                        StockMovement.batch_number,
+                        StockMovement.unit_cost_price,
+                        StockMovement.created_at,
+                    )
+                    .where(
+                        StockMovement.product_id == product.id,
+                        StockMovement.branch_id == active_branch_id,
+                        StockMovement.user_id.in_(tenant_user_ids),
+                        StockMovement.batch_number.in_(batch_numbers),
+                        StockMovement.change > 0,
+                    )
+                    .order_by(StockMovement.batch_number.asc(), StockMovement.created_at.desc())
+                ).all()
+                for bn, unit_cost, _created_at in rows:
+                    if bn is None:
+                        continue
+                    bn_str = str(bn)
+                    if bn_str not in unit_cost_by_batch:
+                        unit_cost_by_batch[bn_str] = unit_cost
+
+            value = Decimal(0)
+            for b in balances:
+                if b.balance <= 0:
+                    continue
+                unit_cost = unit_cost_by_batch.get(b.batch_number)
+                if unit_cost is None:
+                    unit_cost = product_cost
+                if unit_cost is None:
+                    continue
+                value += b.balance * Decimal(unit_cost)
+
+            untracked = total_stock - tracked_total
+            if untracked > 0 and product_cost is not None:
+                value += untracked * product_cost
+            total_stock_value += value
         
         # Low stock check
         if total_stock < low_stock_threshold:
