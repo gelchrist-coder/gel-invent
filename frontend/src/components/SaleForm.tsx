@@ -144,6 +144,16 @@ export default function SaleForm({ products, onSubmit, onCancel }: SaleFormProps
       ? Number(packQuantity) * (product.pack_size || 1)
       : Number(form.quantity);
 
+    const availablePieces = Math.max(0, Number(product.current_stock ?? 0));
+    if (availablePieces <= 0) {
+      alert("Out of stock");
+      return;
+    }
+    if (quantity > availablePieces) {
+      alert(`Not enough stock. Available: ${availablePieces}`);
+      return;
+    }
+
     const sale: NewSale = {
       product_id: form.product_id,
       quantity,

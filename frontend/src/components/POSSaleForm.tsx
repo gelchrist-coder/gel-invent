@@ -76,7 +76,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
 
   // Add product to cart
   const addToCart = (product: Product, unit: 'piece' | 'pack' = 'piece') => {
-    const availablePieces = Number(product.current_stock ?? 0);
+    const availablePieces = Math.max(0, Number(product.current_stock ?? 0));
     if (availablePieces <= 0) {
       alert("Out of stock");
       return;
@@ -121,7 +121,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     }
 
     const product = products.find((p) => p.id === productId);
-    const availablePieces = Number(product?.current_stock ?? 0);
+    const availablePieces = Math.max(0, Number(product?.current_stock ?? 0));
     if (availablePieces <= 0) {
       alert("Out of stock");
       removeFromCart(productId, unit);
@@ -222,7 +222,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     // Validate stock before checkout
     const byProduct = new Map<number, { requiredPieces: number; availablePieces: number }>();
     for (const item of cart) {
-      const availablePieces = Number(item.product.current_stock ?? 0);
+      const availablePieces = Math.max(0, Number(item.product.current_stock ?? 0));
       const pieceQuantity = item.sellingUnit === 'pack'
         ? item.quantity * (item.product.pack_size || 1)
         : item.quantity;

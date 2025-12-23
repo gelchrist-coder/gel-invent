@@ -144,7 +144,8 @@ def list_products(
     for product in products:
         creator = db.query(models.User).filter(models.User.id == product.user_id).first()
         product.created_by_name = creator.name if creator else None
-        product.current_stock = stocks.get(product.id, Decimal(0))
+        raw_stock = stocks.get(product.id, Decimal(0))
+        product.current_stock = raw_stock if raw_stock > 0 else Decimal(0)
     
     return products
 
@@ -184,7 +185,8 @@ def get_product(
         models.StockMovement.user_id.in_(tenant_user_ids),
         models.StockMovement.branch_id == active_branch_id,
     ).scalar()
-    product.current_stock = stock_total if isinstance(stock_total, Decimal) else Decimal(str(stock_total or 0))
+    raw_stock = stock_total if isinstance(stock_total, Decimal) else Decimal(str(stock_total or 0))
+    product.current_stock = raw_stock if raw_stock > 0 else Decimal(0)
     
     return product
 

@@ -110,12 +110,12 @@ export default function Dashboard({ onNavigate }: Props) {
 
   // Stock alerts - will be based on real stock movements when implemented
   const lowStockItems: LowStockItem[] = products
-    .filter((p) => (p.current_stock ?? 0) < lowStockThreshold)
+    .filter((p) => Math.max(0, Number(p.current_stock ?? 0)) < lowStockThreshold)
     .map((p) => ({
       id: p.id,
       name: p.name,
       sku: p.sku,
-      currentStock: p.current_stock ?? 0,
+      currentStock: Math.max(0, Number(p.current_stock ?? 0)),
       minStock: lowStockThreshold,
     }));
 

@@ -209,12 +209,19 @@ def get_inventory_status(
      .group_by(Product.id)
     
     products = db.execute(products_query).all()
+
+    def clamp_stock(value: object) -> float:
+        try:
+            n = float(value)  # type: ignore[arg-type]
+        except Exception:
+            return 0.0
+        return n if n > 0 else 0.0
     
     # Calculate metrics
     total_products = len(products)
     low_stock_threshold = settings.low_stock_threshold
-    low_stock_items = [p for p in products if float(p.current_stock) < low_stock_threshold]
-    out_of_stock = [p for p in products if float(p.current_stock) <= 0]
+    low_stock_items = [p for p in products if clamp_stock(p.current_stock) < float(low_stock_threshold)]
+    out_of_stock = [p for p in products if clamp_stock(p.current_stock) <= 0]
     
     # Items expiring soon (within expiry warning window)
     expiring_soon = []
@@ -222,16 +229,16 @@ def get_inventory_status(
         warning_end = datetime.now().date() + timedelta(days=settings.expiry_warning_days)
         expiring_soon = [
             p for p in products 
-            if p.expiry_date and p.expiry_date <= warning_end and float(p.current_stock) > 0
+            if p.expiry_date and p.expiry_date <= warning_end and clamp_stock(p.current_stock) > 0
         ]
     
     # Calculate total stock value
     total_cost_value = sum(
-        float(p.current_stock) * float(p.cost_price or 0) 
+        clamp_stock(p.current_stock) * float(p.cost_price or 0) 
         for p in products
     )
     total_selling_value = sum(
-        float(p.current_stock) * float(p.selling_price or 0) 
+        clamp_stock(p.current_stock) * float(p.selling_price or 0) 
         for p in products
     )
     
@@ -242,7 +249,7 @@ def get_inventory_status(
         if cat not in category_stock:
             category_stock[cat] = {"count": 0, "total_stock": 0}
         category_stock[cat]["count"] += 1
-        category_stock[cat]["total_stock"] += float(p.current_stock)
+        category_stock[cat]["total_stock"] += clamp_stock(p.current_stock)
     
     return {
         "summary": {
@@ -259,7 +266,7 @@ def get_inventory_status(
                 "id": p.id,
                 "sku": p.sku,
                 "name": p.name,
-                "current_stock": float(p.current_stock),
+                "current_stock": clamp_stock(p.current_stock),
                 "unit": p.unit
             }
             for p in low_stock_items[:20]
@@ -278,7 +285,7 @@ def get_inventory_status(
                 "id": p.id,
                 "sku": p.sku,
                 "name": p.name,
-                "current_stock": float(p.current_stock),
+                "current_stock": clamp_stock(p.current_stock),
                 "expiry_date": p.expiry_date.isoformat(),
                 "days_until_expiry": (p.expiry_date - datetime.now().date()).days
             }

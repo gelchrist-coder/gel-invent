@@ -92,7 +92,8 @@ def get_inventory_analytics(
         ).all()
         
         # Calculate total stock
-        total_stock = sum(m.change for m in movements)
+        total_stock_raw = sum(m.change for m in movements)
+        total_stock = total_stock_raw if total_stock_raw > 0 else Decimal(0)
         
         # Calculate stock by location
         location_stock = {}
@@ -162,6 +163,13 @@ def get_inventory_analytics(
             stock_by_location[loc]["total_units"] += float(qty)
             if product.cost_price:
                 stock_by_location[loc]["value"] += float(product.cost_price * qty)
+
+    # Do not expose negative totals in UI-facing analytics.
+    for item in stock_by_location.values():
+        if item["total_units"] < 0:
+            item["total_units"] = 0
+        if item["value"] < 0:
+            item["value"] = 0
     
     # Movement summary (last 30 days)
     thirty_days_ago = datetime.now() - timedelta(days=30)

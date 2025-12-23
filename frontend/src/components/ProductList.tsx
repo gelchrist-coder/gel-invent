@@ -54,7 +54,7 @@ export default function ProductList({
         try {
           const movements = await fetchMovements(product.id);
           const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
-          stockMap[product.id] = totalStock;
+          stockMap[product.id] = Math.max(0, totalStock);
 
           for (const m of movements) {
             if (m.location) locations.add(String(m.location));
@@ -210,7 +210,7 @@ export default function ProductList({
       // Refresh stock data
       const movements = await fetchMovements(productId);
       const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
-      setStockData(prev => ({ ...prev, [productId]: totalStock }));
+      setStockData(prev => ({ ...prev, [productId]: Math.max(0, totalStock) }));
     } catch (err) {
       alert((err as Error).message || "Failed to adjust stock");
     } finally {
