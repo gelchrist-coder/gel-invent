@@ -50,7 +50,10 @@ function buildAuthHeaders(extra?: Record<string, string>): Record<string, string
   const activeBranchId = localStorage.getItem("activeBranchId");
   const headers: Record<string, string> = { ...(extra ?? {}) };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  if (activeBranchId) headers["X-Branch-Id"] = activeBranchId;
+  if (activeBranchId) {
+    const parsed = Number.parseInt(activeBranchId, 10);
+    if (Number.isFinite(parsed) && parsed > 0) headers["X-Branch-Id"] = String(parsed);
+  }
   return headers;
 }
 
@@ -67,7 +70,8 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   if (activeBranchId) {
-    headers["X-Branch-Id"] = activeBranchId;
+    const parsed = Number.parseInt(activeBranchId, 10);
+    if (Number.isFinite(parsed) && parsed > 0) headers["X-Branch-Id"] = String(parsed);
   }
   
   const response = await fetch(`${API_BASE}${path}`, {
