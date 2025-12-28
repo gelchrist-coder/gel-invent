@@ -208,20 +208,25 @@ def create_sale(
         remaining = Decimal(0)
 
     # Handle credit transactions
+    #
+    # IMPORTANT:
+    # - Full credit: entire amount is debt.
+    # - Partial: only the unpaid portion is recorded as debt (no separate "initial payment"
+    #   CreditTransaction should be created; otherwise we would subtract the upfront payment twice).
     credit_amount = Decimal(0)
-    
+
     if payload.payment_method == "credit":
         # Full credit - entire amount goes to creditor
         credit_amount = payload.total_price
     elif payload.payment_method == "partial" and payload.amount_paid:
         # Partial payment - only unpaid portion goes to creditor
         credit_amount = payload.total_price - payload.amount_paid
-        
+
         # Validate partial payment
         if credit_amount <= 0:
             raise HTTPException(
-                status_code=400, 
-                detail="Amount paid should be less than total price for partial payments"
+                status_code=400,
+                detail="Amount paid should be less than total price for partial payments",
             )
     
     # Create creditor transaction if there's credit involved
@@ -282,8 +287,10 @@ def create_sale(
         )
         db.add(credit_transaction)
         
-        # Create payment transaction if there's an initial payment
-        if payload.amount_paid and payload.amount_paid > 0:
+        # Create payment transaction only for "credit" sales.
+        # For "partial" sales, the upfront payment is NOT part of the creditor ledger;
+        # the debt transaction already represents only the unpaid portion.
+        if payload.payment_method == "credit" and payload.amount_paid and payload.amount_paid > 0:
             creditor.total_debt -= payload.amount_paid
             payment_transaction = models.CreditTransaction(
                 user_id=current_user.id,
