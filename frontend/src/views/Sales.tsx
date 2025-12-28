@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
 import { fetchSales, createSale, createSaleForBranch, deleteSale, fetchProducts } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
@@ -24,6 +24,7 @@ export default function Sales() {
   const [confirming, setConfirming] = useState(false);
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [outboxCount, setOutboxCount] = useState<number>(() => getSalesOutboxCount());
+  const receiptWindowRef = useRef<Window | null>(null);
 
   // Get user and business info for receipt
   const currentUser = localStorage.getItem("user");
@@ -153,11 +154,24 @@ export default function Sales() {
     setSaleConfirmed(false);
   };
 
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (!event?.data) return;
+      if (event.data !== "receipt:printed") return;
+      if (receiptWindowRef.current && event.source !== receiptWindowRef.current) return;
+      handleDone();
+    };
+
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
   const printReceipt = () => {
     if (pendingSales.length === 0) return;
 
     const receiptWindow = window.open('', '_blank');
     if (!receiptWindow) return;
+    receiptWindowRef.current = receiptWindow;
 
     // Calculate totals
     const total = pendingSales.reduce((sum, sale) => sum + sale.total_price, 0);
@@ -290,9 +304,60 @@ export default function Sales() {
 
         <script>
           window.onload = function() {
+            function safeClose() {
+              try {
+                window.close();
+              } catch (e) {
+                // ignore
+              }
+            }
+
+            var printed = false;
+            function notifyPrintedAndClose() {
+              if (printed) return;
+              printed = true;
+              try {
+                if (window.opener && typeof window.opener.postMessage === 'function') {
+                  window.opener.postMessage('receipt:printed', '*');
+                }
+              } catch (e) {
+                // ignore
+              }
+              safeClose();
+            }
+
+            // Close the receipt window after the print dialog completes
+            window.onafterprint = notifyPrintedAndClose;
+            try {
+              window.addEventListener('afterprint', notifyPrintedAndClose);
+            } catch (e) {
+              // ignore
+            }
+
+            // Some browsers fire matchMedia print events more reliably than afterprint
+            try {
+              var mql = window.matchMedia('print');
+              if (mql && typeof mql.addEventListener === 'function') {
+                mql.addEventListener('change', function (e) {
+                  if (!e.matches) notifyPrintedAndClose();
+                });
+              } else if (mql && typeof mql.addListener === 'function') {
+                mql.addListener(function (e) {
+                  if (!e.matches) notifyPrintedAndClose();
+                });
+              }
+            } catch (e) {
+              // ignore
+            }
+
             setTimeout(function() {
               window.print();
             }, 250);
+
+            // Fallback: if print events don't fire, don't leave the tab open.
+            setTimeout(function() {
+              if (!printed) safeClose();
+            }, 15000);
           };
         </script>
       </body>
