@@ -24,10 +24,13 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const [customerName, setCustomerName] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [notes, setNotes] = useState("");
+  const [uiMessage, setUiMessage] = useState<{ type: "error" | "info"; text: string } | null>(null);
 
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [clearArmed, setClearArmed] = useState(false);
   const clearArmTimeoutRef = useRef<number | null>(null);
+  const messageTimeoutRef = useRef<number | null>(null);
+  const customerInputRef = useRef<HTMLInputElement | null>(null);
   const [lastAdded, setLastAdded] = useState<{ productId: number; unit: 'piece' | 'pack' } | null>(null);
 
   const userCategories = useAppCategories();
@@ -53,8 +56,22 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
       if (clearArmTimeoutRef.current != null) {
         window.clearTimeout(clearArmTimeoutRef.current);
       }
+      if (messageTimeoutRef.current != null) {
+        window.clearTimeout(messageTimeoutRef.current);
+      }
     };
   }, []);
+
+  const showMessage = (text: string, type: "error" | "info" = "error") => {
+    setUiMessage({ type, text });
+    if (messageTimeoutRef.current != null) {
+      window.clearTimeout(messageTimeoutRef.current);
+    }
+    messageTimeoutRef.current = window.setTimeout(() => {
+      setUiMessage(null);
+      messageTimeoutRef.current = null;
+    }, 3500);
+  };
 
   // Get categories from user registration + existing products
   const categories = [
@@ -78,7 +95,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const addToCart = (product: Product, unit: 'piece' | 'pack' = 'piece') => {
     const availablePieces = Math.max(0, Number(product.current_stock ?? 0));
     if (availablePieces <= 0) {
-      alert("Out of stock");
+      showMessage("Out of stock");
       return;
     }
 
@@ -94,7 +111,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
 
     const addPieceQty = unit === 'pack' ? (product.pack_size || 1) : 1;
     if (cartPiecesForProduct + addPieceQty > availablePieces) {
-      alert(`Not enough stock. Available: ${availablePieces}`);
+      showMessage(`Not enough stock. Available: ${availablePieces}`);
       return;
     }
     
@@ -123,7 +140,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     const product = products.find((p) => p.id === productId);
     const availablePieces = Math.max(0, Number(product?.current_stock ?? 0));
     if (availablePieces <= 0) {
-      alert("Out of stock");
+      showMessage("Out of stock");
       removeFromCart(productId, unit);
       return;
     }
@@ -138,7 +155,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     }, 0);
 
     if (nextPiecesForProduct > availablePieces) {
-      alert(`Not enough stock. Available: ${availablePieces}`);
+      showMessage(`Not enough stock. Available: ${availablePieces}`);
       return;
     }
     setCart(cart.map(item => 
@@ -215,7 +232,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     e.preventDefault();
 
     if (cart.length === 0) {
-      alert("Please add items to cart");
+      showMessage("Please add items to cart");
       return;
     }
 
@@ -237,7 +254,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
       if (v.requiredPieces > v.availablePieces) {
         const p = products.find((x) => x.id === productId);
         const name = p?.name || "This product";
-        alert(`${name}: not enough stock (available ${v.availablePieces})`);
+        showMessage(`${name}: not enough stock (available ${v.availablePieces})`);
         return;
       }
     }
@@ -245,7 +262,8 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     // If credit payment, validate customer name and show credit modal
     if (paymentMethod === "credit") {
       if (!customerName.trim()) {
-        alert("Please enter customer name for credit sale");
+        showMessage("Customer name is required for credit sale");
+        customerInputRef.current?.focus();
         return;
       }
       setCreditorName(customerName); // Use customer name as creditor name
@@ -294,12 +312,12 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
 
   const handleCreditSubmit = () => {
     if (!creditorPhone.trim()) {
-      alert("Please enter creditor phone number");
+      showMessage("Please enter customer phone number");
       return;
     }
 
     if (initialPayment < 0 || initialPayment > cartTotal) {
-      alert(`Initial payment must be between 0 and GHS ${cartTotal.toFixed(2)}`);
+      showMessage(`Initial payment must be between 0 and GHS ${cartTotal.toFixed(2)}`);
       return;
     }
 
@@ -464,6 +482,10 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
               <div style={{ fontSize: 12, color: "#6b7280" }}>
                 {product.sku}
               </div>
+
+              <div style={{ fontSize: 12, color: Number(product.current_stock ?? 0) <= 0 ? "#b91c1c" : "#6b7280" }}>
+                Stock: {Math.max(0, Number(product.current_stock ?? 0))}
+              </div>
               
               {/* Price buttons */}
               <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
@@ -482,17 +504,6 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                     fontSize: 13,
                     fontWeight: 600,
                     color: "#059669",
-                    transition: "all 0.2s",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (Number(product.current_stock ?? 0) <= 0) return;
-                    e.currentTarget.style.background = "#10b981";
-                    e.currentTarget.style.color = "white";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (Number(product.current_stock ?? 0) <= 0) return;
-                    e.currentTarget.style.background = "linear-gradient(135deg, #ecfdf5, #d1fae5)";
-                    e.currentTarget.style.color = "#059669";
                   }}
                 >
                   <div>{product.unit || 'Piece'}</div>
@@ -517,17 +528,6 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                       fontSize: 13,
                       fontWeight: 600,
                       color: "#2563eb",
-                      transition: "all 0.2s",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (Number(product.current_stock ?? 0) <= 0) return;
-                      e.currentTarget.style.background = "#3b82f6";
-                      e.currentTarget.style.color = "white";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (Number(product.current_stock ?? 0) <= 0) return;
-                      e.currentTarget.style.background = "linear-gradient(135deg, #eff6ff, #dbeafe)";
-                      e.currentTarget.style.color = "#2563eb";
                     }}
                   >
                     <div>Pack ({product.pack_size})</div>
@@ -562,6 +562,24 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
 
         {/* Cart Items */}
         <div className="pos-cart-items" style={{ overflowY: "auto", padding: 12 }}>
+          {uiMessage && (
+            <div
+              style={{
+                marginBottom: 10,
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: uiMessage.type === "error" ? "1px solid #fecaca" : "1px solid #bae6fd",
+                background: uiMessage.type === "error" ? "#fef2f2" : "#eff6ff",
+                color: uiMessage.type === "error" ? "#b91c1c" : "#1d4ed8",
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+              role={uiMessage.type === "error" ? "alert" : "status"}
+            >
+              {uiMessage.text}
+            </div>
+          )}
+
           {cart.length === 0 ? (
             <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>🛍️</div>
@@ -851,7 +869,8 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                     type="text"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Customer name (only needed for credit)"
+                    placeholder="Customer name"
+                    ref={customerInputRef}
                     style={{
                       width: "100%",
                       padding: "10px 12px",
@@ -860,6 +879,11 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                       fontSize: 14,
                     }}
                   />
+                  {paymentMethod === "credit" ? (
+                    <div style={{ marginTop: 6, fontSize: 12, color: "#b45309", fontWeight: 600 }}>
+                      Required for credit sales
+                    </div>
+                  ) : null}
                 </div>
 
                 <div style={{ marginBottom: 14 }}>
