@@ -65,6 +65,8 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
     }).format(amount);
   };
 
+  const outstandingFor = (amount: number) => Math.max(0, amount);
+
   if (loading) {
     return (
       <div style={{ padding: 40, textAlign: "center" }}>
@@ -124,7 +126,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
         <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
           <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Total Outstanding</p>
           <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: "#ef4444" }}>
-            {formatCurrency(creditors.reduce((sum, c) => sum + c.actual_debt, 0))}
+            {formatCurrency(creditors.reduce((sum, c) => sum + outstandingFor(c.actual_debt), 0))}
           </p>
         </div>
       </div>
@@ -200,7 +202,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
                         color: creditor.actual_debt > 0 ? "#ef4444" : "#10b981",
                       }}
                     >
-                      {formatCurrency(creditor.actual_debt)}
+                      {formatCurrency(outstandingFor(creditor.actual_debt))}
                     </p>
                   </td>
                   <td style={{ padding: "12px 16px", textAlign: "center" }}>

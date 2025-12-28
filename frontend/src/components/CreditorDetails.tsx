@@ -88,6 +88,9 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
     .reduce((sum, t) => sum + t.amount, 0);
   const actualDebt = totalDebt - totalPayments;
 
+  const outstanding = Math.max(0, actualDebt);
+  const creditBalance = Math.max(0, -actualDebt);
+
   return (
     <div
       style={{
@@ -160,10 +163,12 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
               {formatCurrency(totalPayments)}
             </p>
           </div>
-          <div style={{ backgroundColor: actualDebt > 0 ? "#fef3c7" : "#e0e7ff", borderRadius: 8, padding: 16 }}>
-            <p style={{ margin: 0, fontSize: 13, color: actualDebt > 0 ? "#92400e" : "#3730a3" }}>Outstanding</p>
-            <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: actualDebt > 0 ? "#f59e0b" : "#6366f1" }}>
-              {formatCurrency(actualDebt)}
+          <div style={{ backgroundColor: actualDebt >= 0 ? "#fef3c7" : "#e0e7ff", borderRadius: 8, padding: 16 }}>
+            <p style={{ margin: 0, fontSize: 13, color: actualDebt >= 0 ? "#92400e" : "#3730a3" }}>
+              {actualDebt >= 0 ? "Outstanding" : "Credit Balance"}
+            </p>
+            <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: actualDebt >= 0 ? "#f59e0b" : "#6366f1" }}>
+              {formatCurrency(actualDebt >= 0 ? outstanding : creditBalance)}
             </p>
           </div>
         </div>
