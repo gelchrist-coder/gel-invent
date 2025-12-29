@@ -68,3 +68,46 @@ def create_branch(
     db.commit()
     db.refresh(branch)
     return branch
+
+
+class BranchUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+@router.put("/{branch_id}", response_model=BranchRead)
+def update_branch(
+    branch_id: int,
+    payload: BranchUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Only Admin can update branches")
+
+    owner_user_id = get_owner_user_id(current_user)
+
+    branch = (
+        db.query(models.Branch)
+        .filter(models.Branch.id == branch_id, models.Branch.owner_user_id == owner_user_id)
+        .first()
+    )
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    # Check if name already exists (excluding current branch)
+    existing = (
+        db.query(models.Branch)
+        .filter(
+            models.Branch.owner_user_id == owner_user_id,
+            models.Branch.name == payload.name,
+            models.Branch.id != branch_id,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Branch name already exists")
+
+    branch.name = payload.name
+    db.commit()
+    db.refresh(branch)
+    return branch

@@ -233,6 +233,13 @@ export async function createBranch(payload: { name: string }): Promise<Branch> {
   });
 }
 
+export async function updateBranch(branchId: number, payload: { name: string }): Promise<Branch> {
+  return jsonRequest<Branch>(`/branches/${branchId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchMe(): Promise<AuthUser> {
   return jsonRequest<AuthUser>("/auth/me");
 }

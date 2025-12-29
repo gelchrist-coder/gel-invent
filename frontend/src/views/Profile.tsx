@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, exportData, exportDataXlsx, fetchSystemSettings, importData, updateSystemSettings } from "../api";
+import { changePassword, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
+import { Branch } from "../types";
 
 type PasswordInputProps = {
   label: string;
@@ -94,6 +95,13 @@ export default function Profile() {
   const [importingData, setImportingData] = useState(false);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
 
+  // Branch management state
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [editingBranchId, setEditingBranchId] = useState<number | null>(null);
+  const [editingBranchName, setEditingBranchName] = useState("");
+  const [branchSaving, setBranchSaving] = useState(false);
+  const [branchError, setBranchError] = useState<string | null>(null);
+
   const todayStamp = useMemo(() => {
     const d = new Date();
     const pad = (n: number) => String(n).padStart(2, "0");
@@ -141,8 +149,18 @@ export default function Profile() {
       } catch {
         // If unauthenticated or API unavailable, keep defaults.
       }
+
+      // Load branches for Admin users
+      if (isAdmin) {
+        try {
+          const branchData = await fetchBranches();
+          setBranches(branchData);
+        } catch {
+          // Branches optional
+        }
+      }
     })();
-  }, []);
+  }, [isAdmin]);
 
   const handleSave = async () => {
     localStorage.setItem("businessInfo", JSON.stringify(businessInfo));
@@ -236,6 +254,39 @@ export default function Profile() {
     } finally {
       setExportingData(false);
     }
+  };
+
+  const handleEditBranch = (branch: Branch) => {
+    setEditingBranchId(branch.id);
+    setEditingBranchName(branch.name);
+    setBranchError(null);
+  };
+
+  const handleSaveBranch = async () => {
+    if (!editingBranchId || !editingBranchName.trim()) {
+      setBranchError("Branch name cannot be empty");
+      return;
+    }
+    setBranchSaving(true);
+    setBranchError(null);
+    try {
+      const updated = await updateBranch(editingBranchId, { name: editingBranchName.trim() });
+      setBranches((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
+      setEditingBranchId(null);
+      setEditingBranchName("");
+      // Notify other components that branches changed
+      window.dispatchEvent(new CustomEvent("branchesChanged"));
+    } catch (error) {
+      setBranchError(error instanceof Error ? error.message : "Failed to update branch");
+    } finally {
+      setBranchSaving(false);
+    }
+  };
+
+  const handleCancelEditBranch = () => {
+    setEditingBranchId(null);
+    setEditingBranchName("");
+    setBranchError(null);
   };
 
   const handlePickImportFile = () => {
@@ -838,6 +889,92 @@ export default function Profile() {
                 </label>
               </div>
             </div>
+
+            {/* Branch Management */}
+            {branches.length > 0 && (
+              <div
+                style={{
+                  borderTop: "1px solid #e5e7eb",
+                  paddingTop: 24,
+                }}
+              >
+                <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 16px", color: "#374151" }}>
+                  Branch Management
+                </h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {branches.map((branch) => (
+                    <div
+                      key={branch.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: 16,
+                        background: "#f9fafb",
+                        borderRadius: 8,
+                        border: "1px solid #e5e7eb",
+                      }}
+                    >
+                      {editingBranchId === branch.id ? (
+                        <>
+                          <input
+                            type="text"
+                            value={editingBranchName}
+                            onChange={(e) => setEditingBranchName(e.target.value)}
+                            className="input"
+                            style={{ flex: 1 }}
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleSaveBranch();
+                              if (e.key === "Escape") handleCancelEditBranch();
+                            }}
+                          />
+                          <button
+                            className="button"
+                            style={{ background: "#10b981", fontSize: 13, padding: "8px 16px" }}
+                            onClick={handleSaveBranch}
+                            disabled={branchSaving}
+                          >
+                            {branchSaving ? "Saving..." : "Save"}
+                          </button>
+                          <button
+                            className="button"
+                            style={{ background: "#6b7280", fontSize: 13, padding: "8px 16px" }}
+                            onClick={handleCancelEditBranch}
+                            disabled={branchSaving}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                              {branch.name}
+                            </div>
+                            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                              Branch ID: {branch.id}
+                            </div>
+                          </div>
+                          <button
+                            className="button"
+                            style={{ background: "#3b82f6", fontSize: 13, padding: "8px 16px" }}
+                            onClick={() => handleEditBranch(branch)}
+                          >
+                            ✏️ Edit Name
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {branchError && (
+                    <div style={{ color: "#ef4444", fontSize: 13, marginTop: 4 }}>
+                      {branchError}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div
               style={{
