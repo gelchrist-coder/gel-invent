@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
 from ..database import get_db
-from ..models import Sale, Product, StockMovement, User, CreditTransaction
+from ..models import Sale, Product, StockMovement, User, CreditTransaction, Creditor
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 
@@ -337,9 +337,18 @@ def get_revenue_analytics(
     if extra_payments:
         extra_cash = sum((t.amount for t in extra_payments), Decimal(0))
         cash_revenue += extra_cash
+        # These payments reduce the credit pending (they were paying off existing debt)
+        credit_revenue -= extra_cash
+        if credit_revenue < 0:
+            credit_revenue = Decimal(0)
         for t in extra_payments:
             method = infer_method_from_notes(t.notes)
             payment_methods[method] = payment_methods.get(method, Decimal(0)) + t.amount
+            # Reduce credit in payment methods breakdown
+            if "credit" in payment_methods:
+                payment_methods["credit"] = payment_methods.get("credit", Decimal(0)) - t.amount
+                if payment_methods["credit"] <= 0:
+                    del payment_methods["credit"]
 
     # Deduct returns from revenue using product selling_price
     returns_revenue, returns_cost, returns_profit = compute_returns_totals(start, end)
