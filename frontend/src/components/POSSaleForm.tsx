@@ -275,35 +275,47 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   };
 
   const processOrder = () => {
-    // Create sale for each item in cart
-    const sales: NewSale[] = cart.map(item => {
+    // Create a sale row for each item in cart.
+    // IMPORTANT: For credit sales, the optional initial payment should be applied ONCE
+    // across the whole cart, not repeated for every product.
+    const sales: NewSale[] = [];
+    let remainingInitialPayment = paymentMethod === "credit" ? Number(initialPayment || 0) : 0;
+
+    for (const item of cart) {
       const unitPrice = item.sellingUnit === 'pack'
         ? Number(item.product.pack_selling_price || 0)
         : Number(item.product.selling_price || 0);
       const pieceQuantity = item.sellingUnit === 'pack'
         ? item.quantity * (item.product.pack_size || 1)
         : item.quantity;
-      
-      // For credit sales, add initial payment info to notes
+
+      // For credit sales, add phone to notes (backend extracts it for creditor record).
       let saleNotes = notes || null;
       if (paymentMethod === "credit") {
         const creditInfo = `Phone: ${creditorPhone}`;
         saleNotes = notes ? `${notes} | ${creditInfo}` : creditInfo;
       }
-      
-      return {
+
+      const lineTotal = unitPrice * item.quantity;
+      const appliedPayment =
+        paymentMethod === "credit" && remainingInitialPayment > 0
+          ? Math.min(remainingInitialPayment, Math.max(0, lineTotal))
+          : 0;
+      remainingInitialPayment = remainingInitialPayment - appliedPayment;
+
+      sales.push({
         product_id: item.product.id,
         quantity: pieceQuantity, // Always store in pieces for inventory
         sale_unit_type: item.sellingUnit,
         pack_quantity: item.sellingUnit === 'pack' ? item.quantity : undefined,
         unit_price: unitPrice,
-        total_price: unitPrice * item.quantity,
+        total_price: lineTotal,
         customer_name: paymentMethod === "credit" ? creditorName : (customerName || null),
         payment_method: paymentMethod,
         notes: saleNotes,
-        amount_paid: paymentMethod === "credit" ? initialPayment : undefined,
-      };
-    });
+        amount_paid: paymentMethod === "credit" && appliedPayment > 0 ? appliedPayment : undefined,
+      });
+    }
 
     onSubmit(sales);
     clearCart();
