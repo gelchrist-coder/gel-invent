@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
 import { fetchSales, createSaleForBranch, createSalesBulk, deleteSale, fetchProducts } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
@@ -164,10 +164,16 @@ export default function Sales() {
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
+  const productById = useMemo(() => {
+    const map = new Map<number, Product>();
+    for (const p of products) map.set(p.id, p);
+    return map;
+  }, [products]);
+
   const printReceipt = () => {
     if (pendingSales.length === 0) return;
 
-    const receiptWindow = window.open('', '_blank');
+    const receiptWindow = window.open("", "_blank");
     if (!receiptWindow) return;
     receiptWindowRef.current = receiptWindow;
 
@@ -181,11 +187,12 @@ export default function Sales() {
     const remainingBalance = paymentMethod === 'credit' ? total - amountPaid : 0;
 
     // Build items HTML
-    const itemsHTML = pendingSales.map(sale => {
-      const product = products.find(p => p.id === sale.product_id);
-      if (!product) return '';
+    const itemsHTML = pendingSales
+      .map((sale) => {
+        const product = productById.get(sale.product_id);
+        if (!product) return "";
       
-      return `
+        return `
         <div class="item-row">
           <div><strong>${product.name}</strong></div>
         </div>
@@ -194,7 +201,8 @@ export default function Sales() {
           <div>GHS ${sale.total_price.toFixed(2)}</div>
         </div>
       `;
-    }).join('');
+      })
+      .join("");
 
     const receiptHTML = `
       <!DOCTYPE html>
@@ -364,6 +372,10 @@ export default function Sales() {
 
     receiptWindow.document.write(receiptHTML);
     receiptWindow.document.close();
+
+    // Don't rely on `afterprint`/postMessage (unreliable on some browsers).
+    // Close the POS confirmation immediately so the main app doesn't feel frozen.
+    handleDone();
   };
 
   const handleDeleteSale = async (saleId: number) => {
