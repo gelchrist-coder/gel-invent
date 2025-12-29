@@ -173,50 +173,26 @@ export default function Sales() {
   const printReceipt = () => {
     if (pendingSales.length === 0) return;
 
-    const salesToPrint = [...pendingSales];
-
-    // Prefer a detached window, but note: on some Chrome builds, `noopener`
-    // can still open the tab while returning `null` to the caller.
-    // If we don't get a handle, we can't write the receipt HTML.
-    let receiptWindow = window.open("", "_blank", "noopener,noreferrer");
+    // Open receipt window
+    let receiptWindow = window.open("", "_blank");
     if (!receiptWindow) {
-      receiptWindow = window.open("", "_blank");
+      alert("Please allow popups to print receipts");
+      return;
     }
-    if (!receiptWindow) return;
     receiptWindowRef.current = receiptWindow;
 
-    // Close the POS confirmation immediately so the main app stays responsive.
-    // Then defer receipt rendering to the next tick to allow React to paint.
-    handleDone();
-
-    window.setTimeout(() => {
-      if (receiptWindow.closed) return;
-
-      // Render a quick placeholder so the new tab isn't blank if receipt rendering
-      // takes time or throws.
-      try {
-        receiptWindow.document.open();
-        receiptWindow.document.write(
-          "<!doctype html><html><head><title>Receipt</title></head><body style='font-family:system-ui;padding:16px'>Loading receipt…</body></html>",
-        );
-        receiptWindow.document.close();
-      } catch {
-        // ignore
-      }
-
-      try {
-
+    try {
       // Calculate totals
-      const total = salesToPrint.reduce((sum, sale) => sum + (Number(sale.total_price) || 0), 0);
-      const customerName = salesToPrint[0]?.customer_name;
-      const paymentMethod = salesToPrint[0]?.payment_method ?? "cash";
-      const amountPaid = Number(salesToPrint[0]?.amount_paid) || 0;
+      const total = pendingSales.reduce((sum, sale) => sum + (Number(sale.total_price) || 0), 0);
+      const customerName = pendingSales[0]?.customer_name;
+      const paymentMethod = pendingSales[0]?.payment_method ?? "cash";
+      const amountPaid = Number(pendingSales[0]?.amount_paid) || 0;
 
       // Calculate remaining balance for credit sales
       const remainingBalance = paymentMethod === "credit" ? total - amountPaid : 0;
 
       // Build items HTML
-      const itemsHTML = salesToPrint
+      const itemsHTML = pendingSales
         .map((sale) => {
           const product = productById.get(sale.product_id);
           if (!product) return "";
@@ -403,30 +379,33 @@ export default function Sales() {
       </html>
     `;
 
+      // Write receipt HTML immediately (synchronously)
       receiptWindow.document.write(receiptHTML);
       receiptWindow.document.close();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        try {
-          receiptWindow.document.open();
-          receiptWindow.document.write(
-            `<!doctype html><html><head><title>Receipt Error</title></head><body style="font-family:system-ui;padding:16px">
-              <h3 style="margin:0 0 8px 0">Failed to render receipt</h3>
-              <div style="white-space:pre-wrap;color:#b91c1c">${message}</div>
-              <hr/>
-              <div style="white-space:pre-wrap;font-size:12px;color:#374151">${JSON.stringify(
-                salesToPrint,
-                null,
-                2,
-              )}</div>
-            </body></html>`,
-          );
-          receiptWindow.document.close();
-        } catch {
-          // ignore
-        }
+      
+      // Close POS confirmation modal after a tiny delay to prevent UI freeze
+      window.setTimeout(() => {
+        handleDone();
+      }, 100);
+      
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      try {
+        receiptWindow.document.write(
+          `<!doctype html><html><head><title>Receipt Error</title></head><body style="font-family:system-ui;padding:16px">
+            <h3 style="margin:0 0 8px 0">Failed to render receipt</h3>
+            <div style="white-space:pre-wrap;color:#b91c1c">${message}</div>
+          </body></html>`,
+        );
+        receiptWindow.document.close();
+      } catch {
+        // ignore
       }
-    }, 0);
+      // Still close the modal even if receipt failed
+      window.setTimeout(() => {
+        handleDone();
+      }, 100);
+    }
   };
 
   const handleDeleteSale = async (saleId: number) => {
