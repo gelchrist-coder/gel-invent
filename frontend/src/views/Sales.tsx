@@ -175,9 +175,13 @@ export default function Sales() {
 
     const salesToPrint = [...pendingSales];
 
-    // Open the receipt in a detached window so the main app is less likely to
-    // be blocked by print-dialog quirks in Chrome.
-    const receiptWindow = window.open("", "_blank", "noopener,noreferrer");
+    // Prefer a detached window, but note: on some Chrome builds, `noopener`
+    // can still open the tab while returning `null` to the caller.
+    // If we don't get a handle, we can't write the receipt HTML.
+    let receiptWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!receiptWindow) {
+      receiptWindow = window.open("", "_blank");
+    }
     if (!receiptWindow) return;
     receiptWindowRef.current = receiptWindow;
 
