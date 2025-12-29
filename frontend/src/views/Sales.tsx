@@ -173,6 +173,8 @@ export default function Sales() {
   const printReceipt = () => {
     if (pendingSales.length === 0) return;
 
+    const salesToPrint = [...pendingSales];
+
     // Open the receipt in a detached window so the main app is less likely to
     // be blocked by print-dialog quirks in Chrome.
     const receiptWindow = window.open("", "_blank", "noopener,noreferrer");
@@ -187,16 +189,16 @@ export default function Sales() {
       if (receiptWindow.closed) return;
 
       // Calculate totals
-      const total = pendingSales.reduce((sum, sale) => sum + sale.total_price, 0);
-      const customerName = pendingSales[0].customer_name;
-      const paymentMethod = pendingSales[0].payment_method ?? "cash";
-      const amountPaid = pendingSales[0].amount_paid || 0;
+      const total = salesToPrint.reduce((sum, sale) => sum + sale.total_price, 0);
+      const customerName = salesToPrint[0]?.customer_name;
+      const paymentMethod = salesToPrint[0]?.payment_method ?? "cash";
+      const amountPaid = salesToPrint[0]?.amount_paid || 0;
 
       // Calculate remaining balance for credit sales
       const remainingBalance = paymentMethod === "credit" ? total - amountPaid : 0;
 
       // Build items HTML
-      const itemsHTML = pendingSales
+      const itemsHTML = salesToPrint
         .map((sale) => {
           const product = productById.get(sale.product_id);
           if (!product) return "";
