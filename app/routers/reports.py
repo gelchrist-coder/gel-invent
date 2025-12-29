@@ -36,12 +36,11 @@ def get_sales_dashboard(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
-    start_date: str | None = None,
-    end_date: str | None = None,
+    filter_date: str | None = None,
 ):
     """
     Get sales dashboard with key metrics (Owner/Admin only).
-    Optional date filters: start_date and end_date (YYYY-MM-DD format).
+    Optional filter_date (YYYY-MM-DD format) to filter top products for a specific date.
     """
     # Restrict access to Admin/Owner only
     if current_user.role != "Admin":
@@ -58,17 +57,14 @@ def get_sales_dashboard(
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
     
-    # Parse custom date range for top products if provided
+    # Parse custom date for top products if provided (filters for that specific day)
     top_products_start = month_start
     top_products_end = now
-    if start_date:
+    if filter_date:
         try:
-            top_products_start = datetime.strptime(start_date, "%Y-%m-%d")
-        except ValueError:
-            pass
-    if end_date:
-        try:
-            top_products_end = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            parsed_date = datetime.strptime(filter_date, "%Y-%m-%d")
+            top_products_start = parsed_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            top_products_end = parsed_date.replace(hour=23, minute=59, second=59, microsecond=999999)
         except ValueError:
             pass
     

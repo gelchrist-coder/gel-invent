@@ -49,8 +49,7 @@ export default function Dashboard({ onNavigate }: Props) {
   const [expiryWarningDays, setExpiryWarningDays] = useState<number>(180);
   
   // Top Products date filter
-  const [topProductsStartDate, setTopProductsStartDate] = useState<string>("");
-  const [topProductsEndDate, setTopProductsEndDate] = useState<string>("");
+  const [topProductsDate, setTopProductsDate] = useState<string>("");
   const [topProductsLoading, setTopProductsLoading] = useState(false);
 
   // Check if current user is Admin
@@ -114,10 +113,7 @@ export default function Dashboard({ onNavigate }: Props) {
     if (!token || !isAdmin) return;
     setTopProductsLoading(true);
     try {
-      const data = await fetchSalesDashboard(
-        topProductsStartDate || undefined,
-        topProductsEndDate || undefined
-      );
+      const data = await fetchSalesDashboard(topProductsDate || undefined);
       setDashboardData(data);
     } catch (error) {
       console.error("Error filtering top products:", error);
@@ -128,8 +124,7 @@ export default function Dashboard({ onNavigate }: Props) {
 
   // Clear date filter
   const handleClearFilter = async () => {
-    setTopProductsStartDate("");
-    setTopProductsEndDate("");
+    setTopProductsDate("");
     setTopProductsLoading(true);
     try {
       const data = await fetchSalesDashboard();
@@ -219,41 +214,24 @@ export default function Dashboard({ onNavigate }: Props) {
               display: "flex", 
               gap: 8, 
               marginBottom: 16, 
-              flexWrap: "wrap",
               alignItems: "center",
               padding: 12,
               background: "#f9fbff",
               borderRadius: 8,
               border: "1px solid #e6e9f2"
             }}>
+              <span style={{ color: "#4a5368", fontSize: 13, fontWeight: 500 }}>Date:</span>
               <input
                 type="date"
-                value={topProductsStartDate}
-                onChange={(e) => setTopProductsStartDate(e.target.value)}
+                value={topProductsDate}
+                onChange={(e) => setTopProductsDate(e.target.value)}
                 style={{
                   padding: "8px 12px",
                   borderRadius: 6,
                   border: "1px solid #d1d5db",
                   fontSize: 13,
-                  flex: "1 1 120px",
-                  minWidth: 120,
+                  flex: 1,
                 }}
-                placeholder="Start Date"
-              />
-              <span style={{ color: "#6b7280", fontSize: 13 }}>to</span>
-              <input
-                type="date"
-                value={topProductsEndDate}
-                onChange={(e) => setTopProductsEndDate(e.target.value)}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 6,
-                  border: "1px solid #d1d5db",
-                  fontSize: 13,
-                  flex: "1 1 120px",
-                  minWidth: 120,
-                }}
-                placeholder="End Date"
               />
               <button
                 onClick={handleFilterTopProducts}
@@ -272,7 +250,7 @@ export default function Dashboard({ onNavigate }: Props) {
               >
                 {topProductsLoading ? "..." : "Filter"}
               </button>
-              {(topProductsStartDate || topProductsEndDate) && (
+              {topProductsDate && (
                 <button
                   onClick={handleClearFilter}
                   disabled={topProductsLoading}

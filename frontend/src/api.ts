@@ -542,26 +542,23 @@ export async function fetchRevenueAnalytics(period: string = "30d", startDate?: 
 
 // Reports API
 
-export async function fetchSalesDashboard(startDate?: string, endDate?: string): Promise<JsonObject> {
-  // Don't use cache if custom date range is specified
-  if (!startDate && !endDate) {
+export async function fetchSalesDashboard(filterDate?: string): Promise<JsonObject> {
+  // Don't use cache if custom date is specified
+  if (!filterDate) {
     const cached = getCached<JsonObject>("salesDashboard");
     if (cached && isCacheFresh("salesDashboard")) {
       return cached;
     }
   }
   
-  const params = new URLSearchParams();
-  if (startDate) params.append("start_date", startDate);
-  if (endDate) params.append("end_date", endDate);
-  
-  const queryString = params.toString();
-  const url = queryString ? `/reports/sales-dashboard?${queryString}` : "/reports/sales-dashboard";
+  const url = filterDate 
+    ? `/reports/sales-dashboard?filter_date=${filterDate}` 
+    : "/reports/sales-dashboard";
   
   const data = await jsonRequest<JsonObject>(url);
   
-  // Only cache if no custom date range
-  if (!startDate && !endDate) {
+  // Only cache if no custom date
+  if (!filterDate) {
     setCache("salesDashboard", data);
   }
   return data;
