@@ -1,4 +1,4 @@
-import { API_BASE } from "../api";
+import { API_BASE, buildAuthHeaders } from "../api";
 import { useCallback, useEffect, useState } from "react";
 
 interface Transaction {
@@ -37,11 +37,8 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
   const fetchTransactions = useCallback(async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_BASE}/creditors/${creditor.id}/transactions`, {
-        headers: {
-          "Authorization": `Bearer ${token}`,
-        },
+        headers: buildAuthHeaders(),
       });
 
       if (!response.ok) {
@@ -364,15 +361,22 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
 
   const fetchProducts = async () => {
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/products/`, {
-        headers: {
-          "Authorization": `Bearer ${token}`,
-        },
-      });
+      const response = await fetch(`${API_BASE}/products/`, { headers: buildAuthHeaders() });
       if (response.ok) {
-        const data = await response.json();
-        setProducts(data);
+        const data = (await response.json()) as Array<Record<string, unknown>>;
+        const mapped: Product[] = (Array.isArray(data) ? data : []).map((p) => {
+          const id = Number(p.id);
+          const name = String(p.name ?? "");
+          const price = Number((p.selling_price ?? p.price ?? 0) as unknown);
+          const quantity_in_stock = Number((p.current_stock ?? p.quantity_in_stock ?? 0) as unknown);
+          return {
+            id,
+            name,
+            price: Number.isFinite(price) ? price : 0,
+            quantity_in_stock: Number.isFinite(quantity_in_stock) ? quantity_in_stock : 0,
+          };
+        });
+        setProducts(mapped);
       }
     } catch (error) {
       console.error("Error fetching products:", error);
@@ -381,8 +385,9 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
     }
   };
 
-  const selectedProduct = products.find(p => p.id === parseInt(selectedProductId));
-  const totalAmount = selectedProduct ? selectedProduct.price * parseFloat(quantity || "0") : 0;
+  const selectedProduct = products.find((p) => p.id === parseInt(selectedProductId));
+  const quantityNumPreview = parseFloat(quantity || "0");
+  const totalAmount = selectedProduct ? selectedProduct.price * quantityNumPreview : 0;
   const initialPaymentNum = parseFloat(initialPayment || "0");
   const creditAmount = totalAmount - initialPaymentNum;
 
@@ -419,18 +424,15 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
     setError("");
 
     try {
-      const token = localStorage.getItem("token");
-      
-      // Create the sale with credit payment method
+      // Create a credit sale so the backend will generate the creditor ledger entry.
       const response = await fetch(`${API_BASE}/sales`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
+        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           product_id: parseInt(selectedProductId),
           quantity: quantityNum,
+          unit_price: selectedProduct?.price ?? 0,
+          total_price: (selectedProduct?.price ?? 0) * quantityNum,
           customer_name: creditorName,
           payment_method: "credit",
           amount_paid: initialPaymentNum > 0 ? initialPaymentNum : undefined,
@@ -681,13 +683,9 @@ function TransactionModal({ creditorId, creditorName, transactionType, onClose, 
     setError("");
 
     try {
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_BASE}/creditors/transactions`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
+        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           creditor_id: creditorId,
           amount: amountNum,

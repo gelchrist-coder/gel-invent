@@ -1,9 +1,18 @@
+"""Partial payment / creditor debt integration check.
+
+By default this is *skipped* under pytest because it requires a running API
+server (default: http://localhost:8000) and a configured database/auth.
+
+Run manually with:
+  `python test_partial_payment.py`
+"""
+
 import requests
-import json
 
 BASE_URL = "http://localhost:8000"
 
-def test_partial_payment():
+
+def run_manual_partial_payment():
     # First, get products to find a product_id
     products_response = requests.get(f"{BASE_URL}/products")
     products = products_response.json()
@@ -66,5 +75,13 @@ def test_partial_payment():
         print(f"\n❌ Failed to create sale: {response.status_code}")
         print(response.json())
 
+
+def test_partial_payment():
+    import pytest  # type: ignore
+
+    pytest.skip(
+        "Integration test (requires running server). Run manually: python test_partial_payment.py",
+    )
+
 if __name__ == "__main__":
-    test_partial_payment()
+    run_manual_partial_payment()

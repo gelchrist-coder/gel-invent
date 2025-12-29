@@ -45,7 +45,7 @@ type JsonArray = Record<string, unknown>[];
 
 type StockMovementResponse = Omit<StockMovement, "change"> & { change: string | number };
 
-function buildAuthHeaders(extra?: Record<string, string>): Record<string, string> {
+export function buildAuthHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = localStorage.getItem("token");
   const activeBranchId = localStorage.getItem("activeBranchId");
   const headers: Record<string, string> = { ...(extra ?? {}) };

@@ -1,4 +1,4 @@
-import { API_BASE } from "../api";
+import { API_BASE, buildAuthHeaders } from "../api";
 import { useState, useEffect } from "react";
 
 interface Creditor {
@@ -31,12 +31,8 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
   const fetchCreditors = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem("token");
       const response = await fetch(`${API_BASE}/creditors/`, {
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json"
-        }
+        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
       });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);

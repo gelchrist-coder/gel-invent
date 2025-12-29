@@ -1,4 +1,4 @@
-import { API_BASE } from "../api";
+import { API_BASE, buildAuthHeaders } from "../api";
 import { useState } from "react";
 
 interface CreditorFormProps {
@@ -35,17 +35,13 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
     setError("");
 
     try {
-      const token = localStorage.getItem("token");
       const url = creditor
         ? `${API_BASE}/creditors/${creditor.id}`
         : `${API_BASE}/creditors/`;
       
       const response = await fetch(url, {
         method: creditor ? "PUT" : "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
+        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           name: formData.name.trim(),
           phone: formData.phone.trim() || null,
