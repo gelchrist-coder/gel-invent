@@ -111,3 +111,48 @@ def update_branch(
     db.commit()
     db.refresh(branch)
     return branch
+
+
+@router.delete("/{branch_id}")
+def delete_branch(
+    branch_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Only Admin can delete branches")
+
+    owner_user_id = get_owner_user_id(current_user)
+
+    # Count total active branches
+    total_branches = (
+        db.query(models.Branch)
+        .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.is_active.is_(True))
+        .count()
+    )
+    
+    if total_branches <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the last branch")
+
+    branch = (
+        db.query(models.Branch)
+        .filter(models.Branch.id == branch_id, models.Branch.owner_user_id == owner_user_id)
+        .first()
+    )
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    # Check if branch has any products, sales, or other data
+    has_products = db.query(models.Product).filter(models.Product.branch_id == branch_id).first()
+    has_sales = db.query(models.Sale).filter(models.Sale.branch_id == branch_id).first()
+    
+    if has_products or has_sales:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot delete branch with existing products or sales. Transfer or delete them first."
+        )
+
+    # Soft delete by marking inactive (or hard delete if preferred)
+    db.delete(branch)
+    db.commit()
+    return {"message": "Branch deleted successfully"}

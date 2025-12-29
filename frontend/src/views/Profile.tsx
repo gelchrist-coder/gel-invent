@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
+import { changePassword, deleteBranch, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
 import { Branch } from "../types";
 
 type PasswordInputProps = {
@@ -287,6 +287,30 @@ export default function Profile() {
     setEditingBranchId(null);
     setEditingBranchName("");
     setBranchError(null);
+  };
+
+  const handleDeleteBranch = async (branch: Branch) => {
+    if (branches.length <= 1) {
+      setBranchError("Cannot delete the last branch");
+      return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete "${branch.name}"? This cannot be undone.`)) {
+      return;
+    }
+    
+    setBranchSaving(true);
+    setBranchError(null);
+    try {
+      await deleteBranch(branch.id);
+      setBranches((prev) => prev.filter((b) => b.id !== branch.id));
+      // Notify other components that branches changed
+      window.dispatchEvent(new CustomEvent("branchesChanged"));
+    } catch (error) {
+      setBranchError(error instanceof Error ? error.message : "Failed to delete branch");
+    } finally {
+      setBranchSaving(false);
+    }
   };
 
   const handlePickImportFile = () => {
@@ -956,13 +980,25 @@ export default function Profile() {
                               Branch ID: {branch.id}
                             </div>
                           </div>
-                          <button
-                            className="button"
-                            style={{ background: "#3b82f6", fontSize: 13, padding: "8px 16px" }}
-                            onClick={() => handleEditBranch(branch)}
-                          >
-                            ✏️ Edit Name
-                          </button>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                              className="button"
+                              style={{ background: "#3b82f6", fontSize: 13, padding: "8px 16px" }}
+                              onClick={() => handleEditBranch(branch)}
+                            >
+                              ✏️ Edit
+                            </button>
+                            {branches.length > 1 && (
+                              <button
+                                className="button"
+                                style={{ background: "#ef4444", fontSize: 13, padding: "8px 16px" }}
+                                onClick={() => handleDeleteBranch(branch)}
+                                disabled={branchSaving}
+                              >
+                                🗑️ Delete
+                              </button>
+                            )}
+                          </div>
                         </>
                       )}
                     </div>

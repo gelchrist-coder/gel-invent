@@ -19,14 +19,21 @@ def get_owner_user_id(current_user: models.User) -> int:
 
 
 def ensure_main_branch(db: Session, owner_user_id: int) -> models.Branch:
-    branch = (
+    """Ensure at least one branch exists for the tenant.
+    
+    This function creates a default 'Main Branch' only if NO branches exist.
+    If any branch exists (even with a different name), no new branch is created.
+    """
+    # Check if ANY branch exists for this owner
+    any_branch = (
         db.query(models.Branch)
-        .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.name == "Main Branch")
+        .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.is_active.is_(True))
         .first()
     )
-    if branch:
-        return branch
+    if any_branch:
+        return any_branch
 
+    # No branches exist, create the default one
     branch = models.Branch(owner_user_id=owner_user_id, name="Main Branch", is_active=True)
     db.add(branch)
     db.commit()

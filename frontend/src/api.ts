@@ -240,6 +240,12 @@ export async function updateBranch(branchId: number, payload: { name: string }):
   });
 }
 
+export async function deleteBranch(branchId: number): Promise<{ message: string }> {
+  return jsonRequest<{ message: string }>(`/branches/${branchId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchMe(): Promise<AuthUser> {
   return jsonRequest<AuthUser>("/auth/me");
 }
