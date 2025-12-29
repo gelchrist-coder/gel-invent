@@ -173,26 +173,35 @@ export default function Sales() {
   const printReceipt = () => {
     if (pendingSales.length === 0) return;
 
-    const receiptWindow = window.open("", "_blank");
+    // Open the receipt in a detached window so the main app is less likely to
+    // be blocked by print-dialog quirks in Chrome.
+    const receiptWindow = window.open("", "_blank", "noopener,noreferrer");
     if (!receiptWindow) return;
     receiptWindowRef.current = receiptWindow;
 
-    // Calculate totals
-    const total = pendingSales.reduce((sum, sale) => sum + sale.total_price, 0);
-    const customerName = pendingSales[0].customer_name;
-    const paymentMethod = pendingSales[0].payment_method ?? "cash";
-    const amountPaid = pendingSales[0].amount_paid || 0;
-    
-    // Calculate remaining balance for credit sales
-    const remainingBalance = paymentMethod === 'credit' ? total - amountPaid : 0;
+    // Close the POS confirmation immediately so the main app stays responsive.
+    // Then defer receipt rendering to the next tick to allow React to paint.
+    handleDone();
 
-    // Build items HTML
-    const itemsHTML = pendingSales
-      .map((sale) => {
-        const product = productById.get(sale.product_id);
-        if (!product) return "";
-      
-        return `
+    window.setTimeout(() => {
+      if (receiptWindow.closed) return;
+
+      // Calculate totals
+      const total = pendingSales.reduce((sum, sale) => sum + sale.total_price, 0);
+      const customerName = pendingSales[0].customer_name;
+      const paymentMethod = pendingSales[0].payment_method ?? "cash";
+      const amountPaid = pendingSales[0].amount_paid || 0;
+
+      // Calculate remaining balance for credit sales
+      const remainingBalance = paymentMethod === "credit" ? total - amountPaid : 0;
+
+      // Build items HTML
+      const itemsHTML = pendingSales
+        .map((sale) => {
+          const product = productById.get(sale.product_id);
+          if (!product) return "";
+
+          return `
         <div class="item-row">
           <div><strong>${product.name}</strong></div>
         </div>
@@ -201,8 +210,8 @@ export default function Sales() {
           <div>GHS ${sale.total_price.toFixed(2)}</div>
         </div>
       `;
-      })
-      .join("");
+        })
+        .join("");
 
     const receiptHTML = `
       <!DOCTYPE html>
@@ -370,12 +379,9 @@ export default function Sales() {
       </html>
     `;
 
-    receiptWindow.document.write(receiptHTML);
-    receiptWindow.document.close();
-
-    // Don't rely on `afterprint`/postMessage (unreliable on some browsers).
-    // Close the POS confirmation immediately so the main app doesn't feel frozen.
-    handleDone();
+      receiptWindow.document.write(receiptHTML);
+      receiptWindow.document.close();
+    }, 0);
   };
 
   const handleDeleteSale = async (saleId: number) => {
