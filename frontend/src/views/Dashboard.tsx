@@ -47,6 +47,11 @@ export default function Dashboard({ onNavigate }: Props) {
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
   const [expiryWarningDays, setExpiryWarningDays] = useState<number>(180);
+  
+  // Top Products date filter
+  const [topProductsStartDate, setTopProductsStartDate] = useState<string>("");
+  const [topProductsEndDate, setTopProductsEndDate] = useState<string>("");
+  const [topProductsLoading, setTopProductsLoading] = useState(false);
 
   // Check if current user is Admin
   const currentUser = localStorage.getItem("user");
@@ -103,6 +108,38 @@ export default function Dashboard({ onNavigate }: Props) {
     };
     loadDashboard();
   }, [token, isAdmin]);
+
+  // Reload top products with date filter
+  const handleFilterTopProducts = async () => {
+    if (!token || !isAdmin) return;
+    setTopProductsLoading(true);
+    try {
+      const data = await fetchSalesDashboard(
+        topProductsStartDate || undefined,
+        topProductsEndDate || undefined
+      );
+      setDashboardData(data);
+    } catch (error) {
+      console.error("Error filtering top products:", error);
+    } finally {
+      setTopProductsLoading(false);
+    }
+  };
+
+  // Clear date filter
+  const handleClearFilter = async () => {
+    setTopProductsStartDate("");
+    setTopProductsEndDate("");
+    setTopProductsLoading(true);
+    try {
+      const data = await fetchSalesDashboard();
+      setDashboardData(data);
+    } catch (error) {
+      console.error("Error loading dashboard:", error);
+    } finally {
+      setTopProductsLoading(false);
+    }
+  };
 
   // Top products from dashboard data
   const topProducts = dashboardData?.top_products ?? [];
@@ -172,13 +209,95 @@ export default function Dashboard({ onNavigate }: Props) {
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
         {/* Top Products */}
         <div className="card">
-          <h2 className="section-title">Top Products</h2>
-          {dashboardLoading ? (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h2 className="section-title" style={{ margin: 0 }}>Top Products</h2>
+          </div>
+          
+          {/* Date Filter */}
+          {isAdmin && (
+            <div style={{ 
+              display: "flex", 
+              gap: 8, 
+              marginBottom: 16, 
+              flexWrap: "wrap",
+              alignItems: "center",
+              padding: 12,
+              background: "#f9fbff",
+              borderRadius: 8,
+              border: "1px solid #e6e9f2"
+            }}>
+              <input
+                type="date"
+                value={topProductsStartDate}
+                onChange={(e) => setTopProductsStartDate(e.target.value)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  fontSize: 13,
+                  flex: "1 1 120px",
+                  minWidth: 120,
+                }}
+                placeholder="Start Date"
+              />
+              <span style={{ color: "#6b7280", fontSize: 13 }}>to</span>
+              <input
+                type="date"
+                value={topProductsEndDate}
+                onChange={(e) => setTopProductsEndDate(e.target.value)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  fontSize: 13,
+                  flex: "1 1 120px",
+                  minWidth: 120,
+                }}
+                placeholder="End Date"
+              />
+              <button
+                onClick={handleFilterTopProducts}
+                disabled={topProductsLoading}
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: "#1f7aff",
+                  color: "white",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: topProductsLoading ? "wait" : "pointer",
+                  opacity: topProductsLoading ? 0.7 : 1,
+                }}
+              >
+                {topProductsLoading ? "..." : "Filter"}
+              </button>
+              {(topProductsStartDate || topProductsEndDate) && (
+                <button
+                  onClick={handleClearFilter}
+                  disabled={topProductsLoading}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #d1d5db",
+                    background: "white",
+                    color: "#6b7280",
+                    fontSize: 13,
+                    cursor: topProductsLoading ? "wait" : "pointer",
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
+          
+          {dashboardLoading || topProductsLoading ? (
             <p style={{ margin: 0, color: "#4a5368" }}>Loading...</p>
           ) : !isAdmin ? (
             <p style={{ margin: 0, color: "#4a5368" }}>Admin access required</p>
           ) : topProducts.length === 0 ? (
-            <p style={{ margin: 0, color: "#4a5368" }}>No sales data yet</p>
+            <p style={{ margin: 0, color: "#4a5368" }}>No sales data for selected period</p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {topProducts.map((item, idx) => (

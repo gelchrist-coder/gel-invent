@@ -36,9 +36,12 @@ def get_sales_dashboard(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
+    start_date: str | None = None,
+    end_date: str | None = None,
 ):
     """
     Get sales dashboard with key metrics (Owner/Admin only).
+    Optional date filters: start_date and end_date (YYYY-MM-DD format).
     """
     # Restrict access to Admin/Owner only
     if current_user.role != "Admin":
@@ -54,6 +57,20 @@ def get_sales_dashboard(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
+    
+    # Parse custom date range for top products if provided
+    top_products_start = month_start
+    top_products_end = now
+    if start_date:
+        try:
+            top_products_start = datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            top_products_end = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+        except ValueError:
+            pass
     
     # Today's sales
     today_sales = db.execute(
@@ -89,7 +106,7 @@ def get_sales_dashboard(
         .group_by(Sale.payment_method)
     ).all()
     
-    # Top selling products (this month)
+    # Top selling products (filtered by date range)
     top_products = db.execute(
         select(
             Product.name,
@@ -97,7 +114,8 @@ def get_sales_dashboard(
             func.coalesce(func.sum(Sale.total_price), 0).label("revenue")
         ).join(Sale, Sale.product_id == Product.id)
         .where(and_(
-            Sale.created_at >= month_start,
+            Sale.created_at >= top_products_start,
+            Sale.created_at <= top_products_end,
             Sale.user_id.in_(tenant_user_ids),
             Sale.branch_id == active_branch_id,
             Product.user_id.in_(tenant_user_ids),
