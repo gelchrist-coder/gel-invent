@@ -857,56 +857,69 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                 className="pos-checkout"
                 onSubmit={handleSubmit}
                 style={{
-                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "100%",
                 }}
               >
-                <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
-                  <button
-                    type="button"
-                    onClick={() => setCheckoutOpen(false)}
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: "white",
-                      cursor: "pointer",
-                      fontSize: 13,
-                      fontWeight: 700,
-                      color: "#374151",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    ← Back
-                  </button>
+                {/* Header with gradient */}
+                <div style={{
+                  background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                  padding: "16px",
+                  margin: "-2px -2px 0",
+                  borderRadius: "12px 12px 0 0",
+                }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+                    <button
+                      type="button"
+                      onClick={() => setCheckoutOpen(false)}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "none",
+                        background: "rgba(255,255,255,0.2)",
+                        color: "white",
+                        cursor: "pointer",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      ← Back
+                    </button>
 
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700 }}>Total</div>
-                    <div style={{ fontSize: 20, fontWeight: 900, color: "#059669" }}>
-                      GHS {cartTotal.toFixed(2)}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Amount</div>
+                      <div style={{ fontSize: 24, fontWeight: 900, color: "white" }}>
+                        GHS {cartTotal.toFixed(2)}
+                      </div>
                     </div>
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={armOrClearCart}
-                    style={{
-                      padding: "8px 10px",
-                      fontSize: 12,
-                      background: clearArmed ? "#dc2626" : "#fee2e2",
-                      color: clearArmed ? "white" : "#dc2626",
-                      border: "none",
-                      borderRadius: 8,
-                      cursor: "pointer",
-                      fontWeight: 800,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {clearArmed ? "Tap again" : "Clear"}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={armOrClearCart}
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: 13,
+                        background: clearArmed ? "#dc2626" : "rgba(255,255,255,0.2)",
+                        color: "white",
+                        border: "none",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                        fontWeight: 700,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {clearArmed ? "⚠ Confirm" : "Clear"}
+                    </button>
+                  </div>
                 </div>
 
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                {/* Form fields */}
+                <div style={{ padding: "16px", flex: 1, overflowY: "auto" }}>
+
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, marginBottom: 8, color: "#374151", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                     Payment Method
                   </label>
                   <select
@@ -914,10 +927,13 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                     onChange={(e) => setPaymentMethod(e.target.value)}
                     style={{
                       width: "100%",
-                      padding: "10px 12px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 8,
-                      fontSize: 14,
+                      padding: "12px 14px",
+                      border: "2px solid #e5e7eb",
+                      borderRadius: 10,
+                      fontSize: 15,
+                      fontWeight: 600,
+                      background: "white",
+                      cursor: "pointer",
                     }}
                   >
                     {PAYMENT_METHODS.map((method) => (
@@ -928,68 +944,89 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                   </select>
                 </div>
 
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                    Customer Name (Optional)
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, marginBottom: 8, color: "#374151", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Customer Name {paymentMethod === "credit" ? "*" : "(Optional)"}
                   </label>
                   <input
                     type="text"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Customer name"
+                    placeholder="Enter customer name"
                     ref={customerInputRef}
                     style={{
                       width: "100%",
-                      padding: "10px 12px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 8,
-                      fontSize: 14,
+                      padding: "12px 14px",
+                      border: paymentMethod === "credit" ? "2px solid #f59e0b" : "2px solid #e5e7eb",
+                      borderRadius: 10,
+                      fontSize: 15,
+                      background: paymentMethod === "credit" ? "#fffbeb" : "white",
                     }}
                   />
                   {paymentMethod === "credit" ? (
-                    <div style={{ marginTop: 6, fontSize: 12, color: "#b45309", fontWeight: 600 }}>
-                      Required for credit sales
+                    <div style={{ 
+                      marginTop: 8, 
+                      fontSize: 12, 
+                      color: "#b45309", 
+                      fontWeight: 600,
+                      background: "#fef3c7",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #fde68a",
+                    }}>
+                      ⚠️ Required for credit sales
                     </div>
                   ) : null}
                 </div>
 
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, marginBottom: 8, color: "#374151", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                     Notes (Optional)
                   </label>
                   <textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Notes..."
+                    placeholder="Add any special notes..."
                     rows={2}
                     style={{
                       width: "100%",
-                      padding: "10px 12px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 8,
+                      padding: "12px 14px",
+                      border: "2px solid #e5e7eb",
+                      borderRadius: 10,
                       fontSize: 14,
                       resize: "none",
+                      fontFamily: "inherit",
                     }}
                   />
                 </div>
+                </div>
+
+                {/* Submit button - sticky at bottom */}
+                <div style={{ padding: "16px", borderTop: "2px solid #f3f4f6" }}>
 
                 <button
                   type="submit"
                   style={{
                     width: "100%",
-                    padding: 16,
+                    padding: "16px 20px",
                     background: "linear-gradient(135deg, #10b981, #059669)",
                     color: "white",
                     border: "none",
-                    borderRadius: 10,
-                    fontSize: 16,
-                    fontWeight: 900,
+                    borderRadius: 12,
+                    fontSize: 17,
+                    fontWeight: 800,
                     cursor: "pointer",
-                    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
+                    boxShadow: "0 6px 20px rgba(16, 185, 129, 0.4)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
                   }}
                 >
-                  💳 Complete Sale - GHS {cartTotal.toFixed(2)}
+                  <span style={{ fontSize: 20 }}>✓</span>
+                  <span>Complete Sale • GHS {cartTotal.toFixed(2)}</span>
                 </button>
+                </div>
               </form>
             )}
           </div>
