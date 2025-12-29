@@ -147,10 +147,16 @@ export default function Sales() {
     }
   };
 
+  const doneRef = useRef(false);
+  
   const handleDone = () => {
+    if (doneRef.current) return; // Prevent double-execution
+    doneRef.current = true;
     setShowConfirmation(false);
     setPendingSales([]);
     setSaleConfirmed(false);
+    // Reset flag after state updates
+    setTimeout(() => { doneRef.current = false; }, 100);
   };
 
   useEffect(() => {
@@ -384,10 +390,8 @@ export default function Sales() {
       receiptWindow.document.write(receiptHTML);
       receiptWindow.document.close();
       
-      // Close POS confirmation modal after a tiny delay to prevent UI freeze
-      window.setTimeout(() => {
-        handleDone();
-      }, 100);
+      // Don't auto-close the modal - let the user click "Done" or 
+      // let the receipt window's postMessage handle it when print completes
       
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -402,10 +406,7 @@ export default function Sales() {
       } catch {
         // ignore
       }
-      // Still close the modal even if receipt failed
-      window.setTimeout(() => {
-        handleDone();
-      }, 100);
+      // Don't auto-close on error either - user can click Done
     }
   };
 
