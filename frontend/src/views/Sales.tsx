@@ -192,11 +192,25 @@ export default function Sales() {
     window.setTimeout(() => {
       if (receiptWindow.closed) return;
 
+      // Render a quick placeholder so the new tab isn't blank if receipt rendering
+      // takes time or throws.
+      try {
+        receiptWindow.document.open();
+        receiptWindow.document.write(
+          "<!doctype html><html><head><title>Receipt</title></head><body style='font-family:system-ui;padding:16px'>Loading receipt…</body></html>",
+        );
+        receiptWindow.document.close();
+      } catch {
+        // ignore
+      }
+
+      try {
+
       // Calculate totals
-      const total = salesToPrint.reduce((sum, sale) => sum + sale.total_price, 0);
+      const total = salesToPrint.reduce((sum, sale) => sum + (Number(sale.total_price) || 0), 0);
       const customerName = salesToPrint[0]?.customer_name;
       const paymentMethod = salesToPrint[0]?.payment_method ?? "cash";
-      const amountPaid = salesToPrint[0]?.amount_paid || 0;
+      const amountPaid = Number(salesToPrint[0]?.amount_paid) || 0;
 
       // Calculate remaining balance for credit sales
       const remainingBalance = paymentMethod === "credit" ? total - amountPaid : 0;
@@ -207,13 +221,17 @@ export default function Sales() {
           const product = productById.get(sale.product_id);
           if (!product) return "";
 
+          const quantity = Number(sale.quantity) || 0;
+          const unitPrice = Number(sale.unit_price) || 0;
+          const lineTotal = Number(sale.total_price) || quantity * unitPrice;
+
           return `
         <div class="item-row">
           <div><strong>${product.name}</strong></div>
         </div>
         <div class="item-row">
-          <div>${sale.quantity} × GHS ${sale.unit_price.toFixed(2)}</div>
-          <div>GHS ${sale.total_price.toFixed(2)}</div>
+          <div>${quantity} × GHS ${unitPrice.toFixed(2)}</div>
+          <div>GHS ${lineTotal.toFixed(2)}</div>
         </div>
       `;
         })
@@ -387,6 +405,27 @@ export default function Sales() {
 
       receiptWindow.document.write(receiptHTML);
       receiptWindow.document.close();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        try {
+          receiptWindow.document.open();
+          receiptWindow.document.write(
+            `<!doctype html><html><head><title>Receipt Error</title></head><body style="font-family:system-ui;padding:16px">
+              <h3 style="margin:0 0 8px 0">Failed to render receipt</h3>
+              <div style="white-space:pre-wrap;color:#b91c1c">${message}</div>
+              <hr/>
+              <div style="white-space:pre-wrap;font-size:12px;color:#374151">${JSON.stringify(
+                salesToPrint,
+                null,
+                2,
+              )}</div>
+            </body></html>`,
+          );
+          receiptWindow.document.close();
+        } catch {
+          // ignore
+        }
+      }
     }, 0);
   };
 
