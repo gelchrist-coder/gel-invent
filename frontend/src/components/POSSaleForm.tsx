@@ -347,42 +347,33 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     <div className="pos-layout">
       {/* Left Side - Product Selection */}
       <div className="pos-left">
-        {/* Search and Category Filter */}
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            type="text"
-            placeholder="🔍 Search products..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{
-              flex: 1,
-              padding: "10px 12px",
-              border: "2px solid #e5e7eb",
-              borderRadius: 8,
-              fontSize: 14,
-            }}
-          />
-        </div>
-
-        {/* Category Tabs */}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {/* Category Tabs - Horizontal Scroll */}
+        <div style={{ 
+          display: "flex", 
+          gap: 8, 
+          overflowX: "auto", 
+          paddingBottom: 4,
+          scrollbarWidth: "none", /* Firefox */
+        }}>
           {categories.map(category => (
             <button
               key={category}
               type="button"
               onClick={() => setSelectedCategory(category || "all")}
               style={{
-                padding: "8px 16px",
-                border: selectedCategory === category ? "2px solid #10b981" : "1px solid #d1d5db",
-                background: selectedCategory === category ? "#f0fdf4" : "white",
-                color: selectedCategory === category ? "#059669" : "#6b7280",
+                padding: "6px 14px",
+                border: "none",
+                background: selectedCategory === category ? "#f3f4f6" : "transparent",
+                color: selectedCategory === category ? "#111827" : "#6b7280",
                 borderRadius: 6,
                 cursor: "pointer",
-                fontWeight: selectedCategory === category ? 600 : 400,
-                fontSize: 13,
+                fontWeight: selectedCategory === category ? 600 : 500,
+                fontSize: 14,
+                whiteSpace: "nowrap",
+                flexShrink: 0,
               }}
             >
-              {category === "all" ? "All Products" : category}
+              {category === "all" ? "All" : category}
             </button>
           ))}
 
@@ -393,17 +384,18 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
               setNewCategoryName("");
             }}
             style={{
-              padding: "8px 16px",
+              padding: "6px 14px",
               border: "1px dashed #d1d5db",
-              background: "white",
-              color: "#6b7280",
+              background: "transparent",
+              color: "#9ca3af",
               borderRadius: 6,
               cursor: "pointer",
-              fontWeight: 600,
               fontSize: 13,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
             }}
           >
-            + Add category…
+            + Add
           </button>
         </div>
 
@@ -485,20 +477,20 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
             <div
               key={product.id}
               style={{
-                padding: 14,
-                border: "2px solid #f3f4f6",
-                borderRadius: 12,
+                padding: 12,
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
                 background: "white",
                 display: "flex",
                 flexDirection: "column",
-                gap: 10,
-                boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                gap: 8,
+                cursor: "pointer",
                 transition: "all 0.2s",
               }}
             >
               <div style={{ 
-                fontWeight: 700, 
-                fontSize: 15, 
+                fontWeight: 600, 
+                fontSize: 14, 
                 color: "#111827",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -806,15 +798,16 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
               >
                 {/* Total and Actions */}
                 <div style={{
-                  background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                  background: "#f9fafb",
                   padding: "14px 16px",
                   display: "flex",
                   gap: 10,
                   alignItems: "center",
+                  borderBottom: "1px solid #e5e7eb",
                 }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total ({totalItems} items)</div>
-                    <div style={{ fontSize: 24, fontWeight: 900, color: "white" }}>
+                    <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total • {totalItems} items</div>
+                    <div style={{ fontSize: 26, fontWeight: 800, color: "#111827" }}>
                       GHS {cartTotal.toFixed(2)}
                     </div>
                   </div>
@@ -824,15 +817,15 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                     onClick={undoLastAdd}
                     disabled={!lastAdded}
                     style={{
-                      padding: "8px 12px",
+                      padding: "8px 14px",
                       borderRadius: 8,
-                      border: "none",
-                      background: "rgba(255,255,255,0.2)",
-                      color: "white",
+                      border: "1px solid #e5e7eb",
+                      background: "white",
+                      color: "#6b7280",
                       cursor: !lastAdded ? "not-allowed" : "pointer",
-                      opacity: !lastAdded ? 0.5 : 1,
+                      opacity: !lastAdded ? 0.4 : 1,
                       fontSize: 13,
-                      fontWeight: 700,
+                      fontWeight: 600,
                       whiteSpace: "nowrap",
                     }}
                     title="Undo last added item"
@@ -844,14 +837,14 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                     type="button"
                     onClick={armOrClearCart}
                     style={{
-                      padding: "8px 12px",
+                      padding: "8px 14px",
                       fontSize: 13,
-                      background: clearArmed ? "#dc2626" : "rgba(255,255,255,0.2)",
-                      color: "white",
-                      border: "none",
+                      background: clearArmed ? "#dc2626" : "white",
+                      color: clearArmed ? "white" : "#6b7280",
+                      border: clearArmed ? "none" : "1px solid #e5e7eb",
                       borderRadius: 8,
                       cursor: "pointer",
-                      fontWeight: 700,
+                      fontWeight: 600,
                       whiteSpace: "nowrap",
                     }}
                   >
@@ -862,8 +855,8 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                 {/* Form fields */}
                 <div style={{ padding: "16px", flex: 1, overflowY: "auto" }}>
 
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, marginBottom: 8, color: "#374151", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, marginBottom: 6, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                     Payment Method
                   </label>
                   <select
@@ -871,13 +864,14 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                     onChange={(e) => setPaymentMethod(e.target.value)}
                     style={{
                       width: "100%",
-                      padding: "12px 14px",
-                      border: "2px solid #e5e7eb",
-                      borderRadius: 10,
-                      fontSize: 15,
-                      fontWeight: 600,
+                      padding: "10px 12px",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 500,
                       background: "white",
                       cursor: "pointer",
+                      color: "#111827",
                     }}
                   >
                     {PAYMENT_METHODS.map((method) => (
@@ -888,23 +882,23 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                   </select>
                 </div>
 
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, marginBottom: 8, color: "#374151", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                    Customer Name {paymentMethod === "credit" ? "*" : "(Optional)"}
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, marginBottom: 6, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Customer Name {paymentMethod === "credit" ? "" : "(Optional)"}
                   </label>
                   <input
                     type="text"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Enter customer name"
+                    placeholder="Enter name"
                     ref={customerInputRef}
                     style={{
                       width: "100%",
-                      padding: "12px 14px",
-                      border: paymentMethod === "credit" ? "2px solid #f59e0b" : "2px solid #e5e7eb",
-                      borderRadius: 10,
-                      fontSize: 15,
-                      background: paymentMethod === "credit" ? "#fffbeb" : "white",
+                      padding: "10px 12px",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 8,
+                      fontSize: 14,
+                      background: "white",
                     }}
                   />
                   {paymentMethod === "credit" ? (
@@ -923,21 +917,21 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                   ) : null}
                 </div>
 
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, marginBottom: 8, color: "#374151", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, marginBottom: 6, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                     Notes (Optional)
                   </label>
                   <textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Add any special notes..."
+                    placeholder="Add notes..."
                     rows={2}
                     style={{
                       width: "100%",
-                      padding: "12px 14px",
-                      border: "2px solid #e5e7eb",
-                      borderRadius: 10,
-                      fontSize: 14,
+                      padding: "10px 12px",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 8,
+                      fontSize: 13,
                       resize: "none",
                       fontFamily: "inherit",
                     }}
@@ -945,30 +939,28 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                 </div>
                 </div>
 
-                {/* Submit button - sticky at bottom */}
-                <div style={{ padding: "16px", borderTop: "2px solid #f3f4f6" }}>
+                {/* Submit button */}
+                <div style={{ padding: "14px 16px", borderTop: "1px solid #e5e7eb", background: "#fafafa" }}>
 
                 <button
                   type="submit"
                   style={{
                     width: "100%",
-                    padding: "16px 20px",
-                    background: "linear-gradient(135deg, #10b981, #059669)",
+                    padding: "14px 18px",
+                    background: "#10b981",
                     color: "white",
                     border: "none",
-                    borderRadius: 12,
-                    fontSize: 17,
-                    fontWeight: 800,
+                    borderRadius: 8,
+                    fontSize: 15,
+                    fontWeight: 600,
                     cursor: "pointer",
-                    boxShadow: "0 6px 20px rgba(16, 185, 129, 0.4)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     gap: 8,
                   }}
                 >
-                  <span style={{ fontSize: 20 }}>✓</span>
-                  <span>Complete Sale • GHS {cartTotal.toFixed(2)}</span>
+                  Complete Sale • GHS {cartTotal.toFixed(2)}
                 </button>
                 </div>
               </form>
