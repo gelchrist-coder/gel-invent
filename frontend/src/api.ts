@@ -56,6 +56,15 @@ export function clearDataCache(): void {
   dataCache.clear();
 }
 
+// Get cached data synchronously (for instant UI population)
+export function getCachedProducts(): Product[] | null {
+  return getCached<Product[]>("products");
+}
+
+export function getCachedSales(): Sale[] | null {
+  return getCached<Sale[]>("sales");
+}
+
 // Clear cache when branch changes
 window.addEventListener("activeBranchChanged", () => {
   dataCache.clear();

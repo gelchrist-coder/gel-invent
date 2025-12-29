@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { fetchProducts, fetchSalesDashboard, fetchSystemSettings } from "../api";
+import { fetchProducts, fetchSalesDashboard, fetchSystemSettings, getCachedProducts } from "../api";
 import { Product } from "../types";
 
 type Props = {
@@ -39,8 +39,10 @@ type LowStockItem = {
 };
 
 export default function Dashboard({ onNavigate }: Props) {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Initialize from cache for instant display
+  const cachedProducts = getCachedProducts();
+  const [products, setProducts] = useState<Product[]>(cachedProducts || []);
+  const [loading, setLoading] = useState(!cachedProducts); // Only show loading if no cache
   const [dashboardData, setDashboardData] = useState<SalesDashboardResponse | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);

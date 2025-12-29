@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { createMovement, createProduct, deleteProduct, fetchBranches, fetchMe, fetchProducts, updateProduct } from "./api";
+import { createMovement, createProduct, deleteProduct, fetchBranches, fetchMe, fetchProducts, updateProduct, getCachedProducts } from "./api";
 import Layout from "./components/Layout";
 import ProductForm from "./components/ProductForm";
 import ProductList from "./components/ProductList";
@@ -212,8 +212,17 @@ export default function App() {
     }
     
     const run = async () => {
-      setProducts([]);
-      setSelectedId(null);
+      // Use cached products immediately for instant display
+      const cached = getCachedProducts();
+      if (cached && cached.length > 0) {
+        setProducts(cached);
+        setSelectedId((prev) => prev ?? (cached[0]?.id ?? null));
+      } else {
+        setProducts([]);
+        setSelectedId(null);
+      }
+      
+      // Fetch fresh data in background
       const data = await fetchProducts();
       setProducts(data);
       setSelectedId((prev) => prev ?? (data[0]?.id ?? null));

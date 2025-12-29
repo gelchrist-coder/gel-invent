@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
-import { fetchSales, createSaleForBranch, createSalesBulk, deleteSale, fetchProducts } from "../api";
+import { fetchSales, createSaleForBranch, createSalesBulk, deleteSale, fetchProducts, getCachedProducts, getCachedSales } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import {
@@ -14,9 +14,12 @@ import {
 } from "../offline/storage";
 
 export default function Sales() {
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Initialize from cache for instant display
+  const cachedProducts = getCachedProducts();
+  const cachedSales = getCachedSales();
+  const [sales, setSales] = useState<Sale[]>(cachedSales || []);
+  const [products, setProducts] = useState<Product[]>(cachedProducts || []);
+  const [loading, setLoading] = useState(!cachedProducts); // Only show loading if no cache
   const [error, setError] = useState<string | null>(null);
   const [pendingSales, setPendingSales] = useState<NewSale[]>([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
