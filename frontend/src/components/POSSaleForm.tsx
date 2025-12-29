@@ -350,10 +350,10 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
         {/* Category Tabs - Horizontal Scroll */}
         <div style={{ 
           display: "flex", 
-          gap: 8, 
+          gap: 6, 
           overflowX: "auto", 
-          paddingBottom: 4,
-          scrollbarWidth: "none", /* Firefox */
+          paddingBottom: 2,
+          scrollbarWidth: "none",
         }}>
           {categories.map(category => (
             <button
@@ -361,14 +361,14 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
               type="button"
               onClick={() => setSelectedCategory(category || "all")}
               style={{
-                padding: "6px 14px",
+                padding: "5px 12px",
                 border: "none",
-                background: selectedCategory === category ? "#f3f4f6" : "transparent",
-                color: selectedCategory === category ? "#111827" : "#6b7280",
-                borderRadius: 6,
+                background: selectedCategory === category ? "#111827" : "white",
+                color: selectedCategory === category ? "white" : "#6b7280",
+                borderRadius: 4,
                 cursor: "pointer",
-                fontWeight: selectedCategory === category ? 600 : 500,
-                fontSize: 14,
+                fontWeight: 500,
+                fontSize: 12,
                 whiteSpace: "nowrap",
                 flexShrink: 0,
               }}
@@ -384,13 +384,13 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
               setNewCategoryName("");
             }}
             style={{
-              padding: "6px 14px",
+              padding: "5px 10px",
               border: "1px dashed #d1d5db",
-              background: "transparent",
+              background: "white",
               color: "#9ca3af",
-              borderRadius: 6,
+              borderRadius: 4,
               cursor: "pointer",
-              fontSize: 13,
+              fontSize: 11,
               whiteSpace: "nowrap",
               flexShrink: 0,
             }}
@@ -469,102 +469,56 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
           minHeight: 0,
           overflowY: "auto",
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-          gap: 12,
+          gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+          gap: 8,
           padding: 0,
         }}>
           {filteredProducts.map(product => (
-            <div
+            <button
               key={product.id}
+              type="button"
+              onClick={() => addToCart(product, 'piece')}
+              disabled={Number(product.current_stock ?? 0) <= 0}
               style={{
                 padding: 0,
                 border: "1px solid #e5e7eb",
-                borderRadius: 8,
+                borderRadius: 6,
                 background: "white",
                 display: "flex",
                 flexDirection: "column",
-                cursor: "pointer",
+                cursor: Number(product.current_stock ?? 0) <= 0 ? "not-allowed" : "pointer",
+                opacity: Number(product.current_stock ?? 0) <= 0 ? 0.5 : 1,
                 overflow: "hidden",
+                textAlign: "left",
               }}
             >
-              {/* Product Info Section */}
-              <div style={{ padding: "12px 12px 8px", borderBottom: "1px solid #f3f4f6" }}>
+              <div style={{ padding: "10px 10px 8px" }}>
                 <div style={{ 
                   fontWeight: 600, 
-                  fontSize: 13, 
+                  fontSize: 12, 
                   color: "#111827",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
-                  marginBottom: 4,
+                  marginBottom: 2,
                 }}>
                   {product.name}
                 </div>
-                <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 4 }}>
-                  {product.sku}
-                </div>
-                <div style={{ fontSize: 11, color: Number(product.current_stock ?? 0) <= 0 ? "#dc2626" : "#6b7280" }}>
-                  Stock: {Math.max(0, Number(product.current_stock ?? 0))}
+                <div style={{ fontSize: 10, color: Number(product.current_stock ?? 0) <= 0 ? "#dc2626" : "#9ca3af" }}>
+                  {Number(product.current_stock ?? 0) <= 0 ? "Out of stock" : `${Math.max(0, Number(product.current_stock ?? 0))} in stock`}
                 </div>
               </div>
-              
-              {/* Price buttons */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                <button
-                  type="button"
-                  onClick={() => addToCart(product, 'piece')}
-                  disabled={Number(product.current_stock ?? 0) <= 0}
-                  style={{
-                    padding: "10px 12px",
-                    border: "none",
-                    borderTop: "1px solid #f3f4f6",
-                    background: Number(product.current_stock ?? 0) <= 0 ? "#f9fafb" : "white",
-                    cursor: Number(product.current_stock ?? 0) <= 0 ? "not-allowed" : "pointer",
-                    opacity: Number(product.current_stock ?? 0) <= 0 ? 0.6 : 1,
-                    fontSize: 11,
-                    fontWeight: 500,
-                    color: "#6b7280",
-                    textAlign: "left",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <span>{product.unit || 'Piece'}</span>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>
-                    GHS {Number(product.selling_price || 0).toFixed(2)}
-                  </span>
-                </button>
-                
-                {product.pack_selling_price && product.pack_size && (
-                  <button
-                    type="button"
-                    onClick={() => addToCart(product, 'pack')}
-                    disabled={Number(product.current_stock ?? 0) <= 0}
-                    style={{
-                      padding: "10px 12px",
-                      border: "none",
-                      borderTop: "1px solid #f3f4f6",
-                      background: Number(product.current_stock ?? 0) <= 0 ? "#f9fafb" : "white",
-                      cursor: Number(product.current_stock ?? 0) <= 0 ? "not-allowed" : "pointer",
-                      opacity: Number(product.current_stock ?? 0) <= 0 ? 0.6 : 1,
-                      fontSize: 11,
-                      fontWeight: 500,
-                      color: "#6b7280",
-                      textAlign: "left",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <span>Pack ({product.pack_size})</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>
-                      GHS {Number(product.pack_selling_price || 0).toFixed(2)}
-                    </span>
-                  </button>
-                )}
+              <div style={{ 
+                padding: "8px 10px",
+                background: "#f9fafb",
+                borderTop: "1px solid #f3f4f6",
+                fontSize: 14,
+                fontWeight: 700,
+                color: "#111827",
+              }}>
+                GHS {Number(product.selling_price || 0).toFixed(2)}
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -573,30 +527,27 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
       <div className="pos-right">
         {/* Cart Header */}
         <div style={{
-          padding: "16px 16px 12px",
-          background: "white",
-          borderBottom: "1px solid #e5e7eb",
+          padding: "12px 14px",
+          background: "#111827",
+          color: "white",
         }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>Current Order</h3>
-          {cart.length > 0 && (
-            <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>
-              {totalItems} {totalItems === 1 ? 'item' : 'items'}
-            </div>
-          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>Order</span>
+            <span style={{ fontSize: 13, opacity: 0.8 }}>{totalItems} items</span>
+          </div>
         </div>
 
         {/* Cart Items */}
-        <div className="pos-cart-items">
+        <div className="pos-cart-items" style={{ padding: "0 14px" }}>
           {uiMessage && (
             <div
               style={{
-                marginBottom: 12,
-                padding: "10px 12px",
-                borderRadius: 6,
-                border: uiMessage.type === "error" ? "1px solid #fecaca" : "1px solid #bae6fd",
+                margin: "10px 0",
+                padding: "8px 10px",
+                borderRadius: 4,
                 background: uiMessage.type === "error" ? "#fef2f2" : "#eff6ff",
                 color: uiMessage.type === "error" ? "#b91c1c" : "#1d4ed8",
-                fontSize: 13,
+                fontSize: 12,
               }}
               role={uiMessage.type === "error" ? "alert" : "status"}
             >
@@ -607,15 +558,11 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
           {cart.length === 0 ? (
             <div style={{ 
               textAlign: "center", 
-              padding: "60px 20px", 
+              padding: "40px 16px", 
               color: "#9ca3af",
-              height: "100%",
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
             }}>
-              <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.3 }}>🛒</div>
-              <p style={{ fontSize: 14, fontWeight: 600, margin: 0, color: "#9ca3af" }}>No items yet</p>
+              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.3 }}>🛒</div>
+              <p style={{ fontSize: 13, margin: 0 }}>No items</p>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
@@ -623,74 +570,54 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                 const unitPrice = item.sellingUnit === 'pack'
                   ? Number(item.product.pack_selling_price || 0)
                   : Number(item.product.selling_price || 0);
-                const unitLabel = item.sellingUnit === 'pack'
-                  ? `Pack (${item.product.pack_size || 1})`
-                  : (item.product.unit || 'Piece');
-                
-                // Debugging: log if we get NaN
-                if (isNaN(unitPrice)) {
-                  console.error('Invalid price:', {
-                    sellingUnit: item.sellingUnit,
-                    pack_selling_price: item.product.pack_selling_price,
-                    selling_price: item.product.selling_price,
-                    product: item.product
-                  });
-                }
                 
                 return (
                 <div
                   key={`${item.product.id}-${item.sellingUnit}`}
                   style={{
-                    padding: "12px 0",
+                    padding: "10px 0",
                     borderBottom: "1px solid #f3f4f6",
-                    background: "white",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14, color: "#111827", marginBottom: 4 }}>{item.product.name}</div>
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>
-                        GHS {unitPrice.toFixed(2)} / {unitLabel}
-                      </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: "#111827", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {item.product.name}
                     </div>
                     <button
                       type="button"
                       onClick={() => removeFromCart(item.product.id, item.sellingUnit)}
                       style={{
-                        width: 28,
-                        height: 28,
+                        width: 24,
+                        height: 24,
                         background: "transparent",
                         color: "#9ca3af",
                         border: "none",
-                        borderRadius: 6,
                         cursor: "pointer",
-                        fontSize: 16,
+                        fontSize: 14,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        transition: "color 0.2s",
+                        flexShrink: 0,
+                        marginLeft: 8,
                       }}
-                      onMouseOver={(e) => e.currentTarget.style.color = "#dc2626"}
-                      onMouseOut={(e) => e.currentTarget.style.color = "#9ca3af"}
                     >
                       ✕
                     </button>
                   </div>
                   
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <button
                         type="button"
                         onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity - 1)}
                         style={{
-                          width: 32,
-                          height: 32,
-                          border: "1px solid #d1d5db",
+                          width: 28,
+                          height: 28,
+                          border: "1px solid #e5e7eb",
                           background: "white",
-                          borderRadius: 6,
+                          borderRadius: 4,
                           cursor: "pointer",
-                          fontSize: 18,
-                          fontWeight: 600,
+                          fontSize: 16,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -699,50 +626,25 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                       >
                         −
                       </button>
-                      <input
-                        type="number"
-                        value={item.quantity || ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val === "" || val === "0") {
-                            updateQuantity(item.product.id, item.sellingUnit, 0);
-                          } else {
-                            const num = parseInt(val);
-                            if (!isNaN(num) && num > 0) {
-                              updateQuantity(item.product.id, item.sellingUnit, num);
-                            }
-                          }
-                        }}
-                        onBlur={(e) => {
-                          const val = parseInt(e.target.value);
-                          if (isNaN(val) || val <= 0) {
-                            updateQuantity(item.product.id, item.sellingUnit, 1);
-                          }
-                        }}
-                        style={{
-                          width: 48,
-                          height: 32,
-                          padding: "4px 8px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: 6,
-                          textAlign: "center",
-                          fontSize: 14,
-                          fontWeight: 600,
-                          background: "white",
-                        }}
-                      />
+                      <span style={{ 
+                        width: 32, 
+                        textAlign: "center", 
+                        fontSize: 14, 
+                        fontWeight: 600 
+                      }}>
+                        {item.quantity}
+                      </span>
                       <button
                         type="button"
                         onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity + 1)}
                         style={{
-                          width: 32,
-                          height: 32,
-                          border: "1px solid #d1d5db",
+                          width: 28,
+                          height: 28,
+                          border: "1px solid #e5e7eb",
                           background: "white",
-                          borderRadius: 6,
+                          borderRadius: 4,
                           cursor: "pointer",
-                          fontSize: 18,
-                          fontWeight: 600,
+                          fontSize: 16,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -752,11 +654,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                         +
                       </button>
                     </div>
-                    <div style={{ 
-                      fontWeight: 700, 
-                      color: "#111827", 
-                      fontSize: 16,
-                    }}>
+                    <div style={{ fontWeight: 700, color: "#111827", fontSize: 14 }}>
                       GHS {(unitPrice * item.quantity).toFixed(2)}
                     </div>
                   </div>
@@ -771,88 +669,38 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
         {cart.length > 0 && (
           <div
             style={{
-              borderTop: "2px solid #e5e7eb",
+              borderTop: "1px solid #e5e7eb",
               background: "white",
-              borderRadius: "0 0 12px 12px",
-              position: "sticky",
-              bottom: 0,
-              zIndex: 2,
             }}
           >
-            (
               <form
                 className="pos-checkout"
                 onSubmit={handleSubmit}
               >
-                {/* Subtotal */}
+                {/* Total */}
                 <div style={{
-                  padding: "16px",
-                  borderBottom: "1px solid #e5e7eb",
+                  padding: "12px 14px",
+                  borderBottom: "1px solid #f3f4f6",
                 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <span style={{ fontSize: 13, color: "#6b7280" }}>Subtotal</span>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: "#111827" }}>GHS {cartTotal.toFixed(2)}</span>
-                  </div>
-
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      type="button"
-                      onClick={undoLastAdd}
-                      disabled={!lastAdded}
-                      style={{
-                        flex: 1,
-                        padding: "8px 12px",
-                        borderRadius: 6,
-                        border: "1px solid #e5e7eb",
-                        background: "white",
-                        color: "#6b7280",
-                        cursor: !lastAdded ? "not-allowed" : "pointer",
-                        opacity: !lastAdded ? 0.4 : 1,
-                        fontSize: 12,
-                        fontWeight: 500,
-                      }}
-                      title="Undo last added item"
-                    >
-                      ↶ Undo
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={armOrClearCart}
-                      style={{
-                        flex: 1,
-                        padding: "8px 12px",
-                        fontSize: 12,
-                        background: clearArmed ? "#dc2626" : "white",
-                        color: clearArmed ? "white" : "#6b7280",
-                        border: clearArmed ? "none" : "1px solid #e5e7eb",
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {clearArmed ? "⚠ Confirm" : "Clear"}
-                    </button>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>Subtotal</span>
+                    <span style={{ fontSize: 18, fontWeight: 700, color: "#111827" }}>GHS {cartTotal.toFixed(2)}</span>
                   </div>
                 </div>
 
                 {/* Form fields */}
-                <div style={{ padding: "16px" }}>
+                <div style={{ padding: "12px 14px" }}>
 
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#374151" }}>
-                    Payment Method
-                  </label>
+                <div style={{ marginBottom: 10 }}>
                   <select
                     value={paymentMethod}
                     onChange={(e) => setPaymentMethod(e.target.value)}
                     style={{
                       width: "100%",
                       padding: "10px 12px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 6,
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 4,
                       fontSize: 13,
-                      fontWeight: 500,
                       background: "white",
                       cursor: "pointer",
                       color: "#111827",
@@ -866,77 +714,45 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                   </select>
                 </div>
 
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#374151" }}>
-                    Customer Name {paymentMethod === "credit" ? "" : "(Optional)"}
-                  </label>
+                <div style={{ marginBottom: 10 }}>
                   <input
                     type="text"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Enter name"
+                    placeholder={paymentMethod === "credit" ? "Customer name (required)" : "Customer name (optional)"}
                     ref={customerInputRef}
                     style={{
                       width: "100%",
                       padding: "10px 12px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 6,
+                      border: paymentMethod === "credit" ? "1px solid #fbbf24" : "1px solid #e5e7eb",
+                      borderRadius: 4,
                       fontSize: 13,
-                      background: "white",
+                      background: paymentMethod === "credit" ? "#fffbeb" : "white",
                     }}
                   />
-                  {paymentMethod === "credit" ? (
-                    <div style={{ 
-                      marginTop: 6, 
-                      fontSize: 11, 
-                      color: "#b45309", 
-                      fontWeight: 500,
-                    }}>
-                      ⚠️ Required for credit sales
-                    </div>
-                  ) : null}
                 </div>
 
-                <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6, color: "#374151" }}>
-                    Notes (Optional)
-                  </label>
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Add notes..."
-                    rows={2}
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 6,
-                      fontSize: 13,
-                      resize: "none",
-                      fontFamily: "inherit",
-                    }}
-                  />
-                </div>
                 </div>
 
                 {/* Submit button */}
-                <button
-                  type="submit"
-                  style={{
-                    width: "100%",
-                    padding: "16px 18px",
-                    background: "#10b981",
-                    color: "white",
-                    border: "none",
-                    borderRadius: 8,
-                    fontSize: 16,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    textAlign: "center",
-                  }}
-                >
-                  Charge GHS {cartTotal.toFixed(2)}
-                </button>
+                <div style={{ padding: "0 14px 14px" }}>
+                  <button
+                    type="submit"
+                    style={{
+                      width: "100%",
+                      padding: "14px",
+                      background: "#10b981",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 6,
+                      fontSize: 15,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Charge GHS {cartTotal.toFixed(2)}
+                  </button>
+                </div>
               </form>
           </div>
         )}
