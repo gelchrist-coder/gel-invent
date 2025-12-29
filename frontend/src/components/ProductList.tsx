@@ -54,43 +54,46 @@ export default function ProductList({
   const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
 
-  // Fetch stock movements for all products
+  // Use current_stock from products (already computed by backend) - much faster!
+  // Only fetch movements in parallel for location options and expiry dates
   useEffect(() => {
-    const loadStockData = async () => {
+    const loadAdditionalData = async () => {
+      // Stock is already in product.current_stock - use it directly
       const stockMap: Record<number, number> = {};
+      const expiryMap: Record<number, string | null> = {};
+      
+      for (const product of products) {
+        stockMap[product.id] = Math.max(0, Number(product.current_stock ?? 0));
+        expiryMap[product.id] = product.expiry_date ?? null;
+      }
+      
+      setStockData(stockMap);
+      setExpiryByProduct(expiryMap);
+      
+      // Fetch movements in PARALLEL for locations only (not for stock calculation)
       const locations = new Set<string>();
       locations.add("Main Store");
-      const expiryMap: Record<number, string | null> = {};
-      for (const product of products) {
-        try {
-          const movements = await fetchMovements(product.id);
-          const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
-          stockMap[product.id] = Math.max(0, totalStock);
-
+      
+      try {
+        const movementPromises = products.map(p => 
+          fetchMovements(p.id).catch(() => [])
+        );
+        const allMovements = await Promise.all(movementPromises);
+        
+        for (const movements of allMovements) {
           for (const m of movements) {
             if (m.location) locations.add(String(m.location));
           }
-
-          const expiries = movements
-            .map((m) => m.expiry_date)
-            .filter((d): d is string => Boolean(d));
-          if (expiries.length) {
-            expiries.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-            expiryMap[product.id] = expiries[0];
-          } else {
-            expiryMap[product.id] = null;
-          }
-        } catch {
-          stockMap[product.id] = 0;
-          expiryMap[product.id] = null;
         }
+      } catch {
+        // Ignore errors - locations are optional
       }
-      setStockData(stockMap);
+      
       setLocationOptions(Array.from(locations));
-      setExpiryByProduct(expiryMap);
     };
+    
     if (products.length > 0) {
-      loadStockData();
+      loadAdditionalData();
     }
   }, [products]);
 
