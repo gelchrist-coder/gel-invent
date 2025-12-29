@@ -580,18 +580,18 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
         </div>
 
         {/* Cart Items */}
-        <div className="pos-cart-items" style={{ overflowY: "auto", padding: 12 }}>
+        <div className="pos-cart-items" style={{ overflowY: "auto", padding: 16, background: "#f9fafb" }}>
           {uiMessage && (
             <div
               style={{
-                marginBottom: 10,
-                padding: "10px 12px",
-                borderRadius: 10,
+                marginBottom: 12,
+                padding: "12px 14px",
+                borderRadius: 8,
                 border: uiMessage.type === "error" ? "1px solid #fecaca" : "1px solid #bae6fd",
                 background: uiMessage.type === "error" ? "#fef2f2" : "#eff6ff",
                 color: uiMessage.type === "error" ? "#b91c1c" : "#1d4ed8",
                 fontSize: 13,
-                fontWeight: 700,
+                fontWeight: 600,
               }}
               role={uiMessage.type === "error" ? "alert" : "status"}
             >
@@ -609,13 +609,15 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
               alignItems: "center",
               justifyContent: "center",
               height: "100%",
+              background: "white",
+              borderRadius: 12,
             }}>
-              <div style={{ fontSize: 64, marginBottom: 16, opacity: 0.5 }}>🛒</div>
+              <div style={{ fontSize: 64, marginBottom: 16, opacity: 0.4 }}>🛒</div>
               <p style={{ fontSize: 16, fontWeight: 600, margin: "0 0 8px 0", color: "#6b7280" }}>Your cart is empty</p>
-              <p style={{ fontSize: 13, margin: 0 }}>Tap products to add them</p>
+              <p style={{ fontSize: 13, margin: 0, color: "#9ca3af" }}>Tap products to add them</p>
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {cart.map(item => {
                 const unitPrice = item.sellingUnit === 'pack'
                   ? Number(item.product.pack_selling_price || 0)
@@ -638,22 +640,22 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                 <div
                   key={`${item.product.id}-${item.sellingUnit}`}
                   style={{
-                    background: "linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)",
-                    padding: 16,
-                    borderRadius: 12,
+                    background: "white",
+                    padding: 14,
+                    borderRadius: 10,
                     border: "2px solid #e5e7eb",
-                    boxShadow: "0 2px 4px rgba(0,0,0,0.04)",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.06)",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: "start", gap: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: "start", gap: 10 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6, color: "#111827" }}>{item.product.name}</div>
+                      <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8, color: "#111827", lineHeight: 1.3 }}>{item.product.name}</div>
                       <div style={{ 
-                        fontSize: 12, 
+                        fontSize: 13, 
                         color: "#059669",
-                        fontWeight: 600,
+                        fontWeight: 700,
                         background: "#d1fae5",
-                        padding: "3px 8px",
+                        padding: "4px 10px",
                         borderRadius: 6,
                         display: "inline-block",
                       }}>
@@ -664,14 +666,14 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                       type="button"
                       onClick={() => removeFromCart(item.product.id, item.sellingUnit)}
                       style={{
-                        width: 32,
-                        height: 32,
+                        width: 36,
+                        height: 36,
                         background: "#fee2e2",
                         color: "#dc2626",
-                        border: "none",
+                        border: "2px solid #fecaca",
                         borderRadius: 8,
                         cursor: "pointer",
-                        fontSize: 16,
+                        fontSize: 18,
                         fontWeight: 700,
                         display: "flex",
                         alignItems: "center",
@@ -685,18 +687,18 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                   </div>
                   
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <button
                         type="button"
                         onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity - 1)}
                         style={{
-                          width: 32,
-                          height: 32,
+                          width: 36,
+                          height: 36,
                           border: "2px solid #e5e7eb",
-                          background: "white",
+                          background: "#f9fafb",
                           borderRadius: 8,
                           cursor: "pointer",
-                          fontSize: 18,
+                          fontSize: 20,
                           fontWeight: 700,
                           display: "flex",
                           alignItems: "center",
@@ -729,26 +731,29 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                           }
                         }}
                         style={{
-                          width: 50,
+                          width: 56,
+                          height: 36,
                           padding: "4px 8px",
-                          border: "1px solid #d1d5db",
-                          borderRadius: 4,
+                          border: "2px solid #d1d5db",
+                          borderRadius: 6,
                           textAlign: "center",
-                          fontSize: 14,
+                          fontSize: 16,
+                          fontWeight: 700,
+                          background: "white",
                         }}
                       />
                       <button
                         type="button"
                         onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity + 1)}
                         style={{
-                          width: 32,
-                          height: 32,
+                          width: 36,
+                          height: 36,
                           border: "2px solid #10b981",
                           background: "#d1fae5",
                           color: "#059669",
                           borderRadius: 8,
                           cursor: "pointer",
-                          fontSize: 18,
+                          fontSize: 20,
                           fontWeight: 700,
                           display: "flex",
                           alignItems: "center",
@@ -762,7 +767,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                     <div style={{ 
                       fontWeight: 800, 
                       color: "#059669", 
-                      fontSize: 18,
+                      fontSize: 20,
                       whiteSpace: "nowrap",
                     }}>
                       GHS {(unitPrice * item.quantity).toFixed(2)}
