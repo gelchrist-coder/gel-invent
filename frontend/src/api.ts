@@ -12,6 +12,56 @@ const API_BASE = normalizeBaseUrl(
 // Export for use in other components
 export { API_BASE };
 
+// ============ DATA CACHE FOR INSTANT NAVIGATION ============
+// Cache data to make sidebar navigation feel instant
+type CacheEntry<T> = {
+  data: T;
+  timestamp: number;
+  branchId: string | null;
+};
+
+const dataCache = new Map<string, CacheEntry<unknown>>();
+const CACHE_TTL = 30000; // 30 seconds - data is considered fresh
+
+function getCacheKey(key: string): string {
+  const branchId = localStorage.getItem("activeBranchId");
+  return `${key}:${branchId || "default"}`;
+}
+
+function getCached<T>(key: string): T | null {
+  const cacheKey = getCacheKey(key);
+  const entry = dataCache.get(cacheKey) as CacheEntry<T> | undefined;
+  if (!entry) return null;
+  
+  const branchId = localStorage.getItem("activeBranchId");
+  if (entry.branchId !== branchId) return null;
+  
+  return entry.data;
+}
+
+function setCache<T>(key: string, data: T): void {
+  const cacheKey = getCacheKey(key);
+  const branchId = localStorage.getItem("activeBranchId");
+  dataCache.set(cacheKey, { data, timestamp: Date.now(), branchId });
+}
+
+function isCacheFresh(key: string): boolean {
+  const cacheKey = getCacheKey(key);
+  const entry = dataCache.get(cacheKey);
+  if (!entry) return false;
+  return Date.now() - entry.timestamp < CACHE_TTL;
+}
+
+export function clearDataCache(): void {
+  dataCache.clear();
+}
+
+// Clear cache when branch changes
+window.addEventListener("activeBranchChanged", () => {
+  dataCache.clear();
+});
+// ============ END DATA CACHE ============
+
 export type AuthUser = {
   id: number;
   email: string;
@@ -261,7 +311,35 @@ export async function changePassword(payload: {
 }
 
 export async function fetchProducts(): Promise<Product[]> {
-  return jsonRequest<Product[]>("/products/");
+  // Return cached data immediately if available
+  const cached = getCached<Product[]>("products");
+  if (cached && isCacheFresh("products")) {
+    return cached;
+  }
+  
+  const data = await jsonRequest<Product[]>("/products/");
+  setCache("products", data);
+  return data;
+}
+
+// Fetch products with background refresh - returns cached immediately, refreshes in background
+export async function fetchProductsCached(onUpdate?: (products: Product[]) => void): Promise<Product[]> {
+  const cached = getCached<Product[]>("products");
+  
+  // If we have cached data, return it immediately and refresh in background
+  if (cached) {
+    // Refresh in background
+    jsonRequest<Product[]>("/products/").then(fresh => {
+      setCache("products", fresh);
+      if (onUpdate) onUpdate(fresh);
+    }).catch(() => { /* ignore background refresh errors */ });
+    return cached;
+  }
+  
+  // No cache, fetch fresh
+  const data = await jsonRequest<Product[]>("/products/");
+  setCache("products", data);
+  return data;
 }
 
 export async function fetchMovements(productId: number): Promise<StockMovement[]> {
@@ -274,11 +352,14 @@ export async function createProduct(payload: NewProduct, branchIdOverride?: numb
   if (branchIdOverride != null) {
     headers["X-Branch-Id"] = String(branchIdOverride);
   }
-  return jsonRequest<Product>("/products/", {
+  const result = await jsonRequest<Product>("/products/", {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
   });
+  // Invalidate products cache
+  dataCache.delete(getCacheKey("products"));
+  return result;
 }
 
 export async function createMovement(
@@ -289,38 +370,82 @@ export async function createMovement(
     method: "POST",
     body: JSON.stringify(payload),
   });
+  // Invalidate caches since stock changed
+  dataCache.delete(getCacheKey("products"));
+  dataCache.delete(getCacheKey("inventoryAnalytics"));
   return { ...data, change: Number(data.change) };
 }
 
 export async function updateProduct(id: number, updates: Partial<Product>): Promise<Product> {
-  return jsonRequest<Product>(`/products/${id}`, {
+  const result = await jsonRequest<Product>(`/products/${id}`, {
     method: "PATCH",
     body: JSON.stringify(updates),
   });
+  // Invalidate products cache since data changed
+  dataCache.delete(getCacheKey("products"));
+  return result;
 }
 
 export async function deleteProduct(productId: number): Promise<void> {
   await jsonRequest<void>(`/products/${productId}`, { method: "DELETE" });
+  // Invalidate products cache
+  dataCache.delete(getCacheKey("products"));
 }
 
 // Sales API
 
 export async function fetchSales(): Promise<Sale[]> {
-  return jsonRequest<Sale[]>("/sales");
+  // Return cached data immediately if available
+  const cached = getCached<Sale[]>("sales");
+  if (cached && isCacheFresh("sales")) {
+    return cached;
+  }
+  
+  const data = await jsonRequest<Sale[]>("/sales");
+  setCache("sales", data);
+  return data;
+}
+
+// Fetch sales with background refresh
+export async function fetchSalesCached(onUpdate?: (sales: Sale[]) => void): Promise<Sale[]> {
+  const cached = getCached<Sale[]>("sales");
+  
+  if (cached) {
+    // Refresh in background
+    jsonRequest<Sale[]>("/sales").then(fresh => {
+      setCache("sales", fresh);
+      if (onUpdate) onUpdate(fresh);
+    }).catch(() => {});
+    return cached;
+  }
+  
+  const data = await jsonRequest<Sale[]>("/sales");
+  setCache("sales", data);
+  return data;
 }
 
 export async function createSale(payload: NewSale): Promise<Sale> {
-  return jsonRequest<Sale>("/sales", {
+  const result = await jsonRequest<Sale>("/sales", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  // Invalidate related caches
+  dataCache.delete(getCacheKey("sales"));
+  dataCache.delete(getCacheKey("products"));
+  dataCache.delete(getCacheKey("salesDashboard"));
+  return result;
 }
 
 export async function createSalesBulk(payloads: NewSale[]): Promise<Sale[]> {
-  return jsonRequest<Sale[]>("/sales/bulk", {
+  const result = await jsonRequest<Sale[]>("/sales/bulk", {
     method: "POST",
     body: JSON.stringify(payloads),
   });
+  // Invalidate related caches
+  dataCache.delete(getCacheKey("sales"));
+  dataCache.delete(getCacheKey("products"));
+  dataCache.delete(getCacheKey("salesDashboard"));
+  return result;
 }
 
 export async function createSaleForBranch(payload: NewSale, branchIdOverride: string | number | null): Promise<Sale> {
@@ -328,21 +453,37 @@ export async function createSaleForBranch(payload: NewSale, branchIdOverride: st
   if (branchIdOverride != null) {
     headers["X-Branch-Id"] = String(branchIdOverride);
   }
-  return jsonRequest<Sale>("/sales", {
+  const result = await jsonRequest<Sale>("/sales", {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
   });
+  // Invalidate related caches
+  dataCache.delete(getCacheKey("sales"));
+  dataCache.delete(getCacheKey("products"));
+  dataCache.delete(getCacheKey("salesDashboard"));
+  return result;
 }
 
 export async function deleteSale(saleId: number): Promise<void> {
   await jsonRequest<void>(`/sales/${saleId}`, { method: "DELETE" });
+  // Invalidate related caches
+  dataCache.delete(getCacheKey("sales"));
+  dataCache.delete(getCacheKey("products"));
+  dataCache.delete(getCacheKey("salesDashboard"));
 }
 
 // Inventory API
 
 export async function fetchInventoryAnalytics(): Promise<JsonObject> {
-  return jsonRequest<JsonObject>("/inventory/analytics");
+  const cached = getCached<JsonObject>("inventoryAnalytics");
+  if (cached && isCacheFresh("inventoryAnalytics")) {
+    return cached;
+  }
+  
+  const data = await jsonRequest<JsonObject>("/inventory/analytics");
+  setCache("inventoryAnalytics", data);
+  return data;
 }
 
 // Settings API
@@ -359,23 +500,46 @@ export async function updateSystemSettings(payload: SystemSettings): Promise<Sys
 }
 
 export async function fetchAllMovements(days: number = 30, location?: string, reason?: string): Promise<JsonArray> {
+  const cacheKey = `movements:${days}:${location || ""}:${reason || ""}`;
+  const cached = getCached<JsonArray>(cacheKey);
+  if (cached && isCacheFresh(cacheKey)) {
+    return cached;
+  }
+  
   const params = new URLSearchParams({ days: days.toString() });
   if (location) params.append("location", location);
   if (reason) params.append("reason", reason);
-  return jsonRequest<JsonArray>(`/inventory/movements?${params.toString()}`);
+  const data = await jsonRequest<JsonArray>(`/inventory/movements?${params.toString()}`);
+  setCache(cacheKey, data);
+  return data;
 }
 
 // Revenue API
 
 export async function fetchRevenueAnalytics(period: string = "30d", startDate?: string, endDate?: string): Promise<JsonObject> {
+  const cacheKey = `revenue:${period}:${startDate || ""}:${endDate || ""}`;
+  const cached = getCached<JsonObject>(cacheKey);
+  if (cached && isCacheFresh(cacheKey)) {
+    return cached;
+  }
+  
   const params = new URLSearchParams({ period });
   if (startDate) params.append("start_date", startDate);
   if (endDate) params.append("end_date", endDate);
-  return jsonRequest<JsonObject>(`/revenue/analytics?${params.toString()}`);
+  const data = await jsonRequest<JsonObject>(`/revenue/analytics?${params.toString()}`);
+  setCache(cacheKey, data);
+  return data;
 }
 
 // Reports API
 
 export async function fetchSalesDashboard(): Promise<JsonObject> {
-  return jsonRequest<JsonObject>("/reports/sales-dashboard");
+  const cached = getCached<JsonObject>("salesDashboard");
+  if (cached && isCacheFresh("salesDashboard")) {
+    return cached;
+  }
+  
+  const data = await jsonRequest<JsonObject>("/reports/sales-dashboard");
+  setCache("salesDashboard", data);
+  return data;
 }
