@@ -303,6 +303,13 @@ export async function createSale(payload: NewSale): Promise<Sale> {
   });
 }
 
+export async function createSalesBulk(payloads: NewSale[]): Promise<Sale[]> {
+  return jsonRequest<Sale[]>("/sales/bulk", {
+    method: "POST",
+    body: JSON.stringify(payloads),
+  });
+}
+
 export async function createSaleForBranch(payload: NewSale, branchIdOverride: string | number | null): Promise<Sale> {
   const headers: Record<string, string> = {};
   if (branchIdOverride != null) {

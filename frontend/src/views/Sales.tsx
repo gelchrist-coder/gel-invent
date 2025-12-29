@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
-import { fetchSales, createSale, createSaleForBranch, deleteSale, fetchProducts } from "../api";
+import { fetchSales, createSaleForBranch, createSalesBulk, deleteSale, fetchProducts } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import {
@@ -131,9 +131,7 @@ export default function Sales() {
       }
 
       // Create all sales
-      for (const sale of pendingSales) {
-        await createSale(sale);
-      }
+      await createSalesBulk(pendingSales);
       await loadData(); // Refresh sales and products (to update stock)
       setSaleConfirmed(true); // Show success state with print/done buttons
     } catch (err) {

@@ -313,6 +313,34 @@ def create_sale(
     return sale
 
 
+@router.post("/bulk", response_model=list[SaleRead], status_code=201)
+def create_sales_bulk(
+    payloads: list[SaleCreate],
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    """Create multiple sales in one request (bulk checkout).
+
+    This is primarily a POS performance endpoint to avoid N sequential HTTP requests.
+    Each item uses the same create_sale logic (including idempotency).
+    """
+    if not payloads:
+        raise HTTPException(status_code=400, detail="No sales provided")
+
+    created: list[models.Sale] = []
+    for payload in payloads:
+        created.append(
+            create_sale(
+                payload=payload,
+                db=db,
+                current_user=current_user,
+                active_branch_id=active_branch_id,
+            )
+        )
+    return created
+
+
 @router.get("", response_model=list[SaleRead])
 def list_sales(
     db: Session = Depends(get_db),
