@@ -477,24 +477,33 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
           minHeight: 0,
           overflowY: "auto",
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-          gap: 12,
+          gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+          gap: 14,
           padding: 4,
         }}>
           {filteredProducts.map(product => (
             <div
               key={product.id}
               style={{
-                padding: 12,
-                border: "1px solid #e5e7eb",
-                borderRadius: 8,
+                padding: 14,
+                border: "2px solid #f3f4f6",
+                borderRadius: 12,
                 background: "white",
                 display: "flex",
                 flexDirection: "column",
-                gap: 8,
+                gap: 10,
+                boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                transition: "all 0.2s",
               }}
             >
-              <div style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>
+              <div style={{ 
+                fontWeight: 700, 
+                fontSize: 15, 
+                color: "#111827",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}>
                 {product.name}
               </div>
               <div style={{ fontSize: 12, color: "#6b7280" }}>
@@ -599,10 +608,19 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
           )}
 
           {cart.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>🛍️</div>
-              <p>Cart is empty</p>
-              <p style={{ fontSize: 13 }}>Click on products to add</p>
+            <div style={{ 
+              textAlign: "center", 
+              padding: 50, 
+              color: "#9ca3af",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+            }}>
+              <div style={{ fontSize: 64, marginBottom: 16, opacity: 0.5 }}>🛒</div>
+              <p style={{ fontSize: 16, fontWeight: 600, margin: "0 0 8px 0", color: "#6b7280" }}>Your cart is empty</p>
+              <p style={{ fontSize: 13, margin: 0 }}>Tap products to add them</p>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -628,31 +646,46 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                 <div
                   key={`${item.product.id}-${item.sellingUnit}`}
                   style={{
-                    background: "white",
-                    padding: 12,
-                    borderRadius: 8,
-                    border: "1px solid #e5e7eb",
+                    background: "linear-gradient(135deg, #ffffff 0%, #f9fafb 100%)",
+                    padding: 16,
+                    borderRadius: 12,
+                    border: "2px solid #e5e7eb",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.04)",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{item.product.name}</div>
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>
-                        GHS {unitPrice.toFixed(2)} per {unitLabel}
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12, alignItems: "start", gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6, color: "#111827" }}>{item.product.name}</div>
+                      <div style={{ 
+                        fontSize: 12, 
+                        color: "#059669",
+                        fontWeight: 600,
+                        background: "#d1fae5",
+                        padding: "3px 8px",
+                        borderRadius: 6,
+                        display: "inline-block",
+                      }}>
+                        GHS {unitPrice.toFixed(2)} / {unitLabel}
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => removeFromCart(item.product.id, item.sellingUnit)}
                       style={{
-                        padding: "4px 8px",
+                        width: 32,
+                        height: 32,
                         background: "#fee2e2",
                         color: "#dc2626",
                         border: "none",
-                        borderRadius: 4,
+                        borderRadius: 8,
                         cursor: "pointer",
-                        fontSize: 12,
-                        height: 24,
+                        fontSize: 16,
+                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                        transition: "all 0.2s",
                       }}
                     >
                       ✕
@@ -665,13 +698,18 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                         type="button"
                         onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity - 1)}
                         style={{
-                          width: 28,
-                          height: 28,
-                          border: "1px solid #d1d5db",
+                          width: 32,
+                          height: 32,
+                          border: "2px solid #e5e7eb",
                           background: "white",
-                          borderRadius: 4,
+                          borderRadius: 8,
                           cursor: "pointer",
-                          fontSize: 16,
+                          fontSize: 18,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          transition: "all 0.2s",
                         }}
                       >
                         −
@@ -699,19 +737,30 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                         type="button"
                         onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity + 1)}
                         style={{
-                          width: 28,
-                          height: 28,
-                          border: "1px solid #d1d5db",
-                          background: "white",
-                          borderRadius: 4,
+                          width: 32,
+                          height: 32,
+                          border: "2px solid #10b981",
+                          background: "#d1fae5",
+                          color: "#059669",
+                          borderRadius: 8,
                           cursor: "pointer",
-                          fontSize: 16,
+                          fontSize: 18,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          transition: "all 0.2s",
                         }}
                       >
                         +
                       </button>
                     </div>
-                    <div style={{ fontWeight: 700, color: "#10b981", fontSize: 16 }}>
+                    <div style={{ 
+                      fontWeight: 800, 
+                      color: "#059669", 
+                      fontSize: 18,
+                      whiteSpace: "nowrap",
+                    }}>
                       GHS {(unitPrice * item.quantity).toFixed(2)}
                     </div>
                   </div>
