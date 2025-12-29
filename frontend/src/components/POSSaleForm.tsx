@@ -716,12 +716,24 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                       </button>
                       <input
                         type="number"
-                        min="1"
-                        value={item.quantity || 1}
+                        value={item.quantity || ""}
                         onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === "" || val === "0") {
+                            // Allow clearing, will update on blur
+                            updateQuantity(item.product.id, item.sellingUnit, 0);
+                          } else {
+                            const num = parseInt(val);
+                            if (!isNaN(num) && num > 0) {
+                              updateQuantity(item.product.id, item.sellingUnit, num);
+                            }
+                          }
+                        }}
+                        onBlur={(e) => {
+                          // If empty or zero on blur, set to 1
                           const val = parseInt(e.target.value);
-                          if (!isNaN(val) && val > 0) {
-                            updateQuantity(item.product.id, item.sellingUnit, val);
+                          if (isNaN(val) || val <= 0) {
+                            updateQuantity(item.product.id, item.sellingUnit, 1);
                           }
                         }}
                         style={{
@@ -771,7 +783,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
           )}
         </div>
 
-        {/* Sticky Summary / Checkout */}
+        {/* Checkout Form - Always visible when cart has items */}
         {cart.length > 0 && (
           <div
             style={{
@@ -783,136 +795,68 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
               zIndex: 2,
             }}
           >
-            {!checkoutOpen ? (
-              <div style={{ padding: 12, display: "flex", gap: 10, alignItems: "center" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>
-                    Total ({totalItems} items)
-                  </div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: "#059669" }}>
-                    GHS {cartTotal.toFixed(2)}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={undoLastAdd}
-                  disabled={!lastAdded}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #d1d5db",
-                    background: "white",
-                    cursor: !lastAdded ? "not-allowed" : "pointer",
-                    opacity: !lastAdded ? 0.6 : 1,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: "#374151",
-                    whiteSpace: "nowrap",
-                  }}
-                  title="Undo last added item"
-                >
-                  Undo
-                </button>
-
-                <button
-                  type="button"
-                  onClick={armOrClearCart}
-                  style={{
-                    padding: "10px 12px",
-                    fontSize: 13,
-                    background: clearArmed ? "#dc2626" : "#fee2e2",
-                    color: clearArmed ? "white" : "#dc2626",
-                    border: "none",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    fontWeight: 800,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {clearArmed ? "Tap again" : "Clear"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setCheckoutOpen(true)}
-                  style={{
-                    padding: "12px 14px",
-                    background: "linear-gradient(135deg, #10b981, #059669)",
-                    color: "white",
-                    border: "none",
-                    borderRadius: 10,
-                    fontSize: 14,
-                    fontWeight: 800,
-                    cursor: "pointer",
-                    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Checkout
-                </button>
-              </div>
-            ) : (
+            (
               <form
                 className="pos-checkout"
                 onSubmit={handleSubmit}
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  height: "100%",
                 }}
               >
-                {/* Header with gradient */}
+                {/* Total and Actions */}
                 <div style={{
                   background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                  padding: "16px",
-                  margin: "-2px -2px 0",
-                  borderRadius: "12px 12px 0 0",
+                  padding: "14px 16px",
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
                 }}>
-                  <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
-                    <button
-                      type="button"
-                      onClick={() => setCheckoutOpen(false)}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        border: "none",
-                        background: "rgba(255,255,255,0.2)",
-                        color: "white",
-                        cursor: "pointer",
-                        fontSize: 14,
-                        fontWeight: 700,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      ← Back
-                    </button>
-
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Amount</div>
-                      <div style={{ fontSize: 24, fontWeight: 900, color: "white" }}>
-                        GHS {cartTotal.toFixed(2)}
-                      </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total ({totalItems} items)</div>
+                    <div style={{ fontSize: 24, fontWeight: 900, color: "white" }}>
+                      GHS {cartTotal.toFixed(2)}
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={armOrClearCart}
-                      style={{
-                        padding: "8px 12px",
-                        fontSize: 13,
-                        background: clearArmed ? "#dc2626" : "rgba(255,255,255,0.2)",
-                        color: "white",
-                        border: "none",
-                        borderRadius: 8,
-                        cursor: "pointer",
-                        fontWeight: 700,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {clearArmed ? "⚠ Confirm" : "Clear"}
-                    </button>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={undoLastAdd}
+                    disabled={!lastAdded}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "rgba(255,255,255,0.2)",
+                      color: "white",
+                      cursor: !lastAdded ? "not-allowed" : "pointer",
+                      opacity: !lastAdded ? 0.5 : 1,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      whiteSpace: "nowrap",
+                    }}
+                    title="Undo last added item"
+                  >
+                    ↶ Undo
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={armOrClearCart}
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: 13,
+                      background: clearArmed ? "#dc2626" : "rgba(255,255,255,0.2)",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontWeight: 700,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {clearArmed ? "⚠ Confirm" : "Clear"}
+                  </button>
                 </div>
 
                 {/* Form fields */}
@@ -1028,7 +972,6 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                 </button>
                 </div>
               </form>
-            )}
           </div>
         )}
       </div>
