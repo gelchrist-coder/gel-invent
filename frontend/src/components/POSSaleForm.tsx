@@ -314,6 +314,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
         payment_method: paymentMethod,
         notes: saleNotes,
         amount_paid: paymentMethod === "credit" && appliedPayment > 0 ? appliedPayment : undefined,
+        partial_payment_method: paymentMethod === "credit" && appliedPayment > 0 ? "cash" : undefined,
       });
     }
 
@@ -323,6 +324,11 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   };
 
   const handleCreditSubmit = () => {
+    if (!creditorName.trim()) {
+      showMessage("Please enter customer name");
+      return;
+    }
+
     if (!creditorPhone.trim()) {
       showMessage("Please enter customer phone number");
       return;

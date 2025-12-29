@@ -218,7 +218,14 @@ def get_revenue_analytics(
         #   - debt transaction amount == unpaid portion
         #   - payment transactions (if any) are informational, but paid = total - unpaid
         if sale.payment_method in ("credit", "partial"):
-            unpaid = debt_by_sale_id.get(sale.id, Decimal(0))
+            debt_amt = debt_by_sale_id.get(sale.id, Decimal(0))
+            pay_amt = payment_by_sale_id.get(sale.id, Decimal(0))
+
+            # In this codebase, credit sales may record:
+            # - a debt txn for the full sale total, and
+            # - a payment txn for any initial payment.
+            # So unpaid should be (debt - payments), clamped to [0, total].
+            unpaid = debt_amt - pay_amt
             if unpaid < 0:
                 unpaid = Decimal(0)
             if unpaid > sale.total_price:
@@ -250,7 +257,10 @@ def get_revenue_analytics(
         # - For cash/card/momo/bank: entire amount is received under that method
         # - For credit/partial: split into received (assigned to a method) + pending (credit)
         if sale.payment_method in ("credit", "partial"):
-            unpaid = debt_by_sale_id.get(sale.id, Decimal(0))
+            debt_amt = debt_by_sale_id.get(sale.id, Decimal(0))
+            pay_amt = payment_by_sale_id.get(sale.id, Decimal(0))
+
+            unpaid = debt_amt - pay_amt
             if unpaid < 0:
                 unpaid = Decimal(0)
             if unpaid > sale.total_price:
@@ -258,7 +268,9 @@ def get_revenue_analytics(
             paid = sale.total_price - unpaid
 
             received_method = "cash"
-            if sale.payment_method == "partial" and getattr(sale, "partial_payment_method", None):
+            # If a partial payment method is recorded, attribute the received portion to it.
+            # This also applies to credit sales that had an initial payment.
+            if getattr(sale, "partial_payment_method", None):
                 received_method = str(sale.partial_payment_method)
 
             if paid > 0:
