@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
@@ -78,6 +78,7 @@ def get_revenue_analytics(
     sales = db.scalars(sales_query).all()
 
     sale_ids = [s.id for s in sales]
+    sale_ids_set = set(sale_ids)
     cost_by_sale_id: dict[int, Decimal] = {}
     debt_by_sale_id: dict[int, Decimal] = {}
     payment_by_sale_id: dict[int, Decimal] = {}
@@ -121,6 +122,8 @@ def get_revenue_analytics(
                 CreditTransaction.sale_id.in_(sale_ids),
                 CreditTransaction.branch_id == active_branch_id,
                 CreditTransaction.user_id.in_(tenant_user_ids),
+                # Clamp the "as-of" ledger state to the end of the selected range.
+                CreditTransaction.created_at <= end,
             )
             .group_by(CreditTransaction.sale_id, CreditTransaction.transaction_type)
         ).all()
@@ -160,6 +163,20 @@ def get_revenue_analytics(
     payment_methods = {}
     product_revenue = {}
     daily_revenue = {}
+
+    def infer_method_from_notes(notes: str | None) -> str:
+        if not notes:
+            return "cash"
+        n = notes.lower()
+        if "momo" in n or "mobile" in n:
+            return "mobile money"
+        if "card" in n:
+            return "card"
+        if "bank" in n or "transfer" in n:
+            return "bank transfer"
+        if "cash" in n:
+            return "cash"
+        return "cash"
 
     def compute_returns_totals(range_start: datetime, range_end: datetime) -> tuple[Decimal, Decimal, Decimal]:
         """Returns (revenue, cost, profit) for stock movements marked as Returned.*"""
@@ -300,6 +317,29 @@ def get_revenue_analytics(
         # Daily revenue
         day_key = sale.created_at.strftime("%Y-%m-%d")
         daily_revenue[day_key] = daily_revenue.get(day_key, Decimal(0)) + sale.total_price
+
+    # Debt cleared within the selected period should increase cash received in this period.
+    # We include payment transactions that are NOT already accounted for by the sales-in-range loop
+    # (to avoid double-counting payments for sales that are already split into paid/unpaid above).
+    payment_tx_q = select(CreditTransaction).where(
+        CreditTransaction.transaction_type == "payment",
+        CreditTransaction.created_at >= start,
+        CreditTransaction.created_at <= end,
+        CreditTransaction.branch_id == active_branch_id,
+        CreditTransaction.user_id.in_(tenant_user_ids),
+    )
+    if sale_ids:
+        payment_tx_q = payment_tx_q.where(
+            or_(CreditTransaction.sale_id.is_(None), ~CreditTransaction.sale_id.in_(sale_ids))
+        )
+
+    extra_payments = db.scalars(payment_tx_q).all()
+    if extra_payments:
+        extra_cash = sum((t.amount for t in extra_payments), Decimal(0))
+        cash_revenue += extra_cash
+        for t in extra_payments:
+            method = infer_method_from_notes(t.notes)
+            payment_methods[method] = payment_methods.get(method, Decimal(0)) + t.amount
 
     # Deduct returns from revenue using product selling_price
     returns_revenue, returns_cost, returns_profit = compute_returns_totals(start, end)
