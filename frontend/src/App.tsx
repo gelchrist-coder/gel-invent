@@ -236,6 +236,8 @@ export default function App() {
   const handleChangeBranch = (branchId: number) => {
     setActiveBranchId(branchId);
     localStorage.setItem("activeBranchId", String(branchId));
+    // Notify other components that the active branch changed
+    window.dispatchEvent(new CustomEvent("activeBranchChanged", { detail: branchId }));
   };
 
   // Show login page if not authenticated

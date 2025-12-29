@@ -83,6 +83,18 @@ export default function RevenueAnalysis() {
     }
   }, [isAdmin, loadData, period]);
 
+  // Reload data when branch changes
+  useEffect(() => {
+    const handleBranchChange = () => {
+      if (isAdmin) {
+        loadData();
+      }
+    };
+
+    window.addEventListener("activeBranchChanged", handleBranchChange);
+    return () => window.removeEventListener("activeBranchChanged", handleBranchChange);
+  }, [isAdmin, loadData]);
+
   // Block access for non-Admin users
   if (!isAdmin) {
     return (

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { API_BASE } from "../api";
+import { API_BASE, buildAuthHeaders } from "../api";
 
 interface SalesDashboard {
   today: { count: number; total: number };
@@ -88,11 +88,7 @@ export default function Reports() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem("token");
-      const headers = {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json"
-      };
+      const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
       if (activeTab === "sales" && !salesData) {
         const res = await fetch(`${API_BASE}/reports/sales-dashboard`, { headers });
@@ -123,6 +119,18 @@ export default function Reports() {
       loadData();
     }
   }, [isAdmin, loadData]);
+
+  // Clear cached data when branch changes so fresh data is loaded
+  useEffect(() => {
+    const handleBranchChange = () => {
+      setSalesData(null);
+      setInventoryData(null);
+      setCreditorsData(null);
+    };
+
+    window.addEventListener("activeBranchChanged", handleBranchChange);
+    return () => window.removeEventListener("activeBranchChanged", handleBranchChange);
+  }, []);
 
   const formatCurrency = (amount: number) => `GHS ${amount.toFixed(2)}`;
   const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString();
