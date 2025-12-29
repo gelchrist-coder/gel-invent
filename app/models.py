@@ -129,6 +129,7 @@ class Sale(Base):
     customer_name: Mapped[str | None] = mapped_column(String(255), default=None)
     payment_method: Mapped[str] = mapped_column(String(50), default="cash")
     amount_paid: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    partial_payment_method: Mapped[str | None] = mapped_column(String(50), default=None)
     notes: Mapped[str | None] = mapped_column(default=None)
     # Optional client-generated id for offline/poor-network idempotency.
     client_sale_id: Mapped[str | None] = mapped_column(String(80), index=True, default=None)

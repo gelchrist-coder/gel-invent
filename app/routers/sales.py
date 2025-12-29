@@ -90,6 +90,8 @@ def create_sale(
         total_price=payload.total_price,
         customer_name=payload.customer_name,
         payment_method=payload.payment_method,
+        amount_paid=payload.amount_paid,
+        partial_payment_method=payload.partial_payment_method,
         notes=payload.notes,
         client_sale_id=payload.client_sale_id,
     )

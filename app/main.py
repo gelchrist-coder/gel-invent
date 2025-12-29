@@ -70,6 +70,8 @@ async def on_startup() -> None:
             # How items were sold (pack vs piece)
             conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS sale_unit_type VARCHAR(10)"))
             conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS pack_quantity INTEGER"))
+            conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(10,2)"))
+            conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS partial_payment_method VARCHAR(50)"))
 
             # Email verification was removed. Clean up old schema objects if present.
             # Safe/idempotent for existing databases.

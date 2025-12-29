@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
 from ..database import get_db
-from ..models import Sale, Product, StockMovement, User
+from ..models import Sale, Product, StockMovement, User, CreditTransaction
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 
@@ -79,6 +79,8 @@ def get_revenue_analytics(
 
     sale_ids = [s.id for s in sales]
     cost_by_sale_id: dict[int, Decimal] = {}
+    debt_by_sale_id: dict[int, Decimal] = {}
+    payment_by_sale_id: dict[int, Decimal] = {}
     if sale_ids:
         cost_rows = db.execute(
             select(
@@ -107,6 +109,31 @@ def get_revenue_analytics(
             if sid is None:
                 continue
             cost_by_sale_id[int(sid)] = cost if isinstance(cost, Decimal) else Decimal(str(cost or 0))
+
+        # Creditor ledger per sale (for credit/partial logic)
+        tx_rows = db.execute(
+            select(
+                CreditTransaction.sale_id,
+                CreditTransaction.transaction_type,
+                func.coalesce(func.sum(CreditTransaction.amount), 0).label("amount"),
+            )
+            .where(
+                CreditTransaction.sale_id.in_(sale_ids),
+                CreditTransaction.branch_id == active_branch_id,
+                CreditTransaction.user_id.in_(tenant_user_ids),
+            )
+            .group_by(CreditTransaction.sale_id, CreditTransaction.transaction_type)
+        ).all()
+
+        for sid, ttype, amt in tx_rows:
+            if sid is None:
+                continue
+            sale_id_int = int(sid)
+            amount = amt if isinstance(amt, Decimal) else Decimal(str(amt or 0))
+            if str(ttype) == "debt":
+                debt_by_sale_id[sale_id_int] = debt_by_sale_id.get(sale_id_int, Decimal(0)) + amount
+            elif str(ttype) == "payment":
+                payment_by_sale_id[sale_id_int] = payment_by_sale_id.get(sale_id_int, Decimal(0)) + amount
     
     # Get losses/write-offs (stock movements with negative change for expired/damaged goods)
     loss_reasons = ["Expired", "Damaged", "Lost", "Lost/Stolen", "Write-off", "Spoiled", "Destroyed"]
@@ -185,17 +212,20 @@ def get_revenue_analytics(
     for sale in sales:
         # Revenue
         total_revenue += sale.total_price
-        
-        # Separate cash and credit
-        if sale.payment_method == "credit":
-            # For credit sales with initial payment
-            amount_paid = Decimal(sale.amount_paid) if sale.amount_paid is not None else Decimal(0)
-            credit_amount = sale.total_price - amount_paid
-            
-            # Cash received from initial payment
-            cash_revenue += amount_paid
-            # Remaining credit/debt
-            credit_revenue += credit_amount
+
+        # Separate cash received vs credit pending.
+        # For credit/partial sales, we derive paid/unpaid from the creditor ledger linked to the sale:
+        #   - debt transaction amount == unpaid portion
+        #   - payment transactions (if any) are informational, but paid = total - unpaid
+        if sale.payment_method in ("credit", "partial"):
+            unpaid = debt_by_sale_id.get(sale.id, Decimal(0))
+            if unpaid < 0:
+                unpaid = Decimal(0)
+            if unpaid > sale.total_price:
+                unpaid = sale.total_price
+            paid = sale.total_price - unpaid
+            cash_revenue += paid
+            credit_revenue += unpaid
         else:
             cash_revenue += sale.total_price
         
@@ -217,7 +247,26 @@ def get_revenue_analytics(
         total_profit += profit
         
         # Payment method breakdown
-        payment_methods[sale.payment_method] = payment_methods.get(sale.payment_method, Decimal(0)) + sale.total_price
+        # - For cash/card/momo/bank: entire amount is received under that method
+        # - For credit/partial: split into received (assigned to a method) + pending (credit)
+        if sale.payment_method in ("credit", "partial"):
+            unpaid = debt_by_sale_id.get(sale.id, Decimal(0))
+            if unpaid < 0:
+                unpaid = Decimal(0)
+            if unpaid > sale.total_price:
+                unpaid = sale.total_price
+            paid = sale.total_price - unpaid
+
+            received_method = "cash"
+            if sale.payment_method == "partial" and getattr(sale, "partial_payment_method", None):
+                received_method = str(sale.partial_payment_method)
+
+            if paid > 0:
+                payment_methods[received_method] = payment_methods.get(received_method, Decimal(0)) + paid
+            if unpaid > 0:
+                payment_methods["credit"] = payment_methods.get("credit", Decimal(0)) + unpaid
+        else:
+            payment_methods[sale.payment_method] = payment_methods.get(sale.payment_method, Decimal(0)) + sale.total_price
         
         # Product revenue
         product_name = product.name if product else f"Product #{sale.product_id}"
