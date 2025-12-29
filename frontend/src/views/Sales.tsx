@@ -25,7 +25,6 @@ export default function Sales() {
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [outboxCount, setOutboxCount] = useState<number>(() => getSalesOutboxCount());
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const receiptWindowRef = useRef<Window | null>(null);
 
   // Get user and business info for receipt
   const currentUser = localStorage.getItem("user");
@@ -159,18 +158,6 @@ export default function Sales() {
     setTimeout(() => { doneRef.current = false; }, 100);
   };
 
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      if (!event?.data) return;
-      if (event.data !== "receipt:printed") return;
-      if (receiptWindowRef.current && event.source !== receiptWindowRef.current) return;
-      handleDone();
-    };
-
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, []);
-
   const productById = useMemo(() => {
     const map = new Map<number, Product>();
     for (const p of products) map.set(p.id, p);
@@ -180,45 +167,27 @@ export default function Sales() {
   const printReceipt = () => {
     if (pendingSales.length === 0) return;
 
-    // Open receipt window
-    let receiptWindow = window.open("", "_blank");
-    if (!receiptWindow) {
-      alert("Please allow popups to print receipts");
-      return;
-    }
-    receiptWindowRef.current = receiptWindow;
+    // Calculate totals
+    const total = pendingSales.reduce((sum, sale) => sum + (Number(sale.total_price) || 0), 0);
+    const customerName = pendingSales[0]?.customer_name;
+    const paymentMethod = pendingSales[0]?.payment_method ?? "cash";
+    const amountPaid = Number(pendingSales[0]?.amount_paid) || 0;
+    const remainingBalance = paymentMethod === "credit" ? total - amountPaid : 0;
 
-    try {
-      // Calculate totals
-      const total = pendingSales.reduce((sum, sale) => sum + (Number(sale.total_price) || 0), 0);
-      const customerName = pendingSales[0]?.customer_name;
-      const paymentMethod = pendingSales[0]?.payment_method ?? "cash";
-      const amountPaid = Number(pendingSales[0]?.amount_paid) || 0;
-
-      // Calculate remaining balance for credit sales
-      const remainingBalance = paymentMethod === "credit" ? total - amountPaid : 0;
-
-      // Build items HTML
-      const itemsHTML = pendingSales
-        .map((sale) => {
-          const product = productById.get(sale.product_id);
-          if (!product) return "";
-
-          const quantity = Number(sale.quantity) || 0;
-          const unitPrice = Number(sale.unit_price) || 0;
-          const lineTotal = Number(sale.total_price) || quantity * unitPrice;
-
-          return `
-        <div class="item-row">
-          <div><strong>${product.name}</strong></div>
-        </div>
-        <div class="item-row">
-          <div>${quantity} × GHS ${unitPrice.toFixed(2)}</div>
-          <div>GHS ${lineTotal.toFixed(2)}</div>
-        </div>
-      `;
-        })
-        .join("");
+    // Build items HTML
+    const itemsHTML = pendingSales
+      .map((sale) => {
+        const product = productById.get(sale.product_id);
+        if (!product) return "";
+        const quantity = Number(sale.quantity) || 0;
+        const unitPrice = Number(sale.unit_price) || 0;
+        const lineTotal = Number(sale.total_price) || quantity * unitPrice;
+        return `
+          <div class="item-row"><div><strong>${product.name}</strong></div></div>
+          <div class="item-row"><div>${quantity} × GHS ${unitPrice.toFixed(2)}</div><div>GHS ${lineTotal.toFixed(2)}</div></div>
+        `;
+      })
+      .join("");
 
     const receiptHTML = `
       <!DOCTYPE html>
@@ -226,60 +195,16 @@ export default function Sales() {
       <head>
         <title>Receipt</title>
         <style>
-          body {
-            font-family: 'Courier New', monospace;
-            max-width: 300px;
-            margin: 20px auto;
-            padding: 20px;
-          }
-          .header {
-            text-align: center;
-            margin-bottom: 20px;
-            border-bottom: 2px dashed #000;
-            padding-bottom: 10px;
-          }
-          .business-name {
-            font-size: 18px;
-            font-weight: bold;
-            margin-bottom: 5px;
-          }
-          .receipt-info {
-            font-size: 12px;
-            margin-bottom: 15px;
-          }
-          .items {
-            border-top: 1px dashed #000;
-            border-bottom: 1px dashed #000;
-            padding: 10px 0;
-            margin: 15px 0;
-          }
-          .item-row {
-            display: flex;
-            justify-content: space-between;
-            margin: 5px 0;
-          }
-          .total-section {
-            margin-top: 15px;
-          }
-          .total-row {
-            display: flex;
-            justify-content: space-between;
-            margin: 5px 0;
-            font-weight: bold;
-          }
-          .footer {
-            text-align: center;
-            margin-top: 20px;
-            font-size: 11px;
-            border-top: 2px dashed #000;
-            padding-top: 10px;
-          }
-          @media print {
-            body {
-              margin: 0;
-              padding: 10px;
-            }
-          }
+          body { font-family: 'Courier New', monospace; max-width: 300px; margin: 0 auto; padding: 20px; }
+          .header { text-align: center; margin-bottom: 20px; border-bottom: 2px dashed #000; padding-bottom: 10px; }
+          .business-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+          .receipt-info { font-size: 12px; margin-bottom: 15px; }
+          .items { border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 10px 0; margin: 15px 0; }
+          .item-row { display: flex; justify-content: space-between; margin: 5px 0; }
+          .total-section { margin-top: 15px; }
+          .total-row { display: flex; justify-content: space-between; margin: 5px 0; font-weight: bold; }
+          .footer { text-align: center; margin-top: 20px; font-size: 11px; border-top: 2px dashed #000; padding-top: 10px; }
+          @media print { body { margin: 0; padding: 10px; } }
         </style>
       </head>
       <body>
@@ -287,127 +212,73 @@ export default function Sales() {
           <div class="business-name">${businessName}</div>
           <div>Sales Receipt</div>
         </div>
-        
         <div class="receipt-info">
           <div>Date: ${new Date().toLocaleString()}</div>
           <div>Served by: ${salesPerson}</div>
           ${customerName ? `<div>Customer: ${customerName}</div>` : ''}
         </div>
-
-        <div class="items">
-          ${itemsHTML}
-        </div>
-
+        <div class="items">${itemsHTML}</div>
         <div class="total-section">
-          <div class="total-row">
-            <div>TOTAL:</div>
-            <div>GHS ${total.toFixed(2)}</div>
-          </div>
-          <div class="item-row">
-            <div>Payment:</div>
-            <div>${paymentMethod.toUpperCase()}</div>
-          </div>
+          <div class="total-row"><div>TOTAL:</div><div>GHS ${total.toFixed(2)}</div></div>
+          <div class="item-row"><div>Payment:</div><div>${paymentMethod.toUpperCase()}</div></div>
           ${paymentMethod === 'credit' ? `
             <div class="item-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #000;">
-              <div>Paid:</div>
-              <div>GHS ${amountPaid.toFixed(2)}</div>
+              <div>Paid:</div><div>GHS ${amountPaid.toFixed(2)}</div>
             </div>
             <div class="item-row" style="font-weight: bold;">
-              <div>Balance:</div>
-              <div>GHS ${remainingBalance.toFixed(2)}</div>
+              <div>Balance:</div><div>GHS ${remainingBalance.toFixed(2)}</div>
             </div>
           ` : ''}
         </div>
-
         <div class="footer">
           <div>Thank you for your business!</div>
           <div>Please come again</div>
         </div>
-
-        <script>
-          window.onload = function() {
-            function safeClose() {
-              try {
-                window.close();
-              } catch (e) {
-                // ignore
-              }
-            }
-
-            var printed = false;
-            function notifyPrintedAndClose() {
-              if (printed) return;
-              printed = true;
-              try {
-                if (window.opener && typeof window.opener.postMessage === 'function') {
-                  window.opener.postMessage('receipt:printed', '*');
-                }
-              } catch (e) {
-                // ignore
-              }
-              safeClose();
-            }
-
-            // Close the receipt window after the print dialog completes
-            window.onafterprint = notifyPrintedAndClose;
-            try {
-              window.addEventListener('afterprint', notifyPrintedAndClose);
-            } catch (e) {
-              // ignore
-            }
-
-            // Some browsers fire matchMedia print events more reliably than afterprint
-            try {
-              var mql = window.matchMedia('print');
-              if (mql && typeof mql.addEventListener === 'function') {
-                mql.addEventListener('change', function (e) {
-                  if (!e.matches) notifyPrintedAndClose();
-                });
-              } else if (mql && typeof mql.addListener === 'function') {
-                mql.addListener(function (e) {
-                  if (!e.matches) notifyPrintedAndClose();
-                });
-              }
-            } catch (e) {
-              // ignore
-            }
-
-            setTimeout(function() {
-              window.print();
-            }, 250);
-
-            // Fallback: if print events don't fire, don't leave the tab open.
-            setTimeout(function() {
-              if (!printed) safeClose();
-            }, 15000);
-          };
-        </script>
       </body>
       </html>
     `;
 
-      // Write receipt HTML immediately (synchronously)
-      receiptWindow.document.write(receiptHTML);
-      receiptWindow.document.close();
-      
-      // Don't auto-close the modal - let the user click "Done" or 
-      // let the receipt window's postMessage handle it when print completes
-      
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      try {
-        receiptWindow.document.write(
-          `<!doctype html><html><head><title>Receipt Error</title></head><body style="font-family:system-ui;padding:16px">
-            <h3 style="margin:0 0 8px 0">Failed to render receipt</h3>
-            <div style="white-space:pre-wrap;color:#b91c1c">${message}</div>
-          </body></html>`,
-        );
-        receiptWindow.document.close();
-      } catch {
-        // ignore
-      }
-      // Don't auto-close on error either - user can click Done
+    // Use iframe for printing - doesn't freeze the main app
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    document.body.appendChild(iframe);
+
+    const iframeDoc = iframe.contentWindow?.document;
+    if (!iframeDoc) {
+      document.body.removeChild(iframe);
+      alert("Failed to create print frame");
+      return;
     }
+
+    iframeDoc.open();
+    iframeDoc.write(receiptHTML);
+    iframeDoc.close();
+
+    // Wait for content to render, then print
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch (e) {
+        console.error("Print error:", e);
+      }
+      // Clean up iframe after a delay (gives time for print dialog)
+      setTimeout(() => {
+        try {
+          document.body.removeChild(iframe);
+        } catch {
+          // ignore
+        }
+      }, 1000);
+    }, 100);
+
+    // Close the modal immediately - don't wait for print to complete
+    handleDone();
   };
 
   const handleDeleteSale = async (saleId: number) => {
