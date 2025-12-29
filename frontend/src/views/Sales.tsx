@@ -514,8 +514,11 @@ export default function Sales() {
             }}>
               <div style={{ fontSize: 40, marginBottom: 8, textAlign: "center" }}>🛒</div>
               <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0, textAlign: "center" }}>
-                Review Order
+                Order Confirmation
               </h2>
+              <div style={{ fontSize: 11, textAlign: "center", opacity: 0.9, marginTop: 4 }}>
+                v2.0 • New Design
+              </div>
               <div style={{
                 position: "absolute",
                 top: 16,
