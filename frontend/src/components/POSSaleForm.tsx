@@ -347,6 +347,25 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     <div className="pos-layout">
       {/* Left Side - Product Selection */}
       <div className="pos-left">
+        {/* Search Bar */}
+        <div style={{ marginBottom: 8 }}>
+          <input
+            type="text"
+            placeholder="🔍 Search products..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              border: "1px solid #e5e7eb",
+              borderRadius: 6,
+              fontSize: 13,
+              background: "white",
+              outline: "none",
+            }}
+          />
+        </div>
+
         {/* Category Tabs - Horizontal Scroll */}
         <div style={{ 
           display: "flex", 

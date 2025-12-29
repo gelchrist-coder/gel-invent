@@ -419,7 +419,7 @@ export default function Sales() {
 
   return (
     <div className="app-shell">
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>💳 Point of Sale</h1>
+      <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>💳 Point of Sale</h1>
 
       {outboxCount > 0 && (
         <div className="card" style={{ marginBottom: 16, border: "1px solid #fde68a", background: "#fffbeb" }}>
