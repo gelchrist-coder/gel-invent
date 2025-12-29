@@ -24,6 +24,7 @@ export default function Sales() {
   const [confirming, setConfirming] = useState(false);
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [outboxCount, setOutboxCount] = useState<number>(() => getSalesOutboxCount());
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const receiptWindowRef = useRef<Window | null>(null);
 
   // Get user and business info for receipt
@@ -417,6 +418,105 @@ export default function Sales() {
     }
   };
 
+  // PDF Export function
+  const exportSalesPDF = () => {
+    if (sales.length === 0) return;
+
+    const getProductName = (productId: number) => {
+      const product = productById.get(productId);
+      return product ? product.name : `Product #${productId}`;
+    };
+
+    const formatDate = (dateString: string) => {
+      const date = new Date(dateString);
+      return date.toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    };
+
+    const totalRevenue = sales.reduce((sum, s) => sum + Number(s.total_price), 0);
+
+    const pdfWindow = window.open("", "_blank");
+    if (!pdfWindow) {
+      alert("Please allow popups to export PDF");
+      return;
+    }
+
+    const rowsHTML = sales.map(sale => `
+      <tr>
+        <td>${formatDate(sale.created_at)}</td>
+        <td>${getProductName(sale.product_id)}</td>
+        <td style="text-align:right">${sale.quantity}</td>
+        <td style="text-align:right">GHS ${Number(sale.unit_price).toFixed(2)}</td>
+        <td style="text-align:right;font-weight:600">GHS ${Number(sale.total_price).toFixed(2)}</td>
+        <td>${sale.customer_name || "-"}</td>
+        <td>${sale.payment_method}</td>
+      </tr>
+    `).join("");
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Sales Report - ${businessName}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
+          h1 { font-size: 18px; margin-bottom: 4px; }
+          .subtitle { color: #666; margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+          th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+          th { background: #f5f5f5; font-weight: 600; }
+          .total-row { background: #f0fdf4; font-weight: 700; }
+          .summary { margin-top: 20px; padding: 12px; background: #f9fafb; border-radius: 8px; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <h1>${businessName} - Sales Report</h1>
+        <div class="subtitle">Generated on ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}</div>
+        
+        <div class="summary">
+          <strong>Total Sales:</strong> ${sales.length} transactions | 
+          <strong>Total Revenue:</strong> GHS ${totalRevenue.toFixed(2)}
+        </div>
+        
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Product</th>
+              <th style="text-align:right">Qty</th>
+              <th style="text-align:right">Price</th>
+              <th style="text-align:right">Total</th>
+              <th>Customer</th>
+              <th>Payment</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHTML}
+            <tr class="total-row">
+              <td colspan="4" style="text-align:right"><strong>Grand Total:</strong></td>
+              <td style="text-align:right"><strong>GHS ${totalRevenue.toFixed(2)}</strong></td>
+              <td colspan="2"></td>
+            </tr>
+          </tbody>
+        </table>
+        
+        <script>
+          window.onload = function() { window.print(); }
+        </script>
+      </body>
+      </html>
+    `;
+
+    pdfWindow.document.write(html);
+    pdfWindow.document.close();
+  };
+
   return (
     <div className="app-shell">
       <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>💳 Point of Sale</h1>
@@ -458,13 +558,72 @@ export default function Sales() {
 
       {/* Sales List */}
       <div className="card">
-        <h3 style={{ margin: "0 0 16px 0" }}>Recent Sales</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Recent Sales</h3>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => exportSalesPDF()}
+              disabled={sales.length === 0}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 4,
+                border: "1px solid #e5e7eb",
+                background: "white",
+                color: "#374151",
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: sales.length === 0 ? "not-allowed" : "pointer",
+                opacity: sales.length === 0 ? 0.5 : 1,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              📄 Export PDF
+            </button>
+            {sales.length > 5 && (
+              <button
+                onClick={() => setShowHistoryModal(true)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 4,
+                  border: "none",
+                  background: "#111827",
+                  color: "white",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                View All ({sales.length})
+              </button>
+            )}
+          </div>
+        </div>
         {sales.length === 0 && loading ? (
-          <p style={{ margin: 0, color: "#6b7280" }}>Loading sales...</p>
+          <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>Loading sales...</p>
         ) : (
           <>
-            {loading ? <p style={{ margin: "0 0 12px 0", color: "#6b7280", fontSize: 13 }}>Refreshing...</p> : null}
-            <SalesList sales={sales} products={products} onDelete={handleDeleteSale} />
+            {loading ? <p style={{ margin: "0 0 8px 0", color: "#6b7280", fontSize: 12 }}>Refreshing...</p> : null}
+            <SalesList sales={sales.slice(0, 5)} products={products} onDelete={handleDeleteSale} />
+            {sales.length > 5 && (
+              <div style={{ textAlign: "center", marginTop: 12 }}>
+                <button
+                  onClick={() => setShowHistoryModal(true)}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: 4,
+                    border: "1px solid #e5e7eb",
+                    background: "white",
+                    color: "#374151",
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  View {sales.length - 5} more sales →
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -766,7 +925,97 @@ export default function Sales() {
           </div>
         </div>
       )}
+
+      {/* Full History Modal */}
+      {showHistoryModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 20,
+          }}
+          onClick={() => setShowHistoryModal(false)}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 12,
+              maxWidth: 900,
+              width: "100%",
+              maxHeight: "90vh",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{
+              padding: "16px 20px",
+              borderBottom: "1px solid #e5e7eb",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: "#f9fafb",
+            }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Sales History</h2>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
+                  {sales.length} total sales
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => exportSalesPDF()}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 6,
+                    border: "1px solid #e5e7eb",
+                    background: "white",
+                    color: "#374151",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  📄 Export PDF
+                </button>
+                <button
+                  onClick={() => setShowHistoryModal(false)}
+                  style={{
+                    padding: "8px 14px",
+                    borderRadius: 6,
+                    border: "none",
+                    background: "#111827",
+                    color: "white",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: "pointer",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
+              <SalesList sales={sales} products={products} onDelete={handleDeleteSale} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
