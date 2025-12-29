@@ -494,72 +494,166 @@ export default function Sales() {
           <div
             style={{
               background: "white",
-              borderRadius: 12,
-              maxWidth: 500,
+              borderRadius: 16,
+              maxWidth: 480,
               width: "100%",
               maxHeight: "90vh",
-              overflow: "auto",
-              padding: 32,
-              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+              overflow: "hidden",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+              display: "flex",
+              flexDirection: "column",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ textAlign: "center", marginBottom: 24 }}>
-              <div style={{ fontSize: 48, marginBottom: 8 }}>✅</div>
-              <h2 style={{ fontSize: 24, fontWeight: 700, margin: "0 0 8px", color: "#059669" }}>
-                Confirm Sale
+            {/* Header */}
+            <div style={{ 
+              background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+              padding: "24px 24px 28px",
+              color: "white",
+              position: "relative",
+            }}>
+              <div style={{ fontSize: 40, marginBottom: 8, textAlign: "center" }}>🛒</div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0, textAlign: "center" }}>
+                Review Order
               </h2>
-              <p style={{ color: "#6b7280", margin: 0 }}>
-                Please review the transaction details before confirming
-              </p>
+              <div style={{
+                position: "absolute",
+                top: 16,
+                right: 16,
+                background: "rgba(255,255,255,0.2)",
+                borderRadius: "50%",
+                width: 32,
+                height: 32,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 18,
+                cursor: "pointer",
+              }}
+              onClick={() => {
+                if (confirming) return;
+                setShowConfirmation(false);
+                setPendingSales([]);
+              }}
+              >×</div>
             </div>
 
-            {/* Sale Summary */}
-            <div style={{ background: "#f9fafb", borderRadius: 8, padding: 20, marginBottom: 24 }}>
-              <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: "2px dashed #e5e7eb" }}>
-                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>ITEMS ({pendingSales.length})</div>
-                {pendingSales.map((sale, index) => {
-                  const product = products.find(p => p.id === sale.product_id);
-                  return (
-                    <div key={index} style={{ marginBottom: 12 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
-                        <div>
-                          <div style={{ fontSize: 16, fontWeight: 600, color: "#111827" }}>
-                            {product?.name}
+            {/* Scrollable Content */}
+            <div style={{ flex: 1, overflow: "auto", padding: 24 }}>
+              {/* Items List */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ 
+                  fontSize: 11, 
+                  fontWeight: 700, 
+                  letterSpacing: "0.5px",
+                  color: "#9ca3af", 
+                  marginBottom: 12,
+                  textTransform: "uppercase",
+                }}>
+                  Order Items • {pendingSales.length}
+                </div>
+                <div style={{ 
+                  background: "#f9fafb", 
+                  borderRadius: 12, 
+                  padding: "16px",
+                  border: "1px solid #f3f4f6",
+                }}>
+                  {pendingSales.map((sale, index) => {
+                    const product = products.find(p => p.id === sale.product_id);
+                    return (
+                      <div 
+                        key={index} 
+                        style={{ 
+                          paddingBottom: index < pendingSales.length - 1 ? 16 : 0,
+                          marginBottom: index < pendingSales.length - 1 ? 16 : 0,
+                          borderBottom: index < pendingSales.length - 1 ? "1px solid #e5e7eb" : "none",
+                        }}
+                      >
+                        <div style={{ display: "flex", gap: 12, alignItems: "start" }}>
+                          <div style={{
+                            background: "white",
+                            width: 40,
+                            height: 40,
+                            borderRadius: 8,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 18,
+                            flexShrink: 0,
+                            border: "1px solid #e5e7eb",
+                          }}>📦</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ 
+                              fontSize: 15, 
+                              fontWeight: 600, 
+                              color: "#111827",
+                              marginBottom: 4,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}>
+                              {product?.name}
+                            </div>
+                            <div style={{ fontSize: 13, color: "#6b7280" }}>
+                              {sale.quantity} × GHS {sale.unit_price.toFixed(2)}
+                            </div>
                           </div>
-                          <div style={{ fontSize: 13, color: "#6b7280" }}>
-                            {sale.quantity} × GHS {sale.unit_price.toFixed(2)}
+                          <div style={{ 
+                            fontSize: 16, 
+                            fontWeight: 700, 
+                            color: "#059669",
+                            flexShrink: 0,
+                          }}>
+                            GHS {sale.total_price.toFixed(2)}
                           </div>
-                        </div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: "#059669" }}>
-                          GHS {sale.total_price.toFixed(2)}
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
 
-              {pendingSales[0].customer_name && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>CUSTOMER</div>
-                  <div style={{ fontSize: 16, fontWeight: 600, color: "#374151" }}>
-                    {pendingSales[0].customer_name}
+              {/* Customer & Payment Info */}
+              <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+                {pendingSales[0].customer_name && (
+                  <div style={{ 
+                    flex: 1,
+                    background: "#eff6ff",
+                    border: "1px solid #dbeafe",
+                    borderRadius: 10,
+                    padding: 12,
+                  }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.5px", color: "#3b82f6", marginBottom: 4, textTransform: "uppercase" }}>Customer</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#1e40af" }}>
+                      {pendingSales[0].customer_name}
+                    </div>
+                  </div>
+                )}
+                
+                <div style={{ 
+                  flex: 1,
+                  background: "#fef3c7",
+                  border: "1px solid #fde68a",
+                  borderRadius: 10,
+                  padding: 12,
+                }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.5px", color: "#d97706", marginBottom: 4, textTransform: "uppercase" }}>Payment</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#92400e", textTransform: "capitalize" }}>
+                    {pendingSales[0].payment_method}
                   </div>
                 </div>
-              )}
-
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>PAYMENT METHOD</div>
-                <div style={{ fontSize: 16, fontWeight: 600, color: "#374151", textTransform: "uppercase" }}>
-                  {pendingSales[0].payment_method}
-                </div>
               </div>
 
-              <div style={{ paddingTop: 16, borderTop: "2px solid #e5e7eb" }}>
+              {/* Total */}
+              <div style={{ 
+                background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
+                borderRadius: 12,
+                padding: 20,
+                border: "2px solid #10b981",
+              }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: 18, fontWeight: 600, color: "#111827" }}>TOTAL</span>
-                  <span style={{ fontSize: 28, fontWeight: 700, color: "#059669" }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#065f46", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Amount</span>
+                  <span style={{ fontSize: 32, fontWeight: 800, color: "#059669" }}>
                     GHS {pendingSales.reduce((sum, sale) => sum + sale.total_price, 0).toFixed(2)}
                   </span>
                 </div>
@@ -567,10 +661,14 @@ export default function Sales() {
             </div>
 
             {/* Action Buttons */}
-            <div style={{ display: "flex", gap: 12 }}>
+            <div style={{ 
+              padding: "16px 24px 24px",
+              background: "white",
+              borderTop: "1px solid #f3f4f6",
+            }}>
               {!saleConfirmed ? (
                 // Before confirmation: Back and Confirm buttons
-                <>
+                <div style={{ display: "flex", gap: 12 }}>
                   <button
                     type="button"
                     onClick={() => {
@@ -580,19 +678,20 @@ export default function Sales() {
                     }}
                     disabled={confirming}
                     style={{
-                      flex: 1,
-                      padding: "12px 24px",
+                      flex: "0 0 auto",
+                      padding: "14px 20px",
                       border: "2px solid #e5e7eb",
                       background: "white",
-                      borderRadius: 8,
+                      borderRadius: 10,
                       fontSize: 15,
                       fontWeight: 600,
                       color: "#6b7280",
                       cursor: confirming ? "not-allowed" : "pointer",
-                      opacity: confirming ? 0.6 : 1,
+                      opacity: confirming ? 0.5 : 1,
+                      transition: "all 0.2s",
                     }}
                   >
-                    ← Go Back
+                    ← Back
                   </button>
                   
                   <button
@@ -601,40 +700,43 @@ export default function Sales() {
                     disabled={confirming}
                     style={{
                       flex: 1,
-                      padding: "12px 24px",
+                      padding: "14px 24px",
                       border: "none",
-                      background: "linear-gradient(135deg, #10b981, #059669)",
-                      borderRadius: 8,
-                      fontSize: 15,
-                      fontWeight: 600,
+                      background: confirming 
+                        ? "#9ca3af" 
+                        : "linear-gradient(135deg, #10b981, #059669)",
+                      borderRadius: 10,
+                      fontSize: 16,
+                      fontWeight: 700,
                       color: "white",
                       cursor: confirming ? "not-allowed" : "pointer",
-                      opacity: confirming ? 0.8 : 1,
-                      boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
+                      boxShadow: confirming ? "none" : "0 4px 14px rgba(16, 185, 129, 0.4)",
+                      transition: "all 0.2s",
                     }}
                   >
-                    {confirming ? "Processing..." : "✓ Confirm Sale"}
+                    {confirming ? "⏳ Processing..." : "✓ Confirm Sale"}
                   </button>
-                </>
+                </div>
               ) : (
                 // After confirmation: Print and Done buttons
-                <>
+                <div style={{ display: "flex", gap: 12 }}>
                   <button
                     type="button"
                     onClick={printReceipt}
                     style={{
                       flex: 1,
-                      padding: "12px 24px",
+                      padding: "14px 24px",
                       border: "2px solid #3b82f6",
-                      background: "#eff6ff",
-                      borderRadius: 8,
+                      background: "white",
+                      borderRadius: 10,
                       fontSize: 15,
                       fontWeight: 600,
                       color: "#3b82f6",
                       cursor: "pointer",
+                      transition: "all 0.2s",
                     }}
                   >
-                    🖨️ Print Receipt
+                    🖨️ Print
                   </button>
                   
                   <button
@@ -642,12 +744,12 @@ export default function Sales() {
                     onClick={handleDone}
                     style={{
                       flex: 1,
-                      padding: "12px 24px",
+                      padding: "14px 24px",
                       border: "none",
                       background: "linear-gradient(135deg, #10b981, #059669)",
-                      borderRadius: 8,
-                      fontSize: 15,
-                      fontWeight: 600,
+                      borderRadius: 10,
+                      fontSize: 16,
+                      fontWeight: 700,
                       color: "white",
                       cursor: "pointer",
                       boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
@@ -655,7 +757,7 @@ export default function Sales() {
                   >
                     ✓ Done
                   </button>
-                </>
+                </div>
               )}
             </div>
           </div>
