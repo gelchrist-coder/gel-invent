@@ -42,6 +42,14 @@ export default function App() {
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
 
+  const showExpiryStatusFilter = products.length > 0 && products.every((p) => !!p.expiry_date);
+
+  useEffect(() => {
+    if (!showExpiryStatusFilter && filterExpiry !== "all") {
+      setFilterExpiry("all");
+    }
+  }, [showExpiryStatusFilter, filterExpiry]);
+
   const logoutAndReset = () => {
     setIsAuthenticated(false);
     localStorage.removeItem("user");
@@ -478,22 +486,24 @@ export default function App() {
                     </button>
                   </div>
                 )}
-                <label style={{ margin: 0 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                    Expiry Status
-                  </span>
-                  <select
-                    className="input"
-                    value={filterExpiry}
-                    onChange={(e) => setFilterExpiry(e.target.value)}
-                    style={{ padding: 10 }}
-                  >
-                    <option value="all">All Products</option>
-                    <option value="expired">Expired Only</option>
-                    <option value="expiring">Expiring Soon</option>
-                    <option value="fresh">Fresh Items</option>
-                  </select>
-                </label>
+                {showExpiryStatusFilter ? (
+                  <label style={{ margin: 0 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                      Expiry Status
+                    </span>
+                    <select
+                      className="input"
+                      value={filterExpiry}
+                      onChange={(e) => setFilterExpiry(e.target.value)}
+                      style={{ padding: 10 }}
+                    >
+                      <option value="all">All Products</option>
+                      <option value="expired">Expired Only</option>
+                      <option value="expiring">Expiring Soon</option>
+                      <option value="fresh">Fresh Items</option>
+                    </select>
+                  </label>
+                ) : null}
               </div>
               {(searchTerm || filterCategory !== "all" || filterExpiry !== "all") && (
                 <button

@@ -51,6 +51,8 @@ type Props = {
 };
 
 export default function MovementTable({ movements, balance }: Props) {
+  const showExpiryColumn = movements.some((m) => !!m.expiry_date);
+
   return (
     <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -70,7 +72,7 @@ export default function MovementTable({ movements, balance }: Props) {
               <th>Change</th>
               <th>Reason</th>
               <th>Batch</th>
-              <th>Batch Expiry</th>
+              {showExpiryColumn ? <th>Batch Expiry</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -94,7 +96,15 @@ export default function MovementTable({ movements, balance }: Props) {
                     <span style={{ color: "#9ca3af", fontSize: 12 }}>—</span>
                   )}
                 </td>
-                <td>{m.expiry_date ? formatExpiry(m.expiry_date) : <span style={{ color: "#9ca3af", fontSize: 12 }}>—</span>}</td>
+                {showExpiryColumn ? (
+                  <td>
+                    {m.expiry_date ? (
+                      formatExpiry(m.expiry_date)
+                    ) : (
+                      <span style={{ color: "#9ca3af", fontSize: 12 }}>—</span>
+                    )}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>

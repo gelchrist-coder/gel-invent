@@ -36,6 +36,8 @@ export default function ProductList({
 }: Props) {
   const isAdmin = userRole === "Admin";
   const categoryOptions = useAppCategories();
+  const showExpiryStatusFilter = products.length > 0 && products.every((p) => !!p.expiry_date);
+  const effectiveFilterExpiry = showExpiryStatusFilter ? filterExpiry : "all";
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
   const [adjustingId, setAdjustingId] = useState<number | null>(null);
@@ -323,14 +325,14 @@ export default function ProductList({
     // Expiry filter
     let matchesExpiry = true;
     const effectiveExpiry = expiryByProduct[p.id] || p.expiry_date;
-    if (filterExpiry === "expired") {
+    if (effectiveFilterExpiry === "expired") {
       matchesExpiry = effectiveExpiry ? new Date(effectiveExpiry) < new Date() : false;
-    } else if (filterExpiry === "expiring") {
+    } else if (effectiveFilterExpiry === "expiring") {
       matchesExpiry = effectiveExpiry ? 
         new Date(effectiveExpiry) >= new Date() && 
         new Date(effectiveExpiry) <= new Date(Date.now() + 180 * 24 * 60 * 60 * 1000) : 
         false;
-    } else if (filterExpiry === "fresh") {
+    } else if (effectiveFilterExpiry === "fresh") {
       matchesExpiry = !effectiveExpiry || 
         new Date(effectiveExpiry) > new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
     }
@@ -795,7 +797,7 @@ export default function ProductList({
       
       {filteredProducts.length === 0 ? (
         <p style={{ margin: 0, color: "#4a5368", textAlign: "center", padding: "40px 0" }}>
-          {searchTerm || filterCategory !== "all" || filterExpiry !== "all" 
+          {searchTerm || filterCategory !== "all" || effectiveFilterExpiry !== "all" 
             ? "No products match your filters" 
             : "No products yet. Create one to get started."}
         </p>
