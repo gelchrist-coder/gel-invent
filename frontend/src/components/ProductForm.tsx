@@ -463,8 +463,8 @@ export default function ProductForm({
                     className="input"
                     value={
                       branches && branches.length > 0
-                        ? (branches.find((b) => b.id === effectiveBranchId)?.name ?? "Main Branch")
-                        : "Main Branch"
+                        ? (branches.find((b) => b.id === effectiveBranchId)?.name ?? branches[0]?.name ?? "Branch")
+                        : "Branch"
                     }
                     readOnly
                   />

@@ -120,8 +120,8 @@ export default function App() {
           return;
         }
 
-        const main = data.find((b) => b.name === "Main Branch");
-        const nextId = (main?.id ?? data[0]?.id) ?? null;
+        // Use first branch as default (no longer requiring "Main Branch" name)
+        const nextId = data[0]?.id ?? null;
         setActiveBranchId(nextId);
         if (nextId != null) {
           localStorage.setItem("activeBranchId", String(nextId));
@@ -149,8 +149,8 @@ export default function App() {
           setBranches(data);
           const stillValid = activeBranchId != null && data.some((b) => b.id === activeBranchId);
           if (stillValid) return;
-          const main = data.find((b) => b.name === "Main Branch");
-          const nextId = (main?.id ?? data[0]?.id) ?? null;
+          // Use first branch as default
+          const nextId = data[0]?.id ?? null;
           setActiveBranchId(nextId);
           if (nextId != null) localStorage.setItem("activeBranchId", String(nextId));
           else localStorage.removeItem("activeBranchId");

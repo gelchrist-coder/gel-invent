@@ -42,11 +42,10 @@ export default function UserManagement() {
     try {
       const data = await fetchBranches();
       setBranches(data);
-      // Default employee branch selection to Main Branch (or first) if not set.
+      // Default employee branch selection to first branch if not set.
       setFormData((prev) => {
         if (prev.branch_id !== "") return prev;
-        const main = data.find((b) => b.name === "Main Branch");
-        const nextId = (main?.id ?? data[0]?.id) ?? "";
+        const nextId = data[0]?.id ?? "";
         return { ...prev, branch_id: nextId };
       });
     } catch (err) {
@@ -292,7 +291,7 @@ export default function UserManagement() {
             + Create Branch
           </button>
           <div style={{ color: "#5f6475", fontSize: 13 }}>
-            Current: {branches.map((b) => b.name).join(", ") || "Main Branch"}
+            Current: {branches.map((b) => b.name).join(", ") || "No branches"}
           </div>
         </div>
         {branchError && <div style={{ marginTop: 10, color: "#c33", fontSize: 13 }}>{branchError}</div>}
@@ -407,7 +406,7 @@ export default function UserManagement() {
                 }}
               >
                 {branches.length === 0 ? (
-                  <option value="">Main Branch</option>
+                  <option value="">{branches[0]?.name ?? "Select Branch"}</option>
                 ) : (
                   branches.map((b) => (
                     <option key={b.id} value={String(b.id)}>
@@ -514,7 +513,7 @@ export default function UserManagement() {
                       }}
                     >
                       {branches.length === 0 ? (
-                        <option value={String(employee.branch_id ?? "")}>Main Branch</option>
+                        <option value={String(employee.branch_id ?? "")}>Current Branch</option>
                       ) : (
                         branches.map((b) => (
                           <option key={b.id} value={String(b.id)}>

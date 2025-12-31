@@ -120,7 +120,7 @@ export default function TopBar({
             }}
             title={branches.find((b) => b.id === (activeBranchId ?? branches[0]?.id))?.name}
           >
-            {branches.find((b) => b.id === (activeBranchId ?? branches[0]?.id))?.name ?? "Main Branch"}
+            {branches.find((b) => b.id === (activeBranchId ?? branches[0]?.id))?.name ?? branches[0]?.name ?? "Branch"}
           </div>
         ) : null}
       </div>
