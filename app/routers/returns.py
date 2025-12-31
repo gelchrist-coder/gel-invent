@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
-from ..deps import get_current_active_user, get_active_branch_id
+from ..auth import get_current_active_user
+from ..utils.branch import get_active_branch_id
 from ..utils.tenant import get_tenant_user_ids
 
 router = APIRouter(prefix="/returns", tags=["returns"])
