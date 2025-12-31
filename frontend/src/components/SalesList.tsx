@@ -1,14 +1,17 @@
 import { useState } from "react";
 import { Sale, Product } from "../types";
+import ReturnForm from "./ReturnForm";
 
 type SalesListProps = {
   sales: Sale[];
   products: Product[];
   onDelete: (saleId: number) => void;
+  onRefresh?: () => void;
 };
 
-export default function SalesList({ sales, products, onDelete }: SalesListProps) {
+export default function SalesList({ sales, products, onDelete, onRefresh }: SalesListProps) {
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [returnSale, setReturnSale] = useState<Sale | null>(null);
 
   const getProductName = (productId: number) => {
     const product = products.find((p) => p.id === productId);
@@ -28,6 +31,17 @@ export default function SalesList({ sales, products, onDelete }: SalesListProps)
 
   const handleDelete = (saleId: number) => {
     setDeleteId(saleId);
+  };
+
+  const handleReturn = (sale: Sale) => {
+    setReturnSale(sale);
+  };
+
+  const handleReturnSuccess = () => {
+    setReturnSale(null);
+    if (onRefresh) {
+      onRefresh();
+    }
   };
 
   const confirmDelete = () => {
@@ -133,26 +147,52 @@ export default function SalesList({ sales, products, onDelete }: SalesListProps)
                   </span>
                 </td>
                 <td style={{ padding: 12, textAlign: "center" }}>
-                  <button
-                    onClick={() => handleDelete(sale.id)}
-                    style={{
-                      padding: "4px 12px",
-                      borderRadius: 4,
-                      border: "none",
-                      backgroundColor: "#ef4444",
-                      color: "white",
-                      cursor: "pointer",
-                      fontSize: "0.875rem",
-                    }}
-                  >
-                    Delete
-                  </button>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                    <button
+                      onClick={() => handleReturn(sale)}
+                      style={{
+                        padding: "4px 12px",
+                        borderRadius: 4,
+                        border: "none",
+                        backgroundColor: "#f59e0b",
+                        color: "white",
+                        cursor: "pointer",
+                        fontSize: "0.875rem",
+                      }}
+                    >
+                      Return
+                    </button>
+                    <button
+                      onClick={() => handleDelete(sale.id)}
+                      style={{
+                        padding: "4px 12px",
+                        borderRadius: 4,
+                        border: "none",
+                        backgroundColor: "#ef4444",
+                        color: "white",
+                        cursor: "pointer",
+                        fontSize: "0.875rem",
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* Return Form Modal */}
+      {returnSale && (
+        <ReturnForm
+          sale={returnSale}
+          product={products.find((p) => p.id === returnSale.product_id)}
+          onClose={() => setReturnSale(null)}
+          onSuccess={handleReturnSuccess}
+        />
+      )}
 
       {/* Delete Confirmation Modal */}
       {deleteId && (

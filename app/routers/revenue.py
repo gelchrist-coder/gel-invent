@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
 from ..database import get_db
-from ..models import Sale, Product, StockMovement, User, CreditTransaction, Creditor
+from ..models import Sale, Product, StockMovement, User, CreditTransaction, Creditor, SaleReturn
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 
@@ -179,20 +179,49 @@ def get_revenue_analytics(
         return "cash"
 
     def compute_returns_totals(range_start: datetime, range_end: datetime) -> tuple[Decimal, Decimal, Decimal]:
-        """Returns (revenue, cost, profit) for stock movements marked as Returned.*"""
+        """
+        Calculate returns totals from both:
+        1. SaleReturn records (new system)
+        2. Stock movements marked as 'Returned*' or 'Customer Return' (legacy/fallback)
+        """
+        returns_revenue = Decimal(0)
+        returns_cost = Decimal(0)
+        returns_profit = Decimal(0)
+        
+        # First, check the new SaleReturn model
+        sale_returns = db.scalars(
+            select(SaleReturn).where(
+                SaleReturn.created_at >= range_start,
+                SaleReturn.created_at <= range_end,
+                SaleReturn.branch_id == active_branch_id,
+                SaleReturn.user_id.in_(tenant_user_ids),
+            )
+        ).all()
+        
+        for sr in sale_returns:
+            returns_revenue += sr.refund_amount
+            # Estimate cost based on product
+            product = db.get(Product, sr.product_id)
+            if product and product.cost_price:
+                cost_value = sr.quantity_returned * product.cost_price
+                returns_cost += cost_value
+        
+        returns_profit = returns_revenue - returns_cost
+        
+        # Also check legacy stock movements marked as returns (for backwards compatibility)
         returns_query = select(StockMovement).join(Product).where(
             StockMovement.created_at >= range_start,
             StockMovement.created_at <= range_end,
             StockMovement.change > 0,
-            StockMovement.reason.like("Returned%"),
+            or_(
+                StockMovement.reason.like("Returned%"),
+                StockMovement.reason == "Customer Return",
+            ),
             StockMovement.branch_id == active_branch_id,
             Product.user_id.in_(tenant_user_ids),
             Product.branch_id == active_branch_id,
         )
         returns_movements = db.scalars(returns_query).all()
-
-        returns_revenue = Decimal(0)
-        returns_cost = Decimal(0)
         returns_profit = Decimal(0)
 
         for movement in returns_movements:

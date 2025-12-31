@@ -482,6 +482,60 @@ export async function deleteSale(saleId: number): Promise<void> {
   dataCache.delete(getCacheKey("salesDashboard"));
 }
 
+// ============ Sale Returns API ============
+
+export type SaleReturn = {
+  id: number;
+  sale_id: number;
+  product_id: number;
+  product_name: string | null;
+  quantity_returned: number;
+  refund_amount: number;
+  refund_method: string;
+  reason: string | null;
+  restock: boolean;
+  created_at: string;
+  created_by_name: string | null;
+};
+
+export type NewSaleReturn = {
+  sale_id: number;
+  quantity_returned: number;
+  refund_amount: number;
+  refund_method: string;
+  reason?: string;
+  restock?: boolean;
+};
+
+export async function createSaleReturn(payload: NewSaleReturn): Promise<SaleReturn> {
+  const result = await jsonRequest<SaleReturn>("/returns/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  // Invalidate related caches
+  dataCache.delete(getCacheKey("sales"));
+  dataCache.delete(getCacheKey("products"));
+  dataCache.delete(getCacheKey("salesDashboard"));
+  dataCache.delete(getCacheKey("inventoryAnalytics"));
+  return result;
+}
+
+export async function fetchReturns(): Promise<SaleReturn[]> {
+  return jsonRequest<SaleReturn[]>("/returns/");
+}
+
+export async function fetchReturnsForSale(saleId: number): Promise<SaleReturn[]> {
+  return jsonRequest<SaleReturn[]>(`/returns/sale/${saleId}`);
+}
+
+export async function fetchReturnsSummary(): Promise<{
+  total_returns: number;
+  total_quantity_returned: number;
+  total_refund_amount: number;
+}> {
+  return jsonRequest("/returns/summary");
+}
+
 // Inventory API
 
 export async function fetchInventoryAnalytics(): Promise<JsonObject> {

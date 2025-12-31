@@ -480,7 +480,7 @@ export default function Sales() {
         ) : (
           <>
             {loading ? <p style={{ margin: "0 0 8px 0", color: "#6b7280", fontSize: 12 }}>Refreshing...</p> : null}
-            <SalesList sales={sales.slice(0, 5)} products={products} onDelete={handleDeleteSale} />
+            <SalesList sales={sales.slice(0, 5)} products={products} onDelete={handleDeleteSale} onRefresh={loadData} />
             {sales.length > 5 && (
               <div style={{ textAlign: "center", marginTop: 12 }}>
                 <button
@@ -886,7 +886,7 @@ export default function Sales() {
 
             {/* Modal Body */}
             <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
-              <SalesList sales={sales} products={products} onDelete={handleDeleteSale} />
+              <SalesList sales={sales} products={products} onDelete={handleDeleteSale} onRefresh={loadData} />
             </div>
           </div>
         </div>

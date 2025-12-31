@@ -82,3 +82,30 @@ class SaleRead(SaleBase):
     deducted_batches: list[dict[str, object]] | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ============ Sale Return Schemas ============
+
+class SaleReturnCreate(BaseModel):
+    sale_id: int = Field(..., gt=0)
+    quantity_returned: Decimal = Field(..., gt=0, decimal_places=2)
+    refund_amount: Decimal = Field(..., ge=0, decimal_places=2)
+    refund_method: str = Field(default="cash", max_length=50)
+    reason: str | None = Field(default=None, max_length=500)
+    restock: bool = Field(default=True)
+
+
+class SaleReturnRead(BaseModel):
+    id: int
+    sale_id: int
+    product_id: int
+    product_name: str | None = None
+    quantity_returned: Decimal
+    refund_amount: Decimal
+    refund_method: str
+    reason: str | None
+    restock: bool
+    created_at: datetime
+    created_by_name: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)

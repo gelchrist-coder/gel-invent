@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .database import Base, engine
-from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings
+from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns
 from . import models
 
 app = FastAPI(title="Gel Invent API", version="0.1.0")
@@ -277,6 +277,7 @@ app.include_router(branches.router)
 app.include_router(settings.router)
 app.include_router(products.router)
 app.include_router(sales.router)
+app.include_router(returns.router)
 app.include_router(inventory.router)
 app.include_router(revenue.router)
 app.include_router(creditors.router)

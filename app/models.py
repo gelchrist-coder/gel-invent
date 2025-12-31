@@ -209,3 +209,25 @@ class SystemSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class SaleReturn(Base):
+    """Track goods returned by customers."""
+    __tablename__ = "sale_returns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    quantity_returned: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    refund_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    # How refund was handled: cash, credit_to_account, exchange, store_credit
+    refund_method: Mapped[str] = mapped_column(String(50), default="cash")
+    reason: Mapped[str | None] = mapped_column(String(500), default=None)
+    # If items are restockable (good condition)
+    restock: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    sale: Mapped[Sale] = relationship()
+    product: Mapped[Product] = relationship()
