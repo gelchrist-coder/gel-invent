@@ -49,12 +49,13 @@ export default function ProductList({
     cost_price: "",
     selling_price: "",
     location: "Main Store",
-    returned_by: "",
   });
   const [stockData, setStockData] = useState<Record<number, number>>({});
   const [locationOptions, setLocationOptions] = useState<string[]>(["Main Store"]);
   const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
+  const [viewingHistoryId, setViewingHistoryId] = useState<number | null>(null);
+  const [historyData, setHistoryData] = useState<Array<{id: number; change: number; reason: string; created_at: string; location?: string | null; unit_cost_price?: number | null; unit_selling_price?: number | null}>>([]);
 
   // Use current_stock from products (already computed by backend) - much faster!
   // Only fetch movements in parallel for location options and expiry dates
@@ -98,6 +99,15 @@ export default function ProductList({
       loadAdditionalData();
     }
   }, [products]);
+
+  // Load history when viewing a product's history
+  useEffect(() => {
+    if (viewingHistoryId !== null) {
+      fetchMovements(viewingHistoryId)
+        .then((movements) => setHistoryData(movements))
+        .catch(() => setHistoryData([]));
+    }
+  }, [viewingHistoryId]);
 
   const startEdit = (product: Product) => {
     setEditingId(product.id);
@@ -178,7 +188,6 @@ export default function ProductList({
       cost_price: "",
       selling_price: "",
       location: "Main Store",
-      returned_by: "",
     });
 
     // Prefill cost/selling for stock-in using product defaults when available.
@@ -193,7 +202,7 @@ export default function ProductList({
 
   const cancelAdjustment = () => {
     setAdjustingId(null);
-    setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: "Main Store", returned_by: "" });
+    setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: "Main Store" });
   };
 
   const saveAdjustment = async (productId: number) => {
@@ -211,15 +220,8 @@ export default function ProductList({
     }
 
     // Normalize sign based on reason so staff can enter a positive quantity.
-    const positiveReasons = new Set(["New Stock", "Restock", "Returned"]);
-    const negativeReasons = new Set(["Expired", "Damaged", "Lost/Stolen", "Write-off"]);
-
-    let qty = rawQty;
-    if (positiveReasons.has(adjustment.reason)) {
-      qty = Math.abs(rawQty);
-    } else if (negativeReasons.has(adjustment.reason)) {
-      qty = -Math.abs(rawQty);
-    }
+    // Since we only have stock-in reasons (New Stock, Restock), always make qty positive
+    let qty = Math.abs(rawQty);
 
     // Convert pack quantity into pieces for ledger accuracy.
     // (We store all movement.change in pieces/units.)
@@ -257,39 +259,24 @@ export default function ProductList({
       else if (product?.selling_price != null) unitSellingToSend = Number(product.selling_price);
       else if (product?.pack_selling_price != null && packSize && packSize > 0) unitSellingToSend = Number(product.pack_selling_price) / packSize;
     }
-    if (adjustment.reason === "Returned" && !adjustment.returned_by.trim()) {
-      alert("Please enter who returned the item");
-      return;
-    }
     if (adjustment.reason === "New Stock" && !adjustment.expiry_date) {
       alert("Please set an expiry date for new stock");
       return;
     }
-
-    const available = stockData[productId] ?? 0;
-    if (qty < 0 && Math.abs(qty) > available) {
-      alert(`Not enough stock. Available: ${available}`);
-      return;
-    }
-
-    const reasonToSend =
-      adjustment.reason === "Returned"
-        ? `Returned (${adjustment.returned_by.trim()})`
-        : adjustment.reason;
 
     setBusy(true);
     try {
       await onStockAdjust(
         productId,
         qty,
-        reasonToSend,
+        adjustment.reason,
         adjustment.expiry_date || undefined,
         adjustment.location,
         unitCostToSend,
         unitSellingToSend,
       );
       setAdjustingId(null);
-      setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: "Main Store", returned_by: "" });
+      setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: "Main Store" });
       // Refresh stock data
       const movements = await fetchMovements(productId);
       const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
@@ -613,12 +600,12 @@ export default function ProductList({
                   step="1"
                   value={adjustment.quantity}
                   onChange={(e) => setAdjustment({ ...adjustment, quantity: e.target.value })}
-                  placeholder="+50 or -10"
+                  placeholder="50"
                   autoFocus
                   style={{ fontSize: 14, padding: 10 }}
                 />
                 <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
-                  Tip: For Damaged/Expired/Lost/Write-off just enter a quantity (we will deduct automatically).
+                  Enter the number of units to add to inventory
                 </small>
               </label>
               <label>
@@ -641,33 +628,8 @@ export default function ProductList({
                   <option value="">Select reason...</option>
                   <option value="New Stock">New Stock</option>
                   <option value="Restock">Restock</option>
-                  <option value="Expired">Expired</option>
-                  <option value="Damaged">Damaged</option>
-                  <option value="Returned">Returned</option>
-                  <option value="Stock Count">Stock Count</option>
-                  <option value="Correction">Correction</option>
-                  <option value="Lost/Stolen">Lost/Stolen</option>
-                  <option value="Write-off">Write-off</option>
                 </select>
               </label>
-              {adjustment.reason === "Returned" && (
-                <label>
-                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                    Returned By (Customer) *
-                  </span>
-                  <input
-                    className="input"
-                    type="text"
-                    value={adjustment.returned_by}
-                    onChange={(e) => setAdjustment({ ...adjustment, returned_by: e.target.value })}
-                    placeholder="e.g., John Doe"
-                    style={{ fontSize: 14, padding: 10 }}
-                  />
-                  <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
-                    This will be saved on the stock movement
-                  </small>
-                </label>
-              )}
 
               {(adjustment.reason === "New Stock" || adjustment.reason === "Restock") && (
                 <label>
@@ -783,6 +745,127 @@ export default function ProductList({
                   Cancel
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stock History Modal */}
+      {viewingHistoryId !== null && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setViewingHistoryId(null)}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 700,
+              width: "100%",
+              maxHeight: "80vh",
+              overflowY: "auto",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
+                Stock History - {products.find(p => p.id === viewingHistoryId)?.name}
+              </h3>
+              <button
+                onClick={() => setViewingHistoryId(null)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  fontSize: 20,
+                  cursor: "pointer",
+                  color: "#6b7280",
+                }}
+              >
+                ×
+              </button>
+            </div>
+            {historyData.length === 0 ? (
+              <p style={{ color: "#6b7280", textAlign: "center", padding: "20px 0" }}>
+                No stock movements yet
+              </p>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+                <thead>
+                  <tr style={{ background: "#f8f9fc", borderBottom: "2px solid #e5e7eb" }}>
+                    <th style={{ padding: "10px", textAlign: "left", fontWeight: 600 }}>Date</th>
+                    <th style={{ padding: "10px", textAlign: "right", fontWeight: 600 }}>Change</th>
+                    <th style={{ padding: "10px", textAlign: "left", fontWeight: 600 }}>Reason</th>
+                    <th style={{ padding: "10px", textAlign: "left", fontWeight: 600 }}>Location</th>
+                    <th style={{ padding: "10px", textAlign: "right", fontWeight: 600 }}>Cost</th>
+                    <th style={{ padding: "10px", textAlign: "right", fontWeight: 600 }}>Selling</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyData.map((m) => (
+                    <tr key={m.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: "10px", color: "#6b7280", fontSize: 13 }}>
+                        {new Date(m.created_at).toLocaleDateString()} {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td style={{ 
+                        padding: "10px", 
+                        textAlign: "right", 
+                        fontWeight: 600,
+                        color: m.change > 0 ? "#059669" : "#dc2626" 
+                      }}>
+                        {m.change > 0 ? `+${m.change}` : m.change}
+                      </td>
+                      <td style={{ padding: "10px" }}>
+                        <span style={{
+                          background: m.change > 0 ? "#d1fae5" : "#fee2e2",
+                          color: m.change > 0 ? "#065f46" : "#991b1b",
+                          padding: "4px 8px",
+                          borderRadius: 4,
+                          fontSize: 12,
+                          fontWeight: 500,
+                        }}>
+                          {m.reason}
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px", color: "#6b7280" }}>{m.location || "-"}</td>
+                      <td style={{ padding: "10px", textAlign: "right", color: "#374151" }}>
+                        {m.unit_cost_price ? `₵${Number(m.unit_cost_price).toFixed(2)}` : "-"}
+                      </td>
+                      <td style={{ padding: "10px", textAlign: "right", color: "#374151" }}>
+                        {m.unit_selling_price ? `₵${Number(m.unit_selling_price).toFixed(2)}` : "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div style={{ marginTop: 16, textAlign: "right" }}>
+              <button
+                onClick={() => setViewingHistoryId(null)}
+                style={{
+                  padding: "10px 20px",
+                  fontSize: 14,
+                  background: "#3b82f6",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontWeight: 500,
+                }}
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
@@ -933,44 +1016,46 @@ export default function ProductList({
                             cursor: busy ? "not-allowed" : "pointer",
                             fontWeight: 500,
                           }}
-                          title="New stock"
+                          title="Add new stock"
                         >
                           New Stock
                         </button>
                         <button
-                          onClick={() => startAdjustment(p.id)}
+                          onClick={() => setViewingHistoryId(p.id)}
                           disabled={busy}
                           style={{
                             padding: "6px 12px",
                             fontSize: 12,
-                            background: "#10b981",
+                            background: "#6366f1",
                             color: "white",
                             border: "none",
                             borderRadius: 6,
                             cursor: busy ? "not-allowed" : "pointer",
                             fontWeight: 500,
                           }}
-                          title="Adjust stock"
+                          title="View stock history"
                         >
-                          Stock
+                          History
                         </button>
-                        <button
-                          onClick={() => handleDelete(p)}
-                          disabled={busy}
-                          style={{
-                            padding: "6px 12px",
-                            fontSize: 12,
-                            background: "#ef4444",
-                            color: "white",
-                            border: "none",
-                            borderRadius: 6,
-                            cursor: busy ? "not-allowed" : "pointer",
-                            fontWeight: 500,
-                          }}
-                          title="Delete product"
-                        >
-                          Delete
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDelete(p)}
+                            disabled={busy}
+                            style={{
+                              padding: "6px 12px",
+                              fontSize: 12,
+                              background: "#ef4444",
+                              color: "white",
+                              border: "none",
+                              borderRadius: 6,
+                              cursor: busy ? "not-allowed" : "pointer",
+                              fontWeight: 500,
+                            }}
+                            title="Delete product"
+                          >
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
