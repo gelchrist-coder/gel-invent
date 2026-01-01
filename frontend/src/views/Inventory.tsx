@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ComponentProps } from "react";
-import { fetchInventoryAnalytics, fetchAllMovements } from "../api";
+import { fetchInventoryAnalytics, fetchAllMovements, exportMovementsPdf } from "../api";
 import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
 import LocationBreakdown from "../components/LocationBreakdown";
@@ -20,6 +20,8 @@ export default function Inventory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [movementDays, setMovementDays] = useState(30);
+  const [exporting, setExporting] = useState(false);
+  const [exportType, setExportType] = useState<string>("all");
 
   const loadData = useCallback(async () => {
     // Only load data if user is Admin
@@ -48,6 +50,25 @@ export default function Inventory() {
       setLoading(false);
     }
   }, [isAdmin, loadData, movementDays]);
+
+  const handleExportPdf = async () => {
+    setExporting(true);
+    try {
+      const blob = await exportMovementsPdf(movementDays, exportType);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `stock_movements_${exportType}_${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to export PDF");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Block access for non-Admin users
   if (!isAdmin) {
@@ -153,25 +174,65 @@ export default function Inventory() {
 
       {/* Movement History */}
       <div className="card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Movement History</h3>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <label style={{ fontSize: 14, color: "#6b7280" }}>Show last:</label>
-            <select
-              value={movementDays}
-              onChange={(e) => setMovementDays(Number(e.target.value))}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "1px solid #d1d5db",
-                fontSize: 14,
-              }}
-            >
-              <option value={7}>7 days</option>
-              <option value={30}>30 days</option>
-              <option value={90}>90 days</option>
-              <option value={365}>1 year</option>
-            </select>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label style={{ fontSize: 14, color: "#6b7280" }}>Show last:</label>
+              <select
+                value={movementDays}
+                onChange={(e) => setMovementDays(Number(e.target.value))}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  fontSize: 14,
+                }}
+              >
+                <option value={7}>7 days</option>
+                <option value={30}>30 days</option>
+                <option value={90}>90 days</option>
+                <option value={365}>1 year</option>
+              </select>
+            </div>
+            
+            {/* Export to PDF */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", borderLeft: "1px solid #e5e7eb", paddingLeft: 12 }}>
+              <select
+                value={exportType}
+                onChange={(e) => setExportType(e.target.value)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  fontSize: 14,
+                }}
+              >
+                <option value="all">All Movements</option>
+                <option value="stock_in">Stock In (Purchases)</option>
+                <option value="stock_out">Stock Out</option>
+                <option value="sale">Sales Only</option>
+              </select>
+              <button
+                onClick={handleExportPdf}
+                disabled={exporting}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "none",
+                  backgroundColor: exporting ? "#9ca3af" : "#10b981",
+                  color: "white",
+                  cursor: exporting ? "not-allowed" : "pointer",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                {exporting ? "Exporting..." : "📄 Export PDF"}
+              </button>
+            </div>
           </div>
         </div>
         <MovementHistory movements={movements} locations={locations} />

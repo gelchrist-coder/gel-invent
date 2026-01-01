@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
+from io import BytesIO
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import Session
 
@@ -326,3 +328,212 @@ def get_all_movements(
         })
     
     return result
+
+
+@router.get("/movements/export-pdf")
+def export_movements_pdf(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+    days: int = Query(30, ge=1, le=365),
+    movement_type: str | None = Query(None, description="Filter by: stock_in, stock_out, sale, all"),
+):
+    """
+    Export stock movements to PDF.
+    
+    Movement types:
+    - stock_in: Purchases, restocks, returns (positive movements)
+    - stock_out: Damaged, expired, write-offs (negative non-sale movements)
+    - sale: Sales transactions
+    - all: All movements
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    
+    # Fetch movements
+    since_date = datetime.now() - timedelta(days=days)
+    query = select(StockMovement).join(Product).where(
+        and_(
+            StockMovement.created_at >= since_date,
+            StockMovement.user_id.in_(tenant_user_ids),
+            StockMovement.branch_id == active_branch_id,
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        )
+    ).order_by(StockMovement.created_at.desc())
+    
+    movements = db.scalars(query).all()
+    
+    # Filter by movement type
+    filtered_movements = []
+    for movement in movements:
+        product = db.scalar(
+            select(Product).where(
+                and_(
+                    Product.id == movement.product_id,
+                    Product.user_id.in_(tenant_user_ids),
+                    Product.branch_id == active_branch_id,
+                )
+            )
+        )
+        
+        # Classify movement
+        classification = classify_movement(movement.reason, movement.change)
+        
+        # Determine if it matches filter
+        if movement_type and movement_type != "all":
+            if movement_type == "stock_in" and classification != "stock_in":
+                continue
+            if movement_type == "stock_out" and classification not in ("stock_out", "adjustments"):
+                continue
+            if movement_type == "sale" and classification != "sales":
+                continue
+        
+        filtered_movements.append({
+            "date": movement.created_at.strftime("%d %b %Y %H:%M"),
+            "product_name": product.name if product else "Unknown",
+            "product_sku": product.sku if product else "N/A",
+            "change": float(movement.change),
+            "reason": movement.reason,
+            "batch_number": movement.batch_number or "-",
+            "location": movement.location or "Main Store",
+            "type": "Stock In" if movement.change > 0 else ("Sale" if classification == "sales" else "Stock Out"),
+        })
+    
+    # Generate PDF
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        rightMargin=30,
+        leftMargin=30,
+        topMargin=30,
+        bottomMargin=30,
+    )
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=20,
+        alignment=1,  # Center
+    )
+    
+    elements = []
+    
+    # Title
+    type_label = {
+        "stock_in": "Stock In (Purchases)",
+        "stock_out": "Stock Out",
+        "sale": "Sales",
+        None: "All Movements",
+        "all": "All Movements",
+    }.get(movement_type, "All Movements")
+    
+    title = Paragraph(f"Stock Movement Report - {type_label}", title_style)
+    elements.append(title)
+    
+    # Subtitle with date range
+    subtitle_style = ParagraphStyle(
+        'Subtitle',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=colors.gray,
+        alignment=1,
+        spaceAfter=20,
+    )
+    subtitle = Paragraph(
+        f"Generated on {datetime.now().strftime('%d %b %Y %H:%M')} | Last {days} days | {len(filtered_movements)} records",
+        subtitle_style,
+    )
+    elements.append(subtitle)
+    elements.append(Spacer(1, 0.2 * inch))
+    
+    # Summary statistics
+    total_in = sum(m["change"] for m in filtered_movements if m["change"] > 0)
+    total_out = abs(sum(m["change"] for m in filtered_movements if m["change"] < 0))
+    
+    summary_data = [
+        ["Summary", ""],
+        ["Total Stock In", f"+{total_in:.2f} units"],
+        ["Total Stock Out", f"-{total_out:.2f} units"],
+        ["Net Change", f"{total_in - total_out:+.2f} units"],
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[2 * inch, 2 * inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('TOPPADDING', (0, 0), (-1, 0), 8),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#f9fafb")),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
+    ]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 0.3 * inch))
+    
+    # Movement table
+    if filtered_movements:
+        header = ["Date", "Product", "SKU", "Change", "Type", "Reason", "Batch", "Location"]
+        data = [header]
+        
+        for m in filtered_movements:
+            change_str = f"+{m['change']:.2f}" if m["change"] > 0 else f"{m['change']:.2f}"
+            data.append([
+                m["date"],
+                m["product_name"][:25] + "..." if len(m["product_name"]) > 25 else m["product_name"],
+                m["product_sku"],
+                change_str,
+                m["type"],
+                m["reason"],
+                m["batch_number"],
+                m["location"],
+            ])
+        
+        col_widths = [1.2 * inch, 1.8 * inch, 0.9 * inch, 0.7 * inch, 0.8 * inch, 1.0 * inch, 0.8 * inch, 1.0 * inch]
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+        
+        table.setStyle(TableStyle([
+            # Header
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('TOPPADDING', (0, 0), (-1, 0), 10),
+            # Body
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('ALIGN', (3, 1), (3, -1), 'RIGHT'),  # Change column
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        
+        elements.append(table)
+    else:
+        no_data = Paragraph("No movements found for the selected criteria.", styles['Normal'])
+        elements.append(no_data)
+    
+    doc.build(elements)
+    buffer.seek(0)
+    
+    filename = f"stock_movements_{movement_type or 'all'}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

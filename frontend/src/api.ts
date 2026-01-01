@@ -577,6 +577,35 @@ export async function fetchAllMovements(days: number = 30, location?: string, re
   return data;
 }
 
+export async function exportMovementsPdf(days: number = 30, movementType?: string): Promise<Blob> {
+  const params = new URLSearchParams({ days: days.toString() });
+  if (movementType && movementType !== "all") {
+    params.append("movement_type", movementType);
+  }
+  
+  const headers: Record<string, string> = {};
+  const token = localStorage.getItem("token");
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  const branchId = localStorage.getItem("activeBranchId");
+  if (branchId) {
+    headers["X-Branch-ID"] = branchId;
+  }
+  
+  const resp = await fetch(`${API_BASE}/inventory/movements/export-pdf?${params.toString()}`, {
+    method: "GET",
+    headers,
+  });
+  
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    throw new Error(errorText || `Failed to export PDF: ${resp.status}`);
+  }
+  
+  return resp.blob();
+}
+
 // Revenue API
 
 export async function fetchRevenueAnalytics(period: string = "30d", startDate?: string, endDate?: string): Promise<JsonObject> {
