@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, useState, useEffect } from "react";
 
 import TopBar from "./TopBar";
 import { Branch } from "../types";
@@ -47,11 +47,52 @@ export default function Layout({
   activeBranchId,
   onChangeBranch,
 }: Props) {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Check for mobile viewport
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+      if (window.innerWidth >= 768) {
+        setSidebarOpen(false);
+      }
+    };
+    
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  // Close sidebar when navigating on mobile
+  const handleNavigate = (view: string) => {
+    onNavigate(view);
+    if (isMobile) {
+      setSidebarOpen(false);
+    }
+  };
+
   // Filter navigation items based on user role
   const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || userRole === "Admin");
   
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
+      {/* Mobile Overlay */}
+      {isMobile && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            zIndex: 998,
+          }}
+        />
+      )}
+
       {/* Sidebar */}
       <aside
         style={{
@@ -62,25 +103,72 @@ export default function Layout({
           color: "#fff",
           padding: "24px 0",
           boxShadow: "4px 0 20px rgba(0,0,0,0.15)",
-          position: "sticky",
+          position: isMobile ? "fixed" : "sticky",
           top: 0,
+          left: isMobile ? (sidebarOpen ? 0 : -260) : 0,
           height: "100vh",
           overflowY: "auto",
           flexShrink: 0,
+          zIndex: 999,
+          transition: "left 0.3s ease",
         }}
       >
-        <div style={{ padding: "0 20px", marginBottom: 32 }}>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, letterSpacing: "-0.5px" }}>
-            Gel Invent
-          </h1>
-          <p style={{ margin: "4px 0 0", opacity: 0.7, fontSize: 13 }}>Inventory System</p>
+        <div style={{ padding: "0 20px", marginBottom: 32, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, letterSpacing: "-0.5px" }}>
+              Gel Invent
+            </h1>
+            <p style={{ margin: "4px 0 0", opacity: 0.7, fontSize: 13 }}>Inventory System</p>
+          </div>
+          {isMobile && (
+            <button
+              onClick={() => setSidebarOpen(false)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#fff",
+                fontSize: 24,
+                cursor: "pointer",
+                padding: 4,
+              }}
+            >
+              ×
+            </button>
+          )}
         </div>
+
+        {/* Branch Selector for Mobile */}
+        {isMobile && userRole === "Admin" && onChangeBranch && branches && branches.length > 0 && (
+          <div style={{ padding: "0 20px", marginBottom: 20 }}>
+            <select
+              value={activeBranchId ?? branches[0]?.id}
+              onChange={(e) => onChangeBranch?.(Number(e.target.value))}
+              style={{
+                width: "100%",
+                height: 40,
+                borderRadius: 8,
+                border: "1px solid rgba(255,255,255,0.2)",
+                background: "rgba(255,255,255,0.1)",
+                padding: "0 12px",
+                fontSize: 14,
+                color: "#fff",
+              }}
+              aria-label="Select branch"
+            >
+              {branches.map((b) => (
+                <option key={b.id} value={b.id} style={{ color: "#0b1021" }}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <nav>
           {visibleNavItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => onNavigate(item.id)}
+              onClick={() => handleNavigate(item.id)}
               style={{
                 width: "100%",
                 padding: "14px 20px",
@@ -118,7 +206,7 @@ export default function Layout({
       </aside>
 
       {/* Main Content */}
-      <main style={{ flex: 1, background: "#f7f9ff", display: "flex", flexDirection: "column" }}>
+      <main style={{ flex: 1, background: "#f7f9ff", display: "flex", flexDirection: "column", minWidth: 0 }}>
         <TopBar
           userName={userName}
           userRole={userRole}
@@ -127,6 +215,8 @@ export default function Layout({
           branches={branches}
           activeBranchId={activeBranchId}
           onChangeBranch={onChangeBranch}
+          onMenuClick={() => setSidebarOpen(true)}
+          isMobile={isMobile}
         />
         <div style={{ flex: 1 }}>{children}</div>
       </main>

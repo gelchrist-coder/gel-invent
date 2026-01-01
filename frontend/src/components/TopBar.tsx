@@ -10,6 +10,8 @@ type Props = {
   branches?: Branch[];
   activeBranchId?: number | null;
   onChangeBranch?: (branchId: number) => void;
+  onMenuClick?: () => void;
+  isMobile?: boolean;
 };
 
 export default function TopBar({
@@ -20,6 +22,8 @@ export default function TopBar({
   branches,
   activeBranchId,
   onChangeBranch,
+  onMenuClick,
+  isMobile = false,
 }: Props) {
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -50,19 +54,38 @@ export default function TopBar({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "0 32px",
+        padding: isMobile ? "0 16px" : "0 32px",
         boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
         position: "sticky",
         top: 0,
         zIndex: 100,
       }}
     >
-      {/* Left - Business Name */}
+      {/* Left - Menu Button (mobile) + Business Name */}
       <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 12 }}>
+        {isMobile && onMenuClick && (
+          <button
+            onClick={onMenuClick}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 8,
+              cursor: "pointer",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+            aria-label="Open menu"
+          >
+            <span style={{ width: 20, height: 2, background: "#0b1021", borderRadius: 1 }} />
+            <span style={{ width: 20, height: 2, background: "#0b1021", borderRadius: 1 }} />
+            <span style={{ width: 20, height: 2, background: "#0b1021", borderRadius: 1 }} />
+          </button>
+        )}
         <h1
           style={{
             margin: 0,
-            fontSize: 22,
+            fontSize: isMobile ? 18 : 22,
             fontWeight: 700,
             background: "linear-gradient(120deg, #1f7aff, #8246ff)",
             WebkitBackgroundClip: "text",
@@ -72,14 +95,14 @@ export default function TopBar({
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
-            maxWidth: 520,
+            maxWidth: isMobile ? 160 : 520,
           }}
           title={businessName}
         >
           {businessName}
         </h1>
 
-        {userRole === "Admin" && onChangeBranch && branches && branches.length > 0 ? (
+        {!isMobile && userRole === "Admin" && onChangeBranch && branches && branches.length > 0 ? (
           <select
             value={activeBranchId ?? branches[0]?.id}
             onChange={(e) => onChangeBranch?.(Number(e.target.value))}
@@ -101,7 +124,7 @@ export default function TopBar({
               </option>
             ))}
           </select>
-        ) : branches && branches.length > 0 ? (
+        ) : !isMobile && branches && branches.length > 0 ? (
           <div
             style={{
               height: 36,
@@ -133,8 +156,8 @@ export default function TopBar({
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 12,
-              padding: "8px 16px 8px 8px",
+              gap: isMobile ? 8 : 12,
+              padding: isMobile ? "6px 10px 6px 6px" : "8px 16px 8px 8px",
               background: "#f9fbff",
               borderRadius: 999,
               border: "1px solid #e6e9f2",
@@ -152,26 +175,28 @@ export default function TopBar({
           >
             <div
               style={{
-                width: 42,
-                height: 42,
+                width: isMobile ? 36 : 42,
+                height: isMobile ? 36 : 42,
                 borderRadius: "50%",
                 background: "linear-gradient(135deg, #1f7aff, #8246ff)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 fontWeight: 700,
-                fontSize: 16,
+                fontSize: isMobile ? 14 : 16,
                 color: "#fff",
                 boxShadow: "0 4px 12px rgba(31, 122, 255, 0.3)",
               }}
             >
               {userName.charAt(0).toUpperCase()}
             </div>
-            <div style={{ textAlign: "left" }}>
-              <div style={{ fontWeight: 600, fontSize: 14, color: "#0b1021" }}>{userName}</div>
-              <div style={{ fontSize: 12, color: "#5f6475" }}>{userRole}</div>
-            </div>
-            <div style={{ marginLeft: 4, fontSize: 12, color: "#5f6475" }}>
+            {!isMobile && (
+              <div style={{ textAlign: "left" }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: "#0b1021" }}>{userName}</div>
+                <div style={{ fontSize: 12, color: "#5f6475" }}>{userRole}</div>
+              </div>
+            )}
+            <div style={{ marginLeft: isMobile ? 0 : 4, fontSize: 12, color: "#5f6475" }}>
               {showDropdown ? "▲" : "▼"}
             </div>
           </div>
@@ -223,24 +248,6 @@ export default function TopBar({
                     e.currentTarget.style.borderColor = "#fee2e2";
                   }}
                 >
-                  <span
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 999,
-                      background: "#fee2e2",
-                      border: "1px solid #fecaca",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14,
-                      lineHeight: 1,
-                      flex: "0 0 auto",
-                    }}
-                    aria-hidden="true"
-                  >
-                    🚪
-                  </span>
                   <span style={{ flex: 1 }}>Logout</span>
                 </button>
               )}
