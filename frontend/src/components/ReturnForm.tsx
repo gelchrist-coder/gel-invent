@@ -12,15 +12,29 @@ type ReturnFormProps = {
 export default function ReturnForm({ sale, product, onClose, onSuccess }: ReturnFormProps) {
   const [quantityReturned, setQuantityReturned] = useState(1);
   const [refundAmount, setRefundAmount] = useState(sale.unit_price);
-  const [refundMethod, setRefundMethod] = useState<"cash" | "credit_to_account" | "exchange" | "store_credit">(
+  const [refundMethod, setRefundMethod] = useState<"cash" | "credit_to_account" | "store_credit" | "no_refund">(
     sale.payment_method === "credit" ? "credit_to_account" : "cash"
   );
-  const [reason, setReason] = useState("");
+  const [reasonCategory, setReasonCategory] = useState("");
+  const [reasonDetails, setReasonDetails] = useState("");
   const [restock, setRestock] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [existingReturns, setExistingReturns] = useState<SaleReturn[]>([]);
   const [loadingReturns, setLoadingReturns] = useState(true);
+
+  // Reason categories
+  const REASON_CATEGORIES = [
+    { value: "defective", label: "Defective Product" },
+    { value: "wrong_item", label: "Wrong Item Delivered" },
+    { value: "wrong_size", label: "Wrong Size/Specification" },
+    { value: "damaged", label: "Damaged in Transit" },
+    { value: "changed_mind", label: "Customer Changed Mind" },
+    { value: "exchange", label: "Exchange for Other Product" },
+    { value: "expired", label: "Product Expired" },
+    { value: "quality", label: "Quality Not as Expected" },
+    { value: "other", label: "Other" },
+  ];
 
   // Calculate max quantity that can be returned
   const totalReturned = existingReturns.reduce((sum, r) => sum + r.quantity_returned, 0);
@@ -69,10 +83,23 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
       return;
     }
 
-    if (!reason.trim()) {
-      setError("Please provide a reason for the return");
+    if (!reasonCategory) {
+      setError("Please select a reason for the return");
       return;
     }
+
+    if (reasonCategory === "other" && !reasonDetails.trim()) {
+      setError("Please provide details for 'Other' reason");
+      return;
+    }
+
+    // Build the full reason string
+    const selectedReason = REASON_CATEGORIES.find(r => r.value === reasonCategory);
+    const fullReason = reasonCategory === "other" 
+      ? reasonDetails.trim()
+      : reasonDetails.trim() 
+        ? `${selectedReason?.label}: ${reasonDetails.trim()}`
+        : selectedReason?.label || "";
 
     setLoading(true);
     setError("");
@@ -81,9 +108,9 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
       await createSaleReturn({
         sale_id: sale.id,
         quantity_returned: quantityReturned,
-        refund_amount: refundAmount,
-        refund_method: refundMethod,
-        reason: reason.trim(),
+        refund_amount: refundMethod === "no_refund" ? 0 : refundAmount,
+        refund_method: refundMethod === "no_refund" ? "exchange" : refundMethod,
+        reason: fullReason,
         restock,
       });
       onSuccess();
@@ -286,6 +313,60 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
 
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", marginBottom: 6, fontWeight: 500 }}>
+              Reason for Return
+            </label>
+            <select
+              value={reasonCategory}
+              onChange={(e) => {
+                setReasonCategory(e.target.value);
+                // Auto-set no refund for exchanges
+                if (e.target.value === "exchange") {
+                  setRefundMethod("no_refund");
+                } else if (refundMethod === "no_refund") {
+                  setRefundMethod(sale.payment_method === "credit" ? "credit_to_account" : "cash");
+                }
+              }}
+              style={{
+                width: "100%",
+                padding: 10,
+                borderRadius: 4,
+                border: "1px solid #ddd",
+                boxSizing: "border-box",
+              }}
+            >
+              <option value="">-- Select a reason --</option>
+              {REASON_CATEGORIES.map((cat) => (
+                <option key={cat.value} value={cat.value}>
+                  {cat.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {reasonCategory && (
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 500 }}>
+                {reasonCategory === "other" ? "Please specify" : "Additional Details (optional)"}
+              </label>
+              <textarea
+                value={reasonDetails}
+                onChange={(e) => setReasonDetails(e.target.value)}
+                placeholder={reasonCategory === "other" ? "Please describe the reason..." : "Any additional details..."}
+                rows={2}
+                style={{
+                  width: "100%",
+                  padding: 10,
+                  borderRadius: 4,
+                  border: "1px solid #ddd",
+                  boxSizing: "border-box",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+          )}
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", marginBottom: 6, fontWeight: 500 }}>
               Refund Method
             </label>
             <select
@@ -301,34 +382,19 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
             >
               <option value="cash">Cash Refund</option>
               <option value="credit_to_account">Credit to Account (reduce debt)</option>
-              <option value="exchange">Exchange for Other Product</option>
               <option value="store_credit">Store Credit</option>
+              <option value="no_refund">No Refund (Exchange Only)</option>
             </select>
             {sale.payment_method === "credit" && refundMethod === "credit_to_account" && (
               <p style={{ margin: "4px 0 0 0", fontSize: "0.75rem", color: "#059669" }}>
                 This will reduce the customer's outstanding debt
               </p>
             )}
-          </div>
-
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", marginBottom: 6, fontWeight: 500 }}>
-              Reason for Return
-            </label>
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g., Defective product, Wrong size, Customer changed mind..."
-              rows={3}
-              style={{
-                width: "100%",
-                padding: 10,
-                borderRadius: 4,
-                border: "1px solid #ddd",
-                boxSizing: "border-box",
-                resize: "vertical",
-              }}
-            />
+            {refundMethod === "no_refund" && (
+              <p style={{ margin: "4px 0 0 0", fontSize: "0.75rem", color: "#f59e0b" }}>
+                Customer will exchange for another product of equal or greater value
+              </p>
+            )}
           </div>
 
           <div style={{ marginBottom: 20 }}>
