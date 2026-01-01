@@ -54,8 +54,6 @@ export default function ProductList({
   const [locationOptions, setLocationOptions] = useState<string[]>(["Main Store"]);
   const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
-  const [viewingHistoryId, setViewingHistoryId] = useState<number | null>(null);
-  const [historyData, setHistoryData] = useState<Array<{id: number; change: number; reason: string; created_at: string; location?: string | null; unit_cost_price?: number | null; unit_selling_price?: number | null}>>([]);
 
   // Use current_stock from products (already computed by backend) - much faster!
   // Only fetch movements in parallel for location options and expiry dates
@@ -99,15 +97,6 @@ export default function ProductList({
       loadAdditionalData();
     }
   }, [products]);
-
-  // Load history when viewing a product's history
-  useEffect(() => {
-    if (viewingHistoryId !== null) {
-      fetchMovements(viewingHistoryId)
-        .then((movements) => setHistoryData(movements))
-        .catch(() => setHistoryData([]));
-    }
-  }, [viewingHistoryId]);
 
   const startEdit = (product: Product) => {
     setEditingId(product.id);
@@ -750,127 +739,6 @@ export default function ProductList({
         </div>
       )}
 
-      {/* Stock History Modal */}
-      {viewingHistoryId !== null && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-          onClick={() => setViewingHistoryId(null)}
-        >
-          <div
-            style={{
-              background: "white",
-              borderRadius: 12,
-              padding: 24,
-              maxWidth: 700,
-              width: "100%",
-              maxHeight: "80vh",
-              overflowY: "auto",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-                Stock History - {products.find(p => p.id === viewingHistoryId)?.name}
-              </h3>
-              <button
-                onClick={() => setViewingHistoryId(null)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  fontSize: 20,
-                  cursor: "pointer",
-                  color: "#6b7280",
-                }}
-              >
-                ×
-              </button>
-            </div>
-            {historyData.length === 0 ? (
-              <p style={{ color: "#6b7280", textAlign: "center", padding: "20px 0" }}>
-                No stock movements yet
-              </p>
-            ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-                <thead>
-                  <tr style={{ background: "#f8f9fc", borderBottom: "2px solid #e5e7eb" }}>
-                    <th style={{ padding: "10px", textAlign: "left", fontWeight: 600 }}>Date</th>
-                    <th style={{ padding: "10px", textAlign: "right", fontWeight: 600 }}>Change</th>
-                    <th style={{ padding: "10px", textAlign: "left", fontWeight: 600 }}>Reason</th>
-                    <th style={{ padding: "10px", textAlign: "left", fontWeight: 600 }}>Location</th>
-                    <th style={{ padding: "10px", textAlign: "right", fontWeight: 600 }}>Cost</th>
-                    <th style={{ padding: "10px", textAlign: "right", fontWeight: 600 }}>Selling</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {historyData.map((m) => (
-                    <tr key={m.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                      <td style={{ padding: "10px", color: "#6b7280", fontSize: 13 }}>
-                        {new Date(m.created_at).toLocaleDateString()} {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </td>
-                      <td style={{ 
-                        padding: "10px", 
-                        textAlign: "right", 
-                        fontWeight: 600,
-                        color: m.change > 0 ? "#059669" : "#dc2626" 
-                      }}>
-                        {m.change > 0 ? `+${m.change}` : m.change}
-                      </td>
-                      <td style={{ padding: "10px" }}>
-                        <span style={{
-                          background: m.change > 0 ? "#d1fae5" : "#fee2e2",
-                          color: m.change > 0 ? "#065f46" : "#991b1b",
-                          padding: "4px 8px",
-                          borderRadius: 4,
-                          fontSize: 12,
-                          fontWeight: 500,
-                        }}>
-                          {m.reason}
-                        </span>
-                      </td>
-                      <td style={{ padding: "10px", color: "#6b7280" }}>{m.location || "-"}</td>
-                      <td style={{ padding: "10px", textAlign: "right", color: "#374151" }}>
-                        {m.unit_cost_price ? `₵${Number(m.unit_cost_price).toFixed(2)}` : "-"}
-                      </td>
-                      <td style={{ padding: "10px", textAlign: "right", color: "#374151" }}>
-                        {m.unit_selling_price ? `₵${Number(m.unit_selling_price).toFixed(2)}` : "-"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            <div style={{ marginTop: 16, textAlign: "right" }}>
-              <button
-                onClick={() => setViewingHistoryId(null)}
-                style={{
-                  padding: "10px 20px",
-                  fontSize: 14,
-                  background: "#3b82f6",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  fontWeight: 500,
-                }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 className="section-title" style={{ margin: 0 }}>Products</h2>
         <span style={{ fontSize: 14, color: "#6b7280" }}>
@@ -1019,23 +887,6 @@ export default function ProductList({
                           title="Add new stock"
                         >
                           New Stock
-                        </button>
-                        <button
-                          onClick={() => setViewingHistoryId(p.id)}
-                          disabled={busy}
-                          style={{
-                            padding: "6px 12px",
-                            fontSize: 12,
-                            background: "#6366f1",
-                            color: "white",
-                            border: "none",
-                            borderRadius: 6,
-                            cursor: busy ? "not-allowed" : "pointer",
-                            fontWeight: 500,
-                          }}
-                          title="View stock history"
-                        >
-                          History
                         </button>
                         {isAdmin && (
                           <button
