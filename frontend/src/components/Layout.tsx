@@ -22,8 +22,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: "users", label: "Users", icon: "M", adminOnly: true },
 ];
 
-const SIDEBAR_EXPANDED_WIDTH = 240;
-const SIDEBAR_COLLAPSED_WIDTH = 70;
+const SIDEBAR_EXPANDED_WIDTH = 220;
+const SIDEBAR_COLLAPSED_WIDTH = 64;
 
 type Props = {
   activeView: string;
@@ -51,11 +51,7 @@ export default function Layout({
   onChangeBranch,
 }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    // Load collapsed state from localStorage
-    const saved = localStorage.getItem("sidebarCollapsed");
-    return saved === "true";
-  });
+  const [sidebarHovered, setSidebarHovered] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
   // Check for mobile viewport
@@ -72,11 +68,6 @@ export default function Layout({
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  // Save collapsed state to localStorage
-  useEffect(() => {
-    localStorage.setItem("sidebarCollapsed", String(sidebarCollapsed));
-  }, [sidebarCollapsed]);
-
   // Close sidebar when navigating on mobile
   const handleNavigate = (view: string) => {
     onNavigate(view);
@@ -88,7 +79,9 @@ export default function Layout({
   // Filter navigation items based on user role
   const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || userRole === "Admin");
 
-  const sidebarWidth = isMobile ? 260 : (sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH);
+  // On desktop: collapsed by default, expands on hover
+  const isExpanded = isMobile || sidebarHovered;
+  const sidebarWidth = isMobile ? 260 : (isExpanded ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH);
   
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
@@ -110,14 +103,16 @@ export default function Layout({
 
       {/* Sidebar */}
       <aside
+        onMouseEnter={() => !isMobile && setSidebarHovered(true)}
+        onMouseLeave={() => !isMobile && setSidebarHovered(false)}
         style={{
           width: sidebarWidth,
           minWidth: sidebarWidth,
           maxWidth: sidebarWidth,
           background: "linear-gradient(180deg, #0b1021 0%, #1a2235 100%)",
           color: "#fff",
-          padding: "20px 0",
-          boxShadow: "4px 0 20px rgba(0,0,0,0.15)",
+          padding: "16px 0",
+          boxShadow: isExpanded && !isMobile ? "4px 0 24px rgba(0,0,0,0.2)" : "2px 0 8px rgba(0,0,0,0.1)",
           position: isMobile ? "fixed" : "sticky",
           top: 0,
           left: isMobile ? (sidebarOpen ? 0 : -260) : 0,
@@ -126,36 +121,36 @@ export default function Layout({
           overflowX: "hidden",
           flexShrink: 0,
           zIndex: 999,
-          transition: "all 0.3s ease",
+          transition: "all 0.25s ease",
         }}
       >
         {/* Header */}
         <div style={{ 
-          padding: sidebarCollapsed && !isMobile ? "0 8px" : "0 16px", 
-          marginBottom: 24, 
+          padding: !isExpanded ? "0 8px" : "0 16px", 
+          marginBottom: 20, 
           display: "flex", 
           justifyContent: "space-between", 
           alignItems: "center",
-          minHeight: 48,
+          minHeight: 44,
         }}>
-          {(!sidebarCollapsed || isMobile) ? (
+          {isExpanded ? (
             <div style={{ overflow: "hidden" }}>
-              <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: "-0.5px", whiteSpace: "nowrap" }}>
+              <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: "-0.5px", whiteSpace: "nowrap" }}>
                 Gel Invent
               </h1>
-              <p style={{ margin: "2px 0 0", opacity: 0.7, fontSize: 12, whiteSpace: "nowrap" }}>Inventory System</p>
+              <p style={{ margin: "2px 0 0", opacity: 0.6, fontSize: 11, whiteSpace: "nowrap" }}>Inventory System</p>
             </div>
           ) : (
             <div style={{ 
-              width: 40, 
-              height: 40, 
+              width: 36, 
+              height: 36, 
               borderRadius: 8, 
               background: "linear-gradient(135deg, #1f7aff, #8246ff)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               fontWeight: 700,
-              fontSize: 16,
+              fontSize: 14,
               margin: "0 auto",
             }}>
               GI
@@ -211,22 +206,22 @@ export default function Layout({
             <button
               key={item.id}
               onClick={() => handleNavigate(item.id)}
-              title={sidebarCollapsed && !isMobile ? item.label : undefined}
+              title={!isExpanded ? item.label : undefined}
               style={{
                 width: "100%",
-                padding: sidebarCollapsed && !isMobile ? "12px 0" : "12px 16px",
+                padding: !isExpanded ? "10px 0" : "10px 16px",
                 background: activeView === item.id ? "rgba(31, 122, 255, 0.15)" : "transparent",
                 border: "none",
                 borderLeft: activeView === item.id ? "3px solid #1f7aff" : "3px solid transparent",
                 color: activeView === item.id ? "#fff" : "rgba(255,255,255,0.7)",
-                textAlign: sidebarCollapsed && !isMobile ? "center" : "left",
+                textAlign: !isExpanded ? "center" : "left",
                 cursor: "pointer",
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: activeView === item.id ? 600 : 500,
                 transition: "all 0.15s ease",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: sidebarCollapsed && !isMobile ? "center" : "flex-start",
+                justifyContent: !isExpanded ? "center" : "flex-start",
                 gap: 10,
               }}
               onMouseEnter={(e) => {
@@ -251,12 +246,12 @@ export default function Layout({
                 alignItems: "center",
                 justifyContent: "center",
                 fontWeight: 600,
-                fontSize: 12,
+                fontSize: 11,
                 flexShrink: 0,
               }}>
                 {item.icon}
               </span>
-              {(!sidebarCollapsed || isMobile) && (
+              {isExpanded && (
                 <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {item.label}
                 </span>
@@ -264,42 +259,6 @@ export default function Layout({
             </button>
           ))}
         </nav>
-
-        {/* Collapse Toggle (Desktop Only) */}
-        {!isMobile && (
-          <div style={{ padding: "16px 8px", borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 16 }}>
-            <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              style={{
-                width: "100%",
-                padding: "10px",
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 8,
-                color: "rgba(255,255,255,0.7)",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 500,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 8,
-                transition: "all 0.15s ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(255,255,255,0.1)";
-                e.currentTarget.style.color = "#fff";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(255,255,255,0.05)";
-                e.currentTarget.style.color = "rgba(255,255,255,0.7)";
-              }}
-            >
-              <span style={{ fontSize: 16 }}>{sidebarCollapsed ? "»" : "«"}</span>
-              {!sidebarCollapsed && <span>Collapse</span>}
-            </button>
-          </div>
-        )}
       </aside>
 
       {/* Main Content */}
