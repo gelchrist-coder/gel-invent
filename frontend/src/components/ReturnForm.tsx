@@ -23,16 +23,12 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
   const [existingReturns, setExistingReturns] = useState<SaleReturn[]>([]);
   const [loadingReturns, setLoadingReturns] = useState(true);
 
-  // Reason categories
+  // Reason categories (only reasons where product can be restocked)
   const REASON_CATEGORIES = [
-    { value: "defective", label: "Defective Product" },
     { value: "wrong_item", label: "Wrong Item Delivered" },
     { value: "wrong_size", label: "Wrong Size/Specification" },
-    { value: "damaged", label: "Damaged in Transit" },
     { value: "changed_mind", label: "Customer Changed Mind" },
     { value: "exchange", label: "Exchange for Other Product" },
-    { value: "expired", label: "Product Expired" },
-    { value: "quality", label: "Quality Not as Expected" },
     { value: "other", label: "Other" },
   ];
 
