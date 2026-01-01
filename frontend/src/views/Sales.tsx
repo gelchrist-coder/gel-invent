@@ -3,6 +3,7 @@ import { Sale, Product, NewSale } from "../types";
 import { fetchSales, createSaleForBranch, createSalesBulk, deleteSale, fetchProducts, getCachedProducts, getCachedSales } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
+import ReturnsList from "../components/ReturnsList";
 import {
   applyLocalSaleToCachedProducts,
   cacheProducts,
@@ -501,6 +502,14 @@ export default function Sales() {
             )}
           </>
         )}
+      </div>
+
+      {/* Returns History */}
+      <div className="card" style={{ marginTop: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Returns History</h3>
+        </div>
+        <ReturnsList products={products} />
       </div>
 
       {/* Confirmation Modal */}
