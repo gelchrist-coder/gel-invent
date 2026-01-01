@@ -20,21 +20,8 @@ export default function PaymentMethodBreakdown({ data }: Props) {
 
   const totalRevenue = data.reduce((sum, item) => sum + item.revenue, 0);
 
-  const getMethodIcon = (method: string) => {
-    switch (method.toLowerCase()) {
-      case "cash":
-        return "💵";
-      case "card":
-        return "💳";
-      case "mobile_money":
-        return "📱";
-      case "bank_transfer":
-        return "🏦";
-      case "credit":
-        return "📝";
-      default:
-        return "💰";
-    }
+  const getMethodIcon = (_method: string) => {
+    return "";
   };
 
   const getMethodColor = (index: number) => {

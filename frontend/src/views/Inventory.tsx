@@ -150,7 +150,7 @@ export default function Inventory() {
             gap: 8,
           }}
         >
-          🔄 Refresh
+          Refresh
         </button>
       </div>
 

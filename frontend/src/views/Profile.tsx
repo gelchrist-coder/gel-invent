@@ -387,7 +387,7 @@ export default function Profile() {
               className="button"
               style={{ background: "#10b981" }}
             >
-              💾 Save Changes
+              Save Changes
             </button>
           </div>
         ) : (
@@ -396,7 +396,7 @@ export default function Profile() {
             className="button"
             style={{ background: "#1f7aff" }}
           >
-            ✏️ Edit Profile
+            Edit Profile
           </button>
         )}
       </div>
@@ -413,7 +413,7 @@ export default function Profile() {
             fontWeight: 500,
           }}
         >
-          ✓ Settings saved successfully!
+          Settings saved successfully!
         </div>
       )}
 
@@ -442,9 +442,9 @@ export default function Profile() {
         }}
       >
         {[
-          { id: "business", label: "Business Info", icon: "🏢", adminOnly: true },
-          { id: "user", label: "User Account", icon: "👤" },
-          { id: "system", label: "System Settings", icon: "⚙️", adminOnly: true },
+          { id: "business", label: "Business Info", icon: "", adminOnly: true },
+          { id: "user", label: "User Account", icon: "" },
+          { id: "system", label: "System Settings", icon: "", adminOnly: true },
         ]
           .filter((tab) => !tab.adminOnly || isAdmin)
           .map((tab) => (
@@ -670,7 +670,7 @@ export default function Profile() {
               }}
             >
               <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 8px", color: "#374151" }}>
-                🔒 Change Password
+                Change Password
               </h3>
               <p style={{ margin: "0 0 12px", fontSize: 13, color: "#6b7280" }}>
                 Update your password to keep your account secure
@@ -986,7 +986,7 @@ export default function Profile() {
                               style={{ background: "#3b82f6", fontSize: 13, padding: "8px 16px" }}
                               onClick={() => handleEditBranch(branch)}
                             >
-                              ✏️ Edit
+                              Edit
                             </button>
                             {branches.length > 1 && (
                               <button
@@ -995,7 +995,7 @@ export default function Profile() {
                                 onClick={() => handleDeleteBranch(branch)}
                                 disabled={branchSaving}
                               >
-                                🗑️ Delete
+                                Delete
                               </button>
                             )}
                           </div>
@@ -1056,7 +1056,7 @@ export default function Profile() {
                     }
                   }}
                 >
-                  🗑️ Clear All Data
+                  Clear All Data
                 </button>
               </div>
             </div>

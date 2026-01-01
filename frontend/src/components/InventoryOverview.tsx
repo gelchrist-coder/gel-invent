@@ -67,7 +67,6 @@ export default function InventoryOverview({ analytics }: Props) {
               fontSize: 24,
             }}
           >
-            📦
           </div>
           <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Total Products</p>
@@ -100,7 +99,6 @@ export default function InventoryOverview({ analytics }: Props) {
               fontSize: 24,
             }}
           >
-            💰
           </div>
           <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Stock Value</p>
@@ -133,7 +131,6 @@ export default function InventoryOverview({ analytics }: Props) {
               fontSize: 24,
             }}
           >
-            ⚠️
           </div>
           <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Low Stock</p>
@@ -166,7 +163,6 @@ export default function InventoryOverview({ analytics }: Props) {
               fontSize: 24,
             }}
           >
-            ⏰
           </div>
           <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Expiring Soon</p>

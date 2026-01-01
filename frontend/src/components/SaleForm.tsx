@@ -355,7 +355,7 @@ export default function SaleForm({ products, onSubmit, onCancel }: SaleFormProps
                   <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{selectedCreditor.name}</p>
                   {selectedCreditor.phone && (
                     <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-                      📱 {selectedCreditor.phone}
+                      {selectedCreditor.phone}
                     </p>
                   )}
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "#dc2626" }}>
@@ -456,7 +456,7 @@ export default function SaleForm({ products, onSubmit, onCancel }: SaleFormProps
           ) : (
             <div style={{ textAlign: "center" }}>
               <p style={{ margin: "0 0 8px", fontSize: 13, color: "#92400e" }}>
-                ⚠️ Please select a creditor for this {form.payment_method === "partial" ? "partial payment" : "credit sale"}
+                Please select a creditor for this {form.payment_method === "partial" ? "partial payment" : "credit sale"}
               </p>
               <button
                 type="button"
@@ -637,7 +637,7 @@ function CreditorSelectionModal({ onSelect, onClose }: CreditorSelectionModalPro
               color: "#6b7280",
             }}
           >
-            ✕
+            X
           </button>
         </div>
 
@@ -718,7 +718,7 @@ function CreditorSelectionModal({ onSelect, onClose }: CreditorSelectionModalPro
                       <p style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{creditor.name}</p>
                       {creditor.phone && (
                         <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280" }}>
-                          📱 {creditor.phone}
+                          {creditor.phone}
                         </p>
                       )}
                     </div>

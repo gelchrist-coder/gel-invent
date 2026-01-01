@@ -47,7 +47,6 @@ export default function RevenueMetrics({ metrics }: Props) {
                 fontSize: 24,
               }}
             >
-              💰
             </div>
             <div style={{ flex: 1 }}>
               <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Total Revenue</p>
@@ -92,7 +91,6 @@ export default function RevenueMetrics({ metrics }: Props) {
                 fontSize: 24,
               }}
             >
-              💵
             </div>
             <div style={{ flex: 1 }}>
               <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Cash Received</p>
@@ -128,7 +126,6 @@ export default function RevenueMetrics({ metrics }: Props) {
                 fontSize: 24,
               }}
             >
-              📝
             </div>
             <div style={{ flex: 1 }}>
               <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Credit (Pending)</p>
@@ -164,7 +161,6 @@ export default function RevenueMetrics({ metrics }: Props) {
                 fontSize: 24,
               }}
             >
-              🛒
             </div>
             <div style={{ flex: 1 }}>
               <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Total Sales</p>

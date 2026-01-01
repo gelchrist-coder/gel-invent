@@ -190,7 +190,7 @@ export default function RevenueAnalysis() {
               fontWeight: 500,
             }}
           >
-            🔄 Refresh
+            Refresh
           </button>
         </div>
       </div>

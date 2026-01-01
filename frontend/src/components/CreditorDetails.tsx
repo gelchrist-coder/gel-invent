@@ -122,8 +122,8 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
           <div>
             <h2 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>{creditor.name}</h2>
             <div style={{ marginTop: 8 }}>
-              {creditor.phone && <p style={{ margin: "4px 0", fontSize: 14, color: "#6b7280" }}>📱 {creditor.phone}</p>}
-              {creditor.email && <p style={{ margin: "4px 0", fontSize: 14, color: "#6b7280" }}>✉️ {creditor.email}</p>}
+              {creditor.phone && <p style={{ margin: "4px 0", fontSize: 14, color: "#6b7280" }}>{creditor.phone}</p>}
+              {creditor.email && <p style={{ margin: "4px 0", fontSize: 14, color: "#6b7280" }}>{creditor.email}</p>}
             </div>
             {creditor.notes && (
               <p style={{ margin: "12px 0 0", fontSize: 14, color: "#6b7280", fontStyle: "italic" }}>
@@ -142,7 +142,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
               cursor: "pointer",
             }}
           >
-            ✕
+            X
           </button>
         </div>
 
@@ -185,7 +185,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
               cursor: "pointer",
             }}
           >
-            💵 Record Payment
+            Record Payment
           </button>
           <button
             onClick={() => setShowDebtModal(true)}
@@ -200,7 +200,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
               cursor: "pointer",
             }}
           >
-            📝 Add Debt
+            Add Debt
           </button>
           <button
             onClick={onEdit}
@@ -215,7 +215,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
               cursor: "pointer",
             }}
           >
-            ✏️ Edit Info
+            Edit Info
           </button>
         </div>
 

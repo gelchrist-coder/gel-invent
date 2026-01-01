@@ -165,10 +165,10 @@ export default function Dashboard({ onNavigate }: Props) {
   );
 
   const quickActions = [
-    { label: "Add Product", icon: "➕", color: "#1f7aff", action: "products" },
-    { label: "Record Sale", icon: "💰", color: "#10b981", action: "sales" },
-    { label: "Stock Movement", icon: "📦", color: "#8246ff", action: "inventory", adminOnly: true },
-    { label: "View Reports", icon: "📊", color: "#f59e0b", action: "reports", adminOnly: true },
+    { label: "Add Product", icon: "+", color: "#1f7aff", action: "products" },
+    { label: "Record Sale", icon: "$", color: "#10b981", action: "sales" },
+    { label: "Stock Movement", icon: "#", color: "#8246ff", action: "inventory", adminOnly: true },
+    { label: "View Reports", icon: "~", color: "#f59e0b", action: "reports", adminOnly: true },
   ].filter(action => !action.adminOnly || isAdmin);
 
   return (
@@ -417,7 +417,7 @@ export default function Dashboard({ onNavigate }: Props) {
             <div className="card">
               <h2 className="section-title">
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  ⚠️ Expiring Soon ({expiryWarningDays} days)
+                  Expiring Soon ({expiryWarningDays} days)
                   <span
                     className="badge"
                     style={{ background: "#fef3c7", color: "#92400e", fontSize: 12 }}

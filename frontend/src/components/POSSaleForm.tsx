@@ -351,7 +351,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
         <div style={{ marginBottom: 8 }}>
           <input
             type="text"
-            placeholder="🔍 Search products..."
+            placeholder="Search products..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{
@@ -580,7 +580,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
               padding: "40px 16px", 
               color: "#9ca3af",
             }}>
-              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.3 }}>🛒</div>
+              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.3 }}></div>
               <p style={{ fontSize: 13, margin: 0 }}>No items</p>
             </div>
           ) : (
@@ -620,7 +620,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                         marginLeft: 8,
                       }}
                     >
-                      ✕
+                      X
                     </button>
                   </div>
                   
@@ -800,7 +800,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
             boxShadow: "0 20px 60px rgba(0, 0, 0, 0.3)",
           }}>
             <h2 style={{ marginTop: 0, marginBottom: 20, fontSize: 20, fontWeight: 700 }}>
-              💳 Credit Sale Details
+              Credit Sale Details
             </h2>
 
             <div style={{ marginBottom: 16 }}>

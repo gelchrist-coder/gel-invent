@@ -11,15 +11,15 @@ type NavItem = {
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", icon: "📊" },
-  { id: "products", label: "Products", icon: "📦" },
-  { id: "sales", label: "Sales", icon: "💰" },
-  { id: "inventory", label: "Inventory Tracking", icon: "📋", adminOnly: true },
-  { id: "revenue", label: "Revenue Analysis", icon: "💹", adminOnly: true },
-  { id: "reports", label: "Reports", icon: "📈", adminOnly: true },
-  { id: "creditors", label: "Creditors", icon: "👥" },
-  { id: "profile", label: "Profile", icon: "⚙️" },
-  { id: "users", label: "User Management", icon: "👤", adminOnly: true },
+  { id: "dashboard", label: "Dashboard", icon: "" },
+  { id: "products", label: "Products", icon: "" },
+  { id: "sales", label: "Sales", icon: "" },
+  { id: "inventory", label: "Inventory Tracking", icon: "", adminOnly: true },
+  { id: "revenue", label: "Revenue Analysis", icon: "", adminOnly: true },
+  { id: "reports", label: "Reports", icon: "", adminOnly: true },
+  { id: "creditors", label: "Creditors", icon: "" },
+  { id: "profile", label: "Profile", icon: "" },
+  { id: "users", label: "User Management", icon: "", adminOnly: true },
 ];
 
 type Props = {

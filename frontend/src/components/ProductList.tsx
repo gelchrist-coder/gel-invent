@@ -549,7 +549,7 @@ export default function ProductList({
                   disabled={busy}
                   style={{ flex: 1, background: "#3b82f6", fontSize: 14 }}
                 >
-                  ✓ Save Changes
+                  Save Changes
                 </button>
                 <button
                   onClick={cancelEdit}
@@ -765,7 +765,7 @@ export default function ProductList({
                   disabled={busy}
                   style={{ flex: 1, background: "#10b981", fontSize: 14 }}
                 >
-                  ✓ Adjust Stock
+                  Adjust Stock
                 </button>
                 <button
                   onClick={cancelAdjustment}
@@ -917,7 +917,7 @@ export default function ProductList({
                             }}
                           title="Edit product"
                           >
-                          ✏️ Edit
+                          Edit
                           </button>
                         )}
                         <button
@@ -935,7 +935,7 @@ export default function ProductList({
                           }}
                           title="New stock"
                         >
-                          ➕ New Stock
+                          New Stock
                         </button>
                         <button
                           onClick={() => startAdjustment(p.id)}
@@ -952,7 +952,7 @@ export default function ProductList({
                           }}
                           title="Adjust stock"
                         >
-                          📦 Stock
+                          Stock
                         </button>
                         <button
                           onClick={() => handleDelete(p)}
@@ -969,7 +969,7 @@ export default function ProductList({
                           }}
                           title="Delete product"
                         >
-                          🗑️ Delete
+                          Delete
                         </button>
                       </div>
                     </td>

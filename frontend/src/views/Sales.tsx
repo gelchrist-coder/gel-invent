@@ -394,7 +394,7 @@ export default function Sales() {
 
   return (
     <div className="app-shell">
-      <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>💳 Point of Sale</h1>
+      <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Point of Sale</h1>
 
       {outboxCount > 0 && (
         <div className="card" style={{ marginBottom: 16, border: "1px solid #fde68a", background: "#fffbeb" }}>
@@ -546,7 +546,6 @@ export default function Sales() {
               color: "white",
               position: "relative",
             }}>
-              <div style={{ fontSize: 40, marginBottom: 8, textAlign: "center" }}>🛒</div>
               <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0, textAlign: "center" }}>
                 Order Confirmation
               </h2>
@@ -618,7 +617,7 @@ export default function Sales() {
                             fontSize: 18,
                             flexShrink: 0,
                             border: "1px solid #e5e7eb",
-                          }}>📦</div>
+                          }}></div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ 
                               fontSize: 15, 
@@ -773,7 +772,7 @@ export default function Sales() {
                       transition: "all 0.2s",
                     }}
                   >
-                    🖨️ Print
+                    Print
                   </button>
                   
                   <button

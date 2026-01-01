@@ -184,8 +184,8 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
                   </td>
                   <td style={{ padding: "12px 16px" }}>
                     <div>
-                      {creditor.phone && <p style={{ margin: 0, fontSize: 13 }}>📱 {creditor.phone}</p>}
-                      {creditor.email && <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280" }}>✉️ {creditor.email}</p>}
+                      {creditor.phone && <p style={{ margin: 0, fontSize: 13 }}>{creditor.phone}</p>}
+                      {creditor.email && <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280" }}>{creditor.email}</p>}
                       {!creditor.phone && !creditor.email && <p style={{ margin: 0, fontSize: 13, color: "#9ca3af" }}>—</p>}
                     </div>
                   </td>

@@ -179,7 +179,7 @@ export default function ProductForm({
           onClick={generateSKU}
           style={{ background: "#6b7280", padding: "8px 14px" }}
         >
-          🔄 Generate SKU
+          Generate SKU
         </button>
       </div>
 
@@ -539,7 +539,7 @@ export default function ProductForm({
             data-save-mode="save"
             style={{ flex: 1 }}
           >
-            {busy && submittingMode === "save" ? "Saving..." : "💾 Save Product"}
+            {busy && submittingMode === "save" ? "Saving..." : "Save Product"}
           </button>
           <button
             className="button"
@@ -548,7 +548,7 @@ export default function ProductForm({
             data-save-mode="saveAndNew"
             style={{ flex: 1, background: "#10b981" }}
           >
-            {busy && submittingMode === "saveAndNew" ? "Saving..." : "➕ Save & Add Another"}
+            {busy && submittingMode === "saveAndNew" ? "Saving..." : "Save & Add Another"}
           </button>
           {onCancel && (
             <button

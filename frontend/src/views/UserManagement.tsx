@@ -216,7 +216,7 @@ export default function UserManagement() {
             boxShadow: "0 4px 12px rgba(31, 122, 255, 0.3)",
           }}
         >
-          {showAddForm ? "✕ Cancel" : "+ Add Employee"}
+          {showAddForm ? "Cancel" : "+ Add Employee"}
         </button>
       </div>
 

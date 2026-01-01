@@ -61,7 +61,7 @@ export default function StockAlerts({ lowStock, expiring }: Props) {
       {/* Low Stock Alerts */}
       <div>
         <h3 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-          <span>⚠️</span>
+          <span></span>
           Low Stock Alerts ({lowStock.length})
         </h3>
         <div
@@ -120,7 +120,7 @@ export default function StockAlerts({ lowStock, expiring }: Props) {
       {/* Expiring Products */}
       <div>
         <h3 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-          <span>⏰</span>
+          <span></span>
           Expiring Products ({expiring.length})
         </h3>
         <div

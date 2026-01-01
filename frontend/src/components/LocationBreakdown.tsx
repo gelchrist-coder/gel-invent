@@ -17,12 +17,8 @@ export default function LocationBreakdown({ locations }: Props) {
   const totalValue = locations.reduce((sum, loc) => sum + loc.value, 0);
   const totalUnits = locations.reduce((sum, loc) => sum + loc.total_units, 0);
 
-  const getLocationIcon = (location: string) => {
-    if (location.toLowerCase().includes("warehouse")) return "🏭";
-    if (location.toLowerCase().includes("cold")) return "❄️";
-    if (location.toLowerCase().includes("display")) return "🏪";
-    if (location.toLowerCase().includes("main")) return "🏢";
-    return "📍";
+  const getLocationIcon = (_location: string) => {
+    return "";
   };
 
   const getLocationColor = (index: number) => {

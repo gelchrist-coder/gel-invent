@@ -334,7 +334,6 @@ export default function App() {
                   fontWeight: 600,
                 }}
               >
-                <span style={{ fontSize: 18 }}>➕</span>
                 <span>Add New Product</span>
               </button>
             </div>
@@ -382,7 +381,7 @@ export default function App() {
                         padding: 4,
                       }}
                     >
-                      ✕
+                      X
                     </button>
                   </div>
                   <ProductForm
@@ -401,7 +400,7 @@ export default function App() {
               <div className="grid" style={{ gridTemplateColumns: "2fr 1fr 1fr", gap: 12, alignItems: "end" }}>
                 <label style={{ margin: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                    🔍 Search Products
+                    Search Products
                   </span>
                   <input
                     className="input"
@@ -524,7 +523,7 @@ export default function App() {
                     color: "#4a5368",
                   }}
                 >
-                  ✕ Clear Filters
+                  Clear Filters
                 </button>
               )}
             </div>
