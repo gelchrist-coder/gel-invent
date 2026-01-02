@@ -54,6 +54,8 @@ export default function ProductList({
   const [locationOptions, setLocationOptions] = useState<string[]>(["Main Store"]);
   const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
+  const [damageId, setDamageId] = useState<number | null>(null);
+  const [damageForm, setDamageForm] = useState({ quantity: "", reason: "Damaged", details: "", location: "Main Store" });
 
   // Use current_stock from products (already computed by backend) - much faster!
   // Only fetch movements in parallel for location options and expiry dates
@@ -209,8 +211,8 @@ export default function ProductList({
     }
 
     // Normalize sign based on reason so staff can enter a positive quantity.
-    // Since we only have stock-in reasons (New Stock, Restock), always make qty positive
-    let qty = Math.abs(rawQty);
+    const negativeReasons = new Set(["Damaged", "Expired", "Lost/Stolen", "Write-off"]);
+    let qty = negativeReasons.has(adjustment.reason) ? -Math.abs(rawQty) : Math.abs(rawQty);
 
     // Convert pack quantity into pieces for ledger accuracy.
     // (We store all movement.change in pieces/units.)
@@ -739,6 +741,174 @@ export default function ProductList({
         </div>
       )}
 
+      {/* Report Damage Modal */}
+      {damageId !== null && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setDamageId(null)}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 400,
+              width: "100%",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600, color: "#dc2626" }}>
+              Report Damage - {products.find(p => p.id === damageId)?.name}
+            </h3>
+            <p style={{ margin: "0 0 16px", fontSize: 14, color: "#6b7280" }}>
+              This will deduct stock and record the loss. Current stock: <strong>{stockData[damageId] ?? 0}</strong>
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <label>
+                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                  Quantity Damaged *
+                </span>
+                <input
+                  className="input"
+                  type="number"
+                  step="1"
+                  min="1"
+                  max={stockData[damageId] ?? 0}
+                  value={damageForm.quantity}
+                  onChange={(e) => setDamageForm({ ...damageForm, quantity: e.target.value })}
+                  placeholder="Enter quantity"
+                  autoFocus
+                  style={{ fontSize: 14, padding: 10 }}
+                />
+              </label>
+              <label>
+                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                  Damage Type
+                </span>
+                <select
+                  className="input"
+                  value={damageForm.reason}
+                  onChange={(e) => setDamageForm({ ...damageForm, reason: e.target.value })}
+                  style={{ fontSize: 14, padding: 10 }}
+                >
+                  <option value="Damaged">Damaged (Physical damage)</option>
+                  <option value="Expired">Expired (Past expiry date)</option>
+                  <option value="Lost/Stolen">Lost/Stolen</option>
+                  <option value="Write-off">Write-off (Other reasons)</option>
+                </select>
+              </label>
+              <label>
+                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                  Details (Optional)
+                </span>
+                <textarea
+                  className="input"
+                  value={damageForm.details}
+                  onChange={(e) => setDamageForm({ ...damageForm, details: e.target.value })}
+                  placeholder="Describe what happened..."
+                  rows={2}
+                  style={{ fontSize: 14, padding: 10, resize: "vertical" }}
+                />
+              </label>
+              <label>
+                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                  Location
+                </span>
+                <input
+                  className="input"
+                  type="text"
+                  list="damage-location-options"
+                  value={damageForm.location}
+                  onChange={(e) => setDamageForm({ ...damageForm, location: e.target.value })}
+                  placeholder="e.g., Main Store"
+                  style={{ fontSize: 14, padding: 10 }}
+                />
+                <datalist id="damage-location-options">
+                  {locationOptions.map((loc) => (
+                    <option key={loc} value={loc} />
+                  ))}
+                </datalist>
+              </label>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button
+                  className="button"
+                  onClick={async () => {
+                    const qty = parseInt(damageForm.quantity);
+                    const available = stockData[damageId] ?? 0;
+                    
+                    if (isNaN(qty) || qty <= 0) {
+                      alert("Please enter a valid quantity");
+                      return;
+                    }
+                    if (qty > available) {
+                      alert(`Cannot report more than available stock (${available})`);
+                      return;
+                    }
+                    
+                    const reasonText = damageForm.details.trim() 
+                      ? `${damageForm.reason}: ${damageForm.details.trim()}`
+                      : damageForm.reason;
+                    
+                    setBusy(true);
+                    try {
+                      await onStockAdjust(
+                        damageId,
+                        -qty, // Negative to deduct
+                        reasonText,
+                        undefined,
+                        damageForm.location,
+                        null,
+                        null,
+                      );
+                      setDamageId(null);
+                      setDamageForm({ quantity: "", reason: "Damaged", details: "", location: "Main Store" });
+                      // Refresh stock data
+                      const movements = await fetchMovements(damageId);
+                      const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
+                      setStockData(prev => ({ ...prev, [damageId]: Math.max(0, totalStock) }));
+                    } catch (err) {
+                      alert((err as Error).message || "Failed to record damage");
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  disabled={busy}
+                  style={{ flex: 1, background: "#dc2626", fontSize: 14 }}
+                >
+                  {busy ? "Recording..." : "Record Loss"}
+                </button>
+                <button
+                  onClick={() => setDamageId(null)}
+                  disabled={busy}
+                  style={{
+                    flex: 1,
+                    padding: "10px 16px",
+                    fontSize: 14,
+                    background: "transparent",
+                    border: "1px solid #d1d5db",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <h2 className="section-title" style={{ margin: 0 }}>Products</h2>
         <span style={{ fontSize: 14, color: "#6b7280" }}>
@@ -887,6 +1057,27 @@ export default function ProductList({
                           title="Add new stock"
                         >
                           New Stock
+                        </button>
+                        <button
+                          onClick={() => {
+                            setDamageId(p.id);
+                            setDamageForm({ quantity: "", reason: "Damaged", details: "", location: "Main Store" });
+                          }}
+                          disabled={busy || (stockData[p.id] ?? 0) === 0}
+                          style={{
+                            padding: "6px 12px",
+                            fontSize: 12,
+                            background: "#f59e0b",
+                            color: "white",
+                            border: "none",
+                            borderRadius: 6,
+                            cursor: busy || (stockData[p.id] ?? 0) === 0 ? "not-allowed" : "pointer",
+                            fontWeight: 500,
+                            opacity: (stockData[p.id] ?? 0) === 0 ? 0.5 : 1,
+                          }}
+                          title="Report damaged stock"
+                        >
+                          Damage
                         </button>
                         {isAdmin && (
                           <button

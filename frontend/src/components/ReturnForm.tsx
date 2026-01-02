@@ -23,14 +23,25 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
   const [existingReturns, setExistingReturns] = useState<SaleReturn[]>([]);
   const [loadingReturns, setLoadingReturns] = useState(true);
 
-  // Reason categories (only reasons where product can be restocked)
-  const REASON_CATEGORIES = [
+  // Reason categories - separate restockable and non-restockable
+  const RESTOCKABLE_REASONS = [
     { value: "wrong_item", label: "Wrong Item Delivered" },
     { value: "wrong_size", label: "Wrong Size/Specification" },
     { value: "changed_mind", label: "Customer Changed Mind" },
     { value: "exchange", label: "Exchange for Other Product" },
     { value: "other", label: "Other" },
   ];
+  
+  const NON_RESTOCKABLE_REASONS = [
+    { value: "damaged", label: "Damaged (Record as Loss)" },
+    { value: "expired", label: "Expired (Record as Loss)" },
+    { value: "defective", label: "Defective (Record as Loss)" },
+  ];
+  
+  const REASON_CATEGORIES = [...RESTOCKABLE_REASONS, ...NON_RESTOCKABLE_REASONS];
+  
+  // Check if current reason is a loss reason (non-restockable)
+  const isLossReason = NON_RESTOCKABLE_REASONS.some(r => r.value === reasonCategory);
 
   // Calculate max quantity that can be returned
   const totalReturned = existingReturns.reduce((sum, r) => sum + r.quantity_returned, 0);
@@ -97,6 +108,9 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
         ? `${selectedReason?.label}: ${reasonDetails.trim()}`
         : selectedReason?.label || "";
 
+    // For loss reasons, never restock
+    const shouldRestock = isLossReason ? false : restock;
+
     setLoading(true);
     setError("");
 
@@ -107,7 +121,7 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
         refund_amount: refundMethod === "no_refund" ? 0 : refundAmount,
         refund_method: refundMethod === "no_refund" ? "exchange" : refundMethod,
         reason: fullReason,
-        restock,
+        restock: shouldRestock,
       });
       onSuccess();
     } catch (err: any) {
@@ -314,12 +328,18 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
             <select
               value={reasonCategory}
               onChange={(e) => {
-                setReasonCategory(e.target.value);
+                const newReason = e.target.value;
+                setReasonCategory(newReason);
                 // Auto-set no refund for exchanges
-                if (e.target.value === "exchange") {
+                if (newReason === "exchange") {
                   setRefundMethod("no_refund");
-                } else if (refundMethod === "no_refund") {
+                } else if (refundMethod === "no_refund" && newReason !== "exchange") {
                   setRefundMethod(sale.payment_method === "credit" ? "credit_to_account" : "cash");
+                }
+                // Auto-uncheck restock for loss reasons
+                const isLoss = NON_RESTOCKABLE_REASONS.some(r => r.value === newReason);
+                if (isLoss) {
+                  setRestock(false);
                 }
               }}
               style={{
@@ -331,12 +351,26 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
               }}
             >
               <option value="">-- Select a reason --</option>
-              {REASON_CATEGORIES.map((cat) => (
-                <option key={cat.value} value={cat.value}>
-                  {cat.label}
-                </option>
-              ))}
+              <optgroup label="Restockable Returns">
+                {RESTOCKABLE_REASONS.map((cat) => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Loss/Damage (Not Restockable)">
+                {NON_RESTOCKABLE_REASONS.map((cat) => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.label}
+                  </option>
+                ))}
+              </optgroup>
             </select>
+            {isLossReason && (
+              <p style={{ margin: "6px 0 0 0", fontSize: "0.75rem", color: "#dc2626", fontWeight: 500 }}>
+                This will be recorded as a loss and will NOT be restocked
+              </p>
+            )}
           </div>
 
           {reasonCategory && (
@@ -393,29 +427,31 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
             )}
           </div>
 
-          <div style={{ marginBottom: 20 }}>
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={restock}
-                onChange={(e) => setRestock(e.target.checked)}
-                style={{ width: 18, height: 18 }}
-              />
-              <span>
-                <span style={{ fontWeight: 500 }}>Return items to inventory</span>
-                <span style={{ display: "block", fontSize: "0.75rem", color: "#6b7280" }}>
-                  Uncheck if items are damaged and cannot be resold
+          {!isLossReason && (
+            <div style={{ marginBottom: 20 }}>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={restock}
+                  onChange={(e) => setRestock(e.target.checked)}
+                  style={{ width: 18, height: 18 }}
+                />
+                <span>
+                  <span style={{ fontWeight: 500 }}>Return items to inventory</span>
+                  <span style={{ display: "block", fontSize: "0.75rem", color: "#6b7280" }}>
+                    Uncheck if items cannot be resold
+                  </span>
                 </span>
-              </span>
-            </label>
-          </div>
+              </label>
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: 8 }}>
             <button
