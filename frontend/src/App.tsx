@@ -16,6 +16,7 @@ import Reports from "./views/Reports";
 import RevenueAnalysis from "./views/RevenueAnalysis";
 import Sales from "./views/Sales";
 import UserManagement from "./views/UserManagement";
+import { useExpiryTracking } from "./settings";
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -38,11 +39,12 @@ export default function App() {
     return Number.isFinite(parsed) ? parsed : null;
   });
   const categoryOptions = useAppCategories();
+  const usesExpiryTracking = useExpiryTracking();
 
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
 
-  const showExpiryStatusFilter = products.length > 0 && products.every((p) => !!p.expiry_date);
+  const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.every((p) => !!p.expiry_date);
 
   useEffect(() => {
     if (!showExpiryStatusFilter && filterExpiry !== "all") {

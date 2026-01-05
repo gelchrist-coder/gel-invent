@@ -158,7 +158,7 @@ export default function Inventory() {
 
       {/* Overview Cards */}
       <div style={{ marginBottom: 24 }}>
-        <InventoryOverview analytics={analytics} />
+        <InventoryOverview analytics={analytics} usesExpiryTracking={usesExpiryTracking} />
       </div>
 
       {/* Stock Alerts */}
@@ -166,6 +166,7 @@ export default function Inventory() {
         <StockAlerts
           lowStock={analytics.low_stock_alerts}
           expiring={usesExpiryTracking ? analytics.expiring_products : []}
+          hideExpiringSection={!usesExpiryTracking}
         />
       </div>
 

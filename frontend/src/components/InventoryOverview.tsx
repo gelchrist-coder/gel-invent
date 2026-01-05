@@ -36,9 +36,10 @@ type InventoryAnalytics = {
 
 type Props = {
   analytics: InventoryAnalytics;
+  usesExpiryTracking?: boolean;
 };
 
-export default function InventoryOverview({ analytics }: Props) {
+export default function InventoryOverview({ analytics, usesExpiryTracking = true }: Props) {
   const formatCurrency = (value: number) => {
     return `GHS ${value.toFixed(2)}`;
   };
@@ -141,7 +142,8 @@ export default function InventoryOverview({ analytics }: Props) {
         </div>
       </div>
 
-      {/* Expiring Products */}
+      {/* Expiring Products - only show if expiry tracking is enabled */}
+      {usesExpiryTracking && (
       <div
         style={{
           backgroundColor: "white",
@@ -172,6 +174,7 @@ export default function InventoryOverview({ analytics }: Props) {
           </div>
         </div>
       </div>
+      )}
 
       {/* Movement Summary - Last 30 Days */}
       <div

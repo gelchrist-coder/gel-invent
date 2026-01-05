@@ -22,9 +22,10 @@ type ExpiringProduct = {
 type Props = {
   lowStock: LowStockAlert[];
   expiring: ExpiringProduct[];
+  hideExpiringSection?: boolean;
 };
 
-export default function StockAlerts({ lowStock, expiring }: Props) {
+export default function StockAlerts({ lowStock, expiring, hideExpiringSection = false }: Props) {
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString("en-GB", {
@@ -117,7 +118,8 @@ export default function StockAlerts({ lowStock, expiring }: Props) {
         </div>
       </div>
 
-      {/* Expiring Products */}
+      {/* Expiring Products - only show if not hidden */}
+      {!hideExpiringSection && (
       <div>
         <h3 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
           <span></span>
@@ -177,6 +179,7 @@ export default function StockAlerts({ lowStock, expiring }: Props) {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

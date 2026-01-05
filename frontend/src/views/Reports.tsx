@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_BASE, buildAuthHeaders } from "../api";
+import { useExpiryTracking } from "../settings";
 
 interface SalesDashboard {
   today: { count: number; total: number };
@@ -78,6 +79,7 @@ export default function Reports() {
   const currentUser = localStorage.getItem("user");
   const userRole = currentUser ? JSON.parse(currentUser).role : null;
   const isAdmin = userRole === "Admin";
+  const usesExpiryTracking = useExpiryTracking();
 
   const [activeTab, setActiveTab] = useState<"sales" | "inventory" | "creditors">("sales");
   const [salesData, setSalesData] = useState<SalesDashboard | null>(null);
@@ -306,12 +308,14 @@ export default function Reports() {
               </p>
             </div>
 
+            {usesExpiryTracking && (
             <div style={{ padding: 20, backgroundColor: "#fff7ed", borderRadius: 8, border: "1px solid #fed7aa" }}>
               <h3 style={{ margin: 0, fontSize: 13, color: "#9a3412", marginBottom: 8 }}>Expiring Soon</h3>
               <p style={{ margin: 0, fontSize: 32, fontWeight: 700, color: "#ea580c" }}>
                 {inventoryData.summary.expiring_soon_count}
               </p>
             </div>
+            )}
           </div>
 
           {/* Stock Value */}
@@ -360,7 +364,8 @@ export default function Reports() {
               </div>
             </div>
 
-            {/* Expiring Soon */}
+            {/* Expiring Soon - only show if business uses expiry tracking */}
+            {usesExpiryTracking && (
             <div>
               <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Expiring Soon</h2>
               <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, maxHeight: 300, overflowY: "auto" }}>
@@ -378,6 +383,7 @@ export default function Reports() {
                 )}
               </div>
             </div>
+            )}
           </div>
         </div>
       )}
