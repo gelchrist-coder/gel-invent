@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Product } from "../types";
 import { fetchMovements, updateMyCategories } from "../api";
 import { useAppCategories } from "../categories";
+import { useExpiryTracking } from "../settings";
 
 type Props = {
   products: Product[];
@@ -36,7 +37,8 @@ export default function ProductList({
 }: Props) {
   const isAdmin = userRole === "Admin";
   const categoryOptions = useAppCategories();
-  const showExpiryStatusFilter = products.length > 0 && products.every((p) => !!p.expiry_date);
+  const usesExpiryTracking = useExpiryTracking();
+  const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.every((p) => !!p.expiry_date);
   const effectiveFilterExpiry = showExpiryStatusFilter ? filterExpiry : "all";
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
@@ -495,7 +497,7 @@ export default function ProductList({
                   </label>
                 </div>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: usesExpiryTracking ? "1fr 1fr" : "1fr", gap: 12 }}>
                 <label>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Unit
@@ -509,6 +511,7 @@ export default function ProductList({
                     style={{ fontSize: 14, padding: 10 }}
                   />
                 </label>
+                {usesExpiryTracking && (
                 <label>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Expiry Date
@@ -521,6 +524,7 @@ export default function ProductList({
                     style={{ fontSize: 14, padding: 10 }}
                   />
                 </label>
+                )}
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <button

@@ -30,6 +30,7 @@ def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
 class SystemSettingsRead(BaseModel):
     low_stock_threshold: int
     expiry_warning_days: int
+    uses_expiry_tracking: bool
     auto_backup: bool
     email_notifications: bool
 
@@ -37,6 +38,7 @@ class SystemSettingsRead(BaseModel):
 class SystemSettingsUpdate(BaseModel):
     low_stock_threshold: int = Field(ge=0, le=1_000_000)
     expiry_warning_days: int = Field(ge=0, le=10_000)
+    uses_expiry_tracking: bool
     auto_backup: bool
     email_notifications: bool
 
@@ -51,6 +53,7 @@ def get_system_settings(
     return SystemSettingsRead(
         low_stock_threshold=settings.low_stock_threshold,
         expiry_warning_days=settings.expiry_warning_days,
+        uses_expiry_tracking=settings.uses_expiry_tracking,
         auto_backup=settings.auto_backup,
         email_notifications=settings.email_notifications,
     )
@@ -71,6 +74,7 @@ def update_system_settings(
     settings = _get_or_create_settings(db, current_user.id)
     settings.low_stock_threshold = payload.low_stock_threshold
     settings.expiry_warning_days = payload.expiry_warning_days
+    settings.uses_expiry_tracking = payload.uses_expiry_tracking
     settings.auto_backup = payload.auto_backup
     settings.email_notifications = payload.email_notifications
 
@@ -81,6 +85,7 @@ def update_system_settings(
     return SystemSettingsRead(
         low_stock_threshold=settings.low_stock_threshold,
         expiry_warning_days=settings.expiry_warning_days,
+        uses_expiry_tracking=settings.uses_expiry_tracking,
         auto_backup=settings.auto_backup,
         email_notifications=settings.email_notifications,
     )

@@ -70,6 +70,7 @@ export default function Login({ onLogin }: LoginProps) {
     categories: [] as string[],
     hasBranches: false,
     branches: [] as string[],
+    usesExpiryTracking: true,
   });
   const [categoryInput, setCategoryInput] = useState("");
   const [branchInput, setBranchInput] = useState("");
@@ -340,6 +341,7 @@ export default function Login({ onLogin }: LoginProps) {
             business_name: formData.businessName,
             categories: formData.categories,
             branches: formData.hasBranches ? formData.branches : [],
+            uses_expiry_tracking: formData.usesExpiryTracking,
           }),
         });
 
@@ -670,6 +672,24 @@ export default function Login({ onLogin }: LoginProps) {
                     )}
                   </label>
                 )}
+
+                {/* Expiry Tracking Section */}
+                <div style={{ marginTop: 16, padding: 16, background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.usesExpiryTracking}
+                      onChange={(e) => setFormData({ ...formData, usesExpiryTracking: e.target.checked })}
+                      style={{ width: 18, height: 18 }}
+                    />
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                      My products have expiry dates
+                    </span>
+                  </label>
+                  <p style={{ margin: "8px 0 0", fontSize: 12, color: "#6b7280" }}>
+                    Enable this if you sell perishable goods like food, medicine, or cosmetics. You can change this later in Settings.
+                  </p>
+                </div>
               </>
             )}
 
@@ -881,6 +901,7 @@ export default function Login({ onLogin }: LoginProps) {
                   categories: [],
                   hasBranches: false,
                   branches: [],
+                  usesExpiryTracking: true,
                 });
                 setCategoryInput("");
                 setBranchInput("");

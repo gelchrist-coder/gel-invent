@@ -203,6 +203,7 @@ class SystemSettings(Base):
     )
     low_stock_threshold: Mapped[int] = mapped_column(Integer, default=10)
     expiry_warning_days: Mapped[int] = mapped_column(Integer, default=180)
+    uses_expiry_tracking: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_backup: Mapped[bool] = mapped_column(Boolean, default=True)
     email_notifications: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

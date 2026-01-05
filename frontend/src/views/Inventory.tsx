@@ -5,6 +5,7 @@ import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
 import LocationBreakdown from "../components/LocationBreakdown";
 import MovementHistory from "../components/MovementHistory";
+import { useExpiryTracking } from "../settings";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
@@ -14,6 +15,7 @@ export default function Inventory() {
   const currentUser = localStorage.getItem("user");
   const userRole = currentUser ? JSON.parse(currentUser).role : null;
   const isAdmin = userRole === "Admin";
+  const usesExpiryTracking = useExpiryTracking();
 
   const [analytics, setAnalytics] = useState<InventoryAnalytics | null>(null);
   const [movements, setMovements] = useState<MovementHistoryRow[]>([]);
@@ -163,7 +165,7 @@ export default function Inventory() {
       <div style={{ marginBottom: 24 }}>
         <StockAlerts
           lowStock={analytics.low_stock_alerts}
-          expiring={analytics.expiring_products}
+          expiring={usesExpiryTracking ? analytics.expiring_products : []}
         />
       </div>
 

@@ -95,6 +95,7 @@ export async function updateMyCategories(categories: string[]): Promise<AuthUser
 export type SystemSettings = {
   low_stock_threshold: number;
   expiry_warning_days: number;
+  uses_expiry_tracking: boolean;
   auto_backup: boolean;
   email_notifications: boolean;
 };

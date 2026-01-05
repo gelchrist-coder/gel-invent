@@ -10,7 +10,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User, PasswordResetToken, Branch
+from app.models import User, PasswordResetToken, Branch, SystemSettings
 from app.auth import (
     create_access_token,
     get_password_hash,
@@ -44,6 +44,7 @@ class UserCreate(BaseModel):
     business_name: Optional[str] = None
     categories: Optional[list[str]] = None
     branches: Optional[list[str]] = None  # Optional list of branch names
+    uses_expiry_tracking: bool = True  # Whether business uses expiry date tracking
 
 
 class UserResponse(BaseModel):
@@ -172,6 +173,14 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
         branch = Branch(owner_user_id=new_user.id, name=default_name, is_active=True)
         db.add(branch)
         db.commit()
+
+    # Create SystemSettings with user's expiry tracking preference
+    settings = SystemSettings(
+        owner_user_id=new_user.id,
+        uses_expiry_tracking=user_data.uses_expiry_tracking,
+    )
+    db.add(settings)
+    db.commit()
 
     return SignupResponse(**_serialize_user(new_user).model_dump(), verification_code=None)
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { fetchProducts, fetchSalesDashboard, fetchSystemSettings, getCachedProducts } from "../api";
 import { Product } from "../types";
+import { useExpiryTracking } from "../settings";
 
 type Props = {
   onNavigate: (view: string) => void;
@@ -47,6 +48,7 @@ export default function Dashboard({ onNavigate }: Props) {
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
   const [expiryWarningDays, setExpiryWarningDays] = useState<number>(180);
+  const usesExpiryTracking = useExpiryTracking();
   
   // Top Products date filter
   const [topProductsDate, setTopProductsDate] = useState<string>("");
@@ -153,16 +155,16 @@ export default function Dashboard({ onNavigate }: Props) {
       minStock: lowStockThreshold,
     }));
 
-  // Calculate expired and expiring soon products
-  const expiredProducts = products.filter(
+  // Calculate expired and expiring soon products (only if expiry tracking is enabled)
+  const expiredProducts = usesExpiryTracking ? products.filter(
     (p) => p.expiry_date && new Date(p.expiry_date) < new Date()
-  );
-  const expiringSoonProducts = products.filter(
+  ) : [];
+  const expiringSoonProducts = usesExpiryTracking ? products.filter(
     (p) =>
       p.expiry_date &&
       new Date(p.expiry_date) >= new Date() &&
       new Date(p.expiry_date) <= new Date(Date.now() + expiryWarningDays * 24 * 60 * 60 * 1000)
-  );
+  ) : [];
 
   const quickActions = [
     { label: "Add Product", icon: "+", color: "#1f7aff", action: "products" },

@@ -3,6 +3,7 @@ import React, { useMemo, useState } from "react";
 import { Branch, NewProduct } from "../types";
 import { useAppCategories } from "../categories";
 import { updateMyCategories } from "../api";
+import { useExpiryTracking } from "../settings";
 
 type Props = {
   onCreate: (payload: NewProduct, branchIdOverride?: number | null) => Promise<void>;
@@ -22,6 +23,7 @@ export default function ProductForm({
   activeBranchId,
 }: Props) {
   const categoryOptions = useAppCategories();
+  const usesExpiryTracking = useExpiryTracking();
 
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -307,6 +309,7 @@ export default function ProductForm({
                 rows={3}
               />
             </label>
+            {usesExpiryTracking && (
             <label>
               Expiry Date (Optional)
               <input
@@ -320,6 +323,7 @@ export default function ProductForm({
                 Leave empty for non-perishable items
               </small>
             </label>
+            )}
           </div>
         </div>
 
