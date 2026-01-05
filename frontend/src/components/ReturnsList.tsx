@@ -214,7 +214,7 @@ export default function ReturnsList({ products }: ReturnsListProps) {
                 <td style={{ padding: "10px 6px", fontSize: 12 }}>
                   {getRefundMethodLabel(ret.refund_method)}
                 </td>
-                <td style={{ padding: "10px 6px" }}>{getReasonBadge(ret.reason)}</td>
+                <td style={{ padding: "10px 6px" }}>{getReasonBadge(ret.reason || "No reason")}</td>
                 <td style={{ padding: "10px 6px", textAlign: "center" }}>
                   {ret.restock ? (
                     <span style={{ color: "#10b981", fontWeight: 600 }}>Yes</span>
