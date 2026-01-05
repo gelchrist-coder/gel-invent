@@ -52,8 +52,11 @@ export const readUserCategories = (): string[] => {
   }
 };
 
-export const getAppCategories = (): string[] =>
-  uniqCaseInsensitive(readUserCategories());
+export const getAppCategories = (): string[] => {
+  const userCats = readUserCategories();
+  // If user has no categories, fall back to defaults
+  return userCats.length > 0 ? uniqCaseInsensitive(userCats) : DEFAULT_CATEGORIES;
+};
 
 export const useAppCategories = (): string[] => {
   const [userCategories, setUserCategories] = useState<string[]>(() => readUserCategories());
@@ -77,7 +80,12 @@ export const useAppCategories = (): string[] => {
   }, []);
 
   return useMemo(
-    () => uniqCaseInsensitive(userCategories),
+    () => {
+      // If user has no categories, fall back to defaults
+      return userCategories.length > 0 
+        ? uniqCaseInsensitive(userCategories) 
+        : DEFAULT_CATEGORIES;
+    },
     [userCategories],
   );
 };
