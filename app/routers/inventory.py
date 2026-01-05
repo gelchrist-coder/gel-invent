@@ -4,7 +4,7 @@ from io import BytesIO
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -230,7 +230,10 @@ def get_inventory_analytics(
             and_(
                 StockMovement.created_at >= thirty_days_ago,
                 StockMovement.user_id.in_(tenant_user_ids),
-                StockMovement.branch_id == active_branch_id,
+                or_(
+                    StockMovement.branch_id == active_branch_id,
+                    StockMovement.branch_id.is_(None),
+                ),
             )
         )
     ).all()
