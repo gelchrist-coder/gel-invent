@@ -102,7 +102,7 @@ export default function TopBar({
           {businessName}
         </h1>
 
-        {!isMobile && userRole === "Admin" && onChangeBranch && branches && branches.length > 0 ? (
+        {!isMobile && userRole === "Admin" && onChangeBranch && branches && branches.length > 1 ? (
           <select
             value={activeBranchId ?? branches[0]?.id}
             onChange={(e) => onChangeBranch?.(Number(e.target.value))}
@@ -124,7 +124,7 @@ export default function TopBar({
               </option>
             ))}
           </select>
-        ) : !isMobile && branches && branches.length > 0 ? (
+        ) : !isMobile && branches && branches.length > 1 ? (
           <div
             style={{
               height: 36,

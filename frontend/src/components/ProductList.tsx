@@ -250,7 +250,9 @@ export default function ProductList({
       else if (product?.selling_price != null) unitSellingToSend = Number(product.selling_price);
       else if (product?.pack_selling_price != null && packSize && packSize > 0) unitSellingToSend = Number(product.pack_selling_price) / packSize;
     }
-    if (adjustment.reason === "New Stock" && !adjustment.expiry_date) {
+    // Only require expiry date if the product tracks expiry
+    const productTracksExpiry = !!product?.expiry_date;
+    if (adjustment.reason === "New Stock" && productTracksExpiry && !adjustment.expiry_date) {
       alert("Please set an expiry date for new stock");
       return;
     }
@@ -694,7 +696,7 @@ export default function ProductList({
                   ))}
                 </datalist>
               </label>
-              {adjustment.reason === "New Stock" && (
+              {adjustment.reason === "New Stock" && adjustingId !== null && products.find((p) => p.id === adjustingId)?.expiry_date && (
                 <label>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Expiry Date *

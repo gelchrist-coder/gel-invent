@@ -68,8 +68,11 @@ export default function Login({ onLogin }: LoginProps) {
     confirmPassword: "",
     businessName: "",
     categories: [] as string[],
+    hasBranches: false,
+    branches: [] as string[],
   });
   const [categoryInput, setCategoryInput] = useState("");
+  const [branchInput, setBranchInput] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
@@ -183,6 +186,24 @@ export default function Login({ onLogin }: LoginProps) {
     setFormData({
       ...formData,
       categories: formData.categories.filter((c) => c !== value),
+    });
+  };
+
+  const addBranch = (raw: string) => {
+    const value = raw.trim();
+    if (!value) return;
+    if (formData.branches.some((b) => b.toLowerCase() === value.toLowerCase())) return;
+    setFormData({
+      ...formData,
+      branches: [...formData.branches, value],
+    });
+    setBranchInput("");
+  };
+
+  const removeBranch = (value: string) => {
+    setFormData({
+      ...formData,
+      branches: formData.branches.filter((b) => b !== value),
     });
   };
 
@@ -301,6 +322,13 @@ export default function Login({ onLogin }: LoginProps) {
           return;
         }
 
+        // Validate branches if user said they have branches
+        if (formData.hasBranches && formData.branches.length === 0) {
+          setError("Please add at least one branch or uncheck 'I have multiple branches'");
+          setLoading(false);
+          return;
+        }
+
         // Call signup API
         const signupResponse = await fetch(`${API_BASE}/auth/signup`, {
           method: "POST",
@@ -311,6 +339,7 @@ export default function Login({ onLogin }: LoginProps) {
             password: formData.password,
             business_name: formData.businessName,
             categories: formData.categories,
+            branches: formData.hasBranches ? formData.branches : [],
           }),
         });
 
@@ -549,6 +578,98 @@ export default function Login({ onLogin }: LoginProps) {
                     </div>
                   )}
                 </label>
+
+                {/* Branches Section */}
+                <div style={{ marginTop: 16, padding: 16, background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={formData.hasBranches}
+                      onChange={(e) => setFormData({ ...formData, hasBranches: e.target.checked, branches: e.target.checked ? formData.branches : [] })}
+                      style={{ width: 18, height: 18 }}
+                    />
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                      I have multiple branches/locations
+                    </span>
+                  </label>
+                  <p style={{ margin: "8px 0 0", fontSize: 12, color: "#6b7280" }}>
+                    If you have multiple store locations, check this to add them now. You can also add branches later from Settings.
+                  </p>
+                </div>
+
+                {formData.hasBranches && (
+                  <label style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 16 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                      Branch Names *
+                    </span>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        type="text"
+                        value={branchInput}
+                        onChange={(e) => setBranchInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addBranch(branchInput);
+                          }
+                        }}
+                        placeholder="e.g., Main Store, Accra Branch"
+                        className="input"
+                        style={{ padding: 12, flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => addBranch(branchInput)}
+                        className="button"
+                        style={{ padding: "12px 14px" }}
+                      >
+                        Add
+                      </button>
+                    </div>
+                    <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
+                      Press Enter or click Add for each branch
+                    </p>
+
+                    {formData.branches.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                        {formData.branches.map((b) => (
+                          <span
+                            key={b}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 8,
+                              background: "#ecfdf5",
+                              border: "1px solid #a7f3d0",
+                              color: "#065f46",
+                              padding: "6px 10px",
+                              borderRadius: 999,
+                              fontSize: 12,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {b}
+                            <button
+                              type="button"
+                              onClick={() => removeBranch(b)}
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                cursor: "pointer",
+                                color: "#065f46",
+                                fontWeight: 800,
+                                lineHeight: 1,
+                              }}
+                              aria-label={`Remove ${b}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </label>
+                )}
               </>
             )}
 
@@ -758,8 +879,11 @@ export default function Login({ onLogin }: LoginProps) {
                   confirmPassword: "",
                   businessName: "",
                   categories: [],
+                  hasBranches: false,
+                  branches: [],
                 });
                 setCategoryInput("");
+                setBranchInput("");
                 setShowReset(false);
                 setResetEmail("");
                 setResetCode("");

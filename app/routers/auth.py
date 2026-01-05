@@ -43,6 +43,7 @@ class UserCreate(BaseModel):
     password: str
     business_name: Optional[str] = None
     categories: Optional[list[str]] = None
+    branches: Optional[list[str]] = None  # Optional list of branch names
 
 
 class UserResponse(BaseModel):
@@ -158,9 +159,19 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
 
-    main_branch = Branch(owner_user_id=new_user.id, name="Main Branch", is_active=True)
-    db.add(main_branch)
-    db.commit()
+    # Create branches based on signup input
+    if user_data.branches and len(user_data.branches) > 0:
+        # User specified branches - create them
+        for branch_name in user_data.branches:
+            branch = Branch(owner_user_id=new_user.id, name=branch_name.strip(), is_active=True)
+            db.add(branch)
+        db.commit()
+    else:
+        # No branches specified - create a single default branch using business name
+        default_name = user_data.business_name.strip() if user_data.business_name else "Main Store"
+        branch = Branch(owner_user_id=new_user.id, name=default_name, is_active=True)
+        db.add(branch)
+        db.commit()
 
     return SignupResponse(**_serialize_user(new_user).model_dump(), verification_code=None)
 
