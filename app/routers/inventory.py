@@ -238,21 +238,14 @@ def get_inventory_analytics(
     movement_summary = {
         "stock_in": 0,
         "stock_out": 0,
-        "adjustments": 0,
-        "sales": 0,
     }
     
     for movement in recent_movements:
-        bucket = classify_movement(movement.reason, movement.change)
-        amount = float(abs(movement.change))
-        if bucket == "sales":
-            movement_summary["sales"] += amount
-        elif bucket == "adjustments":
-            movement_summary["adjustments"] += amount
-        elif bucket == "stock_in":
-            movement_summary["stock_in"] += amount
+        change = float(movement.change)
+        if change > 0:
+            movement_summary["stock_in"] += change
         else:
-            movement_summary["stock_out"] += amount
+            movement_summary["stock_out"] += abs(change)
     
     return {
         "stock_by_location": list(stock_by_location.values()),

@@ -194,21 +194,9 @@ export default function InventoryOverview({ analytics }: Props) {
             </p>
           </div>
           <div>
-            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Sales</p>
-            <p style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 600, color: "#3b82f6" }}>
-              {analytics.movement_summary.sales.toFixed(2)}
-            </p>
-          </div>
-          <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Stock Out</p>
             <p style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 600, color: "#ef4444" }}>
               -{analytics.movement_summary.stock_out.toFixed(2)}
-            </p>
-          </div>
-          <div>
-            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Adjustments</p>
-            <p style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 600, color: "#8b5cf6" }}>
-              {analytics.movement_summary.adjustments.toFixed(2)}
             </p>
           </div>
         </div>
