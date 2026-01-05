@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Product } from "../types";
-import { fetchMovements, updateMyCategories } from "../api";
+import { Product, Branch } from "../types";
+import { fetchMovements, updateMyCategories, fetchBranches } from "../api";
 import { useAppCategories } from "../categories";
 import { useExpiryTracking } from "../settings";
 
@@ -57,10 +57,29 @@ export default function ProductList({
   const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
   const [damageId, setDamageId] = useState<number | null>(null);
-  const [damageForm, setDamageForm] = useState({ quantity: "", reason: "Damaged", details: "", location: "Main Store" });
+  const [damageForm, setDamageForm] = useState({ quantity: "", reason: "Damaged", details: "", location: "" });
+
+  // Fetch branches for location dropdown
+  useEffect(() => {
+    const loadBranches = async () => {
+      try {
+        const branches = await fetchBranches();
+        if (branches.length > 0) {
+          const branchNames = branches.map(b => b.name);
+          setLocationOptions(branchNames);
+          // Set default location to first branch
+          setAdjustment(prev => ({ ...prev, location: branchNames[0] }));
+          setDamageForm(prev => ({ ...prev, location: branchNames[0] }));
+        }
+      } catch {
+        // Keep default "Main Store" if branches can't be fetched
+        setLocationOptions(["Main Store"]);
+      }
+    };
+    loadBranches();
+  }, []);
 
   // Use current_stock from products (already computed by backend) - much faster!
-  // Only fetch movements in parallel for location options and expiry dates
   useEffect(() => {
     const loadAdditionalData = async () => {
       // Stock is already in product.current_stock - use it directly
@@ -74,27 +93,6 @@ export default function ProductList({
       
       setStockData(stockMap);
       setExpiryByProduct(expiryMap);
-      
-      // Fetch movements in PARALLEL for locations only (not for stock calculation)
-      const locations = new Set<string>();
-      locations.add("Main Store");
-      
-      try {
-        const movementPromises = products.map(p => 
-          fetchMovements(p.id).catch(() => [])
-        );
-        const allMovements = await Promise.all(movementPromises);
-        
-        for (const movements of allMovements) {
-          for (const m of movements) {
-            if (m.location) locations.add(String(m.location));
-          }
-        }
-      } catch {
-        // Ignore errors - locations are optional
-      }
-      
-      setLocationOptions(Array.from(locations));
     };
     
     if (products.length > 0) {
@@ -180,7 +178,7 @@ export default function ProductList({
       unit_type: "piece",
       cost_price: "",
       selling_price: "",
-      location: "Main Store",
+      location: locationOptions[0] || "Main Store",
     });
 
     // Prefill cost/selling for stock-in using product defaults when available.
@@ -195,7 +193,7 @@ export default function ProductList({
 
   const cancelAdjustment = () => {
     setAdjustingId(null);
-    setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: "Main Store" });
+    setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: locationOptions[0] || "Main Store" });
   };
 
   const saveAdjustment = async (productId: number) => {

@@ -57,7 +57,7 @@ export default function ProductForm({
     sellingPrice: "",
     packSellingPrice: "",
     initialStock: "0",
-    initialLocation: "Main Store",
+    initialLocation: branches?.[0]?.name || "Main Store",
     packSize: "",
     reorderLevel: "10",
     supplier: "",
@@ -117,6 +117,9 @@ export default function ProductForm({
         actualStock = actualStock * packSize;
       }
       
+      // Use the selected branch name as the initial location
+      const selectedBranchName = branches?.find(b => b.id === effectiveBranchId)?.name || form.initialLocation || "Main Store";
+      
       await onCreate({ 
         sku: form.sku,
         name: form.name,
@@ -130,7 +133,7 @@ export default function ProductForm({
         selling_price: form.sellingPrice ? parseFloat(form.sellingPrice) : undefined,
         pack_selling_price: form.packSellingPrice ? parseFloat(form.packSellingPrice) : undefined,
         initial_stock: actualStock,
-        initial_location: form.initialLocation || undefined,
+        initial_location: selectedBranchName,
       }, role === "Admin" ? effectiveBranchId : null);
       
       if (mode === "saveAndNew") {
@@ -149,7 +152,7 @@ export default function ProductForm({
           sellingPrice: "",
           packSellingPrice: "",
           initialStock: "0",
-          initialLocation: form.initialLocation || "Main Store",
+          initialLocation: selectedBranchName,
           packSize: "",
           reorderLevel: form.reorderLevel,
           supplier: "",
