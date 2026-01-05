@@ -53,30 +53,38 @@ export default function ProductList({
     location: "Main Store",
   });
   const [stockData, setStockData] = useState<Record<number, number>>({});
-  const [locationOptions, setLocationOptions] = useState<string[]>(["Main Store"]);
+  const [activeBranchName, setActiveBranchName] = useState<string>("Main Store");
   const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
   const [damageId, setDamageId] = useState<number | null>(null);
   const [damageForm, setDamageForm] = useState({ quantity: "", reason: "Damaged", details: "", location: "" });
 
-  // Fetch branches for location dropdown
+  // Get active branch name for location
   useEffect(() => {
-    const loadBranches = async () => {
+    const loadActiveBranch = async () => {
       try {
         const branches = await fetchBranches();
+        const activeBranchId = localStorage.getItem("activeBranchId");
         if (branches.length > 0) {
-          const branchNames = branches.map(b => b.name);
-          setLocationOptions(branchNames);
-          // Set default location to first branch
-          setAdjustment(prev => ({ ...prev, location: branchNames[0] }));
-          setDamageForm(prev => ({ ...prev, location: branchNames[0] }));
+          const activeBranch = activeBranchId 
+            ? branches.find(b => b.id === Number(activeBranchId)) 
+            : branches[0];
+          const branchName = activeBranch?.name || branches[0]?.name || "Main Store";
+          setActiveBranchName(branchName);
+          setAdjustment(prev => ({ ...prev, location: branchName }));
+          setDamageForm(prev => ({ ...prev, location: branchName }));
         }
       } catch {
-        // Keep default "Main Store" if branches can't be fetched
-        setLocationOptions(["Main Store"]);
+        // Keep default if branches can't be fetched
+        setActiveBranchName("Main Store");
       }
     };
-    loadBranches();
+    loadActiveBranch();
+
+    // Also listen for branch changes
+    const handleBranchChange = () => loadActiveBranch();
+    window.addEventListener("activeBranchChanged", handleBranchChange);
+    return () => window.removeEventListener("activeBranchChanged", handleBranchChange);
   }, []);
 
   // Use current_stock from products (already computed by backend) - much faster!
@@ -178,7 +186,7 @@ export default function ProductList({
       unit_type: "piece",
       cost_price: "",
       selling_price: "",
-      location: locationOptions[0] || "Main Store",
+      location: activeBranchName,
     });
 
     // Prefill cost/selling for stock-in using product defaults when available.
@@ -193,7 +201,7 @@ export default function ProductList({
 
   const cancelAdjustment = () => {
     setAdjustingId(null);
-    setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: locationOptions[0] || "Main Store" });
+    setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: activeBranchName });
   };
 
   const saveAdjustment = async (productId: number) => {
@@ -681,22 +689,20 @@ export default function ProductList({
               )}
               <label>
                 <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                  Location/Warehouse
+                  Branch
                 </span>
-                <input
-                  className="input"
-                  type="text"
-                  list="stock-location-options"
-                  value={adjustment.location}
-                  onChange={(e) => setAdjustment({ ...adjustment, location: e.target.value })}
-                  placeholder="e.g., Main Store"
-                  style={{ fontSize: 14, padding: 10 }}
-                />
-                <datalist id="stock-location-options">
-                  {locationOptions.map((loc) => (
-                    <option key={loc} value={loc} />
-                  ))}
-                </datalist>
+                <div
+                  style={{
+                    fontSize: 14,
+                    padding: 10,
+                    background: "#f5f5f5",
+                    borderRadius: 6,
+                    border: "1px solid #e0e0e0",
+                    color: "#333"
+                  }}
+                >
+                  {activeBranchName}
+                </div>
               </label>
               {usesExpiryTracking && adjustment.reason === "New Stock" && adjustingId !== null && products.find((p) => p.id === adjustingId)?.expiry_date && (
                 <label>
@@ -827,22 +833,20 @@ export default function ProductList({
               </label>
               <label>
                 <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                  Location
+                  Branch
                 </span>
-                <input
-                  className="input"
-                  type="text"
-                  list="damage-location-options"
-                  value={damageForm.location}
-                  onChange={(e) => setDamageForm({ ...damageForm, location: e.target.value })}
-                  placeholder="e.g., Main Store"
-                  style={{ fontSize: 14, padding: 10 }}
-                />
-                <datalist id="damage-location-options">
-                  {locationOptions.map((loc) => (
-                    <option key={loc} value={loc} />
-                  ))}
-                </datalist>
+                <div
+                  style={{
+                    fontSize: 14,
+                    padding: 10,
+                    background: "#f5f5f5",
+                    borderRadius: 6,
+                    border: "1px solid #e0e0e0",
+                    color: "#333"
+                  }}
+                >
+                  {activeBranchName}
+                </div>
               </label>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <button
@@ -871,12 +875,12 @@ export default function ProductList({
                         -qty, // Negative to deduct
                         reasonText,
                         undefined,
-                        damageForm.location,
+                        activeBranchName,
                         null,
                         null,
                       );
                       setDamageId(null);
-                      setDamageForm({ quantity: "", reason: "Damaged", details: "", location: "Main Store" });
+                      setDamageForm({ quantity: "", reason: "Damaged", details: "", location: activeBranchName });
                       // Refresh stock data
                       const movements = await fetchMovements(damageId);
                       const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
