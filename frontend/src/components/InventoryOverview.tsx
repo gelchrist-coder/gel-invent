@@ -1,3 +1,35 @@
+// SVG Icons
+const PackageIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16.5 9.4 7.55 4.24" />
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    <polyline points="3.29 7 12 12 20.71 7" />
+    <line x1="12" y1="22" x2="12" y2="12" />
+  </svg>
+);
+
+const DollarIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="1" x2="12" y2="23" />
+    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+  </svg>
+);
+
+const AlertTriangleIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
+const ClockIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="12 6 12 12 16 14" />
+  </svg>
+);
+
 type InventoryAnalytics = {
   stock_by_location: {
     location: string;
@@ -65,9 +97,10 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 24,
+              color: "#2563eb",
             }}
           >
+            <PackageIcon />
           </div>
           <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Total Products</p>
@@ -97,9 +130,10 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 24,
+              color: "#059669",
             }}
           >
+            <DollarIcon />
           </div>
           <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Stock Value</p>
@@ -129,9 +163,10 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 24,
+              color: "#dc2626",
             }}
           >
+            <AlertTriangleIcon />
           </div>
           <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Low Stock</p>
@@ -162,9 +197,10 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 24,
+              color: "#d97706",
             }}
           >
+            <ClockIcon />
           </div>
           <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Expiring Soon</p>
