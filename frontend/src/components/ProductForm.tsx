@@ -27,6 +27,7 @@ export default function ProductForm({
 
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [isPerishable, setIsPerishable] = useState(false);
 
   const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
 
@@ -90,6 +91,12 @@ export default function ProductForm({
     const nativeEvent = e.nativeEvent as SubmitEvent;
     const submitter = nativeEvent.submitter as HTMLButtonElement | null;
     const mode = (submitter?.dataset.saveMode as "save" | "saveAndNew" | undefined) ?? "save";
+
+    // Validate perishable goods have an expiry date
+    if (usesExpiryTracking && isPerishable && !form.expiry_date) {
+      setError("Expiry date is required for perishable goods");
+      return;
+    }
 
     setBusy(true);
     setSubmittingMode(mode);
@@ -158,6 +165,7 @@ export default function ProductForm({
           supplier: "",
           status: form.status || "active",
         });
+        setIsPerishable(false);
         // Focus on name field
         setTimeout(() => {
           const nameInput = document.querySelector('input[name="name"]') as HTMLInputElement;
@@ -313,19 +321,50 @@ export default function ProductForm({
               />
             </label>
             {usesExpiryTracking && (
-            <label>
-              Expiry Date (Optional)
-              <input
-                className="input"
-                type="date"
-                value={form.expiry_date ?? ""}
-                onChange={(e) => setForm({ ...form, expiry_date: e.target.value || null })}
-                min={new Date().toISOString().split('T')[0]}
-              />
-              <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
-                Leave empty for non-perishable items
-              </small>
-            </label>
+            <div style={{ marginTop: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "block" }}>Product Type</span>
+              <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="perishableType"
+                    checked={!isPerishable}
+                    onChange={() => {
+                      setIsPerishable(false);
+                      setForm({ ...form, expiry_date: null });
+                    }}
+                    style={{ width: 18, height: 18, accentColor: "#3b82f6" }}
+                  />
+                  <span style={{ fontSize: 14 }}>Non-Perishable</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="perishableType"
+                    checked={isPerishable}
+                    onChange={() => setIsPerishable(true)}
+                    style={{ width: 18, height: 18, accentColor: "#3b82f6" }}
+                  />
+                  <span style={{ fontSize: 14 }}>Perishable</span>
+                </label>
+              </div>
+              {isPerishable && (
+                <label>
+                  Expiry Date *
+                  <input
+                    className="input"
+                    type="date"
+                    value={form.expiry_date ?? ""}
+                    onChange={(e) => setForm({ ...form, expiry_date: e.target.value || null })}
+                    min={new Date().toISOString().split('T')[0]}
+                    required
+                  />
+                  <small style={{ color: "#ef4444", fontSize: 12, marginTop: 4, display: "block" }}>
+                    Required for perishable goods
+                  </small>
+                </label>
+              )}
+            </div>
             )}
           </div>
         </div>
