@@ -15,11 +15,9 @@ type MovementHistory = {
 
 type Props = {
   movements: MovementHistory[];
-  locations: string[];
 };
 
-export default function MovementHistory({ movements, locations }: Props) {
-  const [filterLocation, setFilterLocation] = useState<string>("all");
+export default function MovementHistory({ movements }: Props) {
   const [filterType, setFilterType] = useState<string>("all");
 
   const formatDate = (dateString: string) => {
@@ -40,40 +38,15 @@ export default function MovementHistory({ movements, locations }: Props) {
   };
 
   const filteredMovements = movements.filter((m) => {
-    const matchesLocation = filterLocation === "all" || m.location === filterLocation;
     const type = getMovementType(m.change, m.reason);
     const matchesType = filterType === "all" || type === filterType;
-    return matchesLocation && matchesType;
+    return matchesType;
   });
 
   return (
     <div>
       {/* Filters */}
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        <div>
-          <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500 }}>
-            Branch
-          </label>
-          <select
-            value={filterLocation}
-            onChange={(e) => setFilterLocation(e.target.value)}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 6,
-              border: "1px solid #d1d5db",
-              fontSize: 14,
-              minWidth: 150,
-            }}
-          >
-            <option value="all">All Branches</option>
-            {locations.map((loc) => (
-              <option key={loc} value={loc}>
-                {loc}
-              </option>
-            ))}
-          </select>
-        </div>
-
         <div>
           <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500 }}>
             Type
@@ -133,15 +106,12 @@ export default function MovementHistory({ movements, locations }: Props) {
               <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb" }}>
                 Batch
               </th>
-              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb" }}>
-                Branch
-              </th>
             </tr>
           </thead>
           <tbody>
             {filteredMovements.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>
+                <td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>
                   No movements found
                 </td>
               </tr>
@@ -187,7 +157,6 @@ export default function MovementHistory({ movements, locations }: Props) {
                   <td style={{ padding: 12, fontSize: 14, color: "#6b7280" }}>
                     {movement.batch_number || "-"}
                   </td>
-                  <td style={{ padding: 12, fontSize: 14 }}>{movement.location}</td>
                 </tr>
               ))
             )}

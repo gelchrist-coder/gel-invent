@@ -131,8 +131,6 @@ export default function Inventory() {
     return null;
   }
 
-  const locations = analytics.stock_by_location.map((loc) => loc.location);
-
   return (
     <div className="app-shell">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
@@ -232,7 +230,7 @@ export default function Inventory() {
             </div>
           </div>
         </div>
-        <MovementHistory movements={movements} locations={locations} />
+        <MovementHistory movements={movements} />
       </div>
     </div>
   );
