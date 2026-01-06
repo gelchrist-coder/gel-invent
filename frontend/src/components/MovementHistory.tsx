@@ -52,7 +52,7 @@ export default function MovementHistory({ movements, locations }: Props) {
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div>
           <label style={{ display: "block", marginBottom: 4, fontSize: 14, fontWeight: 500 }}>
-            Location
+            Branch
           </label>
           <select
             value={filterLocation}
@@ -65,7 +65,7 @@ export default function MovementHistory({ movements, locations }: Props) {
               minWidth: 150,
             }}
           >
-            <option value="all">All Locations</option>
+            <option value="all">All Branches</option>
             {locations.map((loc) => (
               <option key={loc} value={loc}>
                 {loc}
@@ -134,7 +134,7 @@ export default function MovementHistory({ movements, locations }: Props) {
                 Batch
               </th>
               <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb" }}>
-                Location
+                Branch
               </th>
             </tr>
           </thead>
