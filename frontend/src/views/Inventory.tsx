@@ -3,7 +3,6 @@ import type { ComponentProps } from "react";
 import { fetchInventoryAnalytics, fetchAllMovements, exportMovementsPdf } from "../api";
 import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
-import LocationBreakdown from "../components/LocationBreakdown";
 import MovementHistory from "../components/MovementHistory";
 import { useExpiryTracking } from "../settings";
 
@@ -168,11 +167,6 @@ export default function Inventory() {
           expiring={usesExpiryTracking ? analytics.expiring_products : []}
           hideExpiringSection={!usesExpiryTracking}
         />
-      </div>
-
-      {/* Location Breakdown */}
-      <div className="card" style={{ marginBottom: 24 }}>
-        <LocationBreakdown locations={analytics.stock_by_location} />
       </div>
 
       {/* Movement History */}
