@@ -72,8 +72,7 @@ def get_inventory_analytics(
         )
     ).all()
     
-    # Calculate stock for each product by location
-    stock_by_location = {}
+    # Calculate stock for each product
     low_stock_products = []
     expiring_batches = []
     total_stock_value = Decimal(0)
@@ -96,12 +95,6 @@ def get_inventory_analytics(
         # Calculate total stock
         total_stock_raw = sum(m.change for m in movements)
         total_stock = total_stock_raw if total_stock_raw > 0 else Decimal(0)
-        
-        # Calculate stock by location
-        location_stock = {}
-        for movement in movements:
-            loc = movement.location or "Main Store"
-            location_stock[loc] = location_stock.get(loc, Decimal(0)) + movement.change
         
         # Stock value (prefer per-batch unit cost; fallback to product cost)
         if total_stock > 0:
@@ -197,30 +190,8 @@ def get_inventory_analytics(
                             else "expiring_30"
                             if days_to_expiry <= 30
                             else "expiring_90",
-                            "location": b.location or "Main Store",
                         }
                     )
-        
-        # Add to location breakdown
-        for loc, qty in location_stock.items():
-            if loc not in stock_by_location:
-                stock_by_location[loc] = {
-                    "location": loc,
-                    "products": 0,
-                    "total_units": 0,
-                    "value": 0,
-                }
-            stock_by_location[loc]["products"] += 1
-            stock_by_location[loc]["total_units"] += float(qty)
-            if product.cost_price:
-                stock_by_location[loc]["value"] += float(product.cost_price * qty)
-
-    # Do not expose negative totals in UI-facing analytics.
-    for item in stock_by_location.values():
-        if item["total_units"] < 0:
-            item["total_units"] = 0
-        if item["value"] < 0:
-            item["value"] = 0
     
     # Movement summary (last 30 days)
     thirty_days_ago = datetime.now() - timedelta(days=30)
@@ -251,7 +222,7 @@ def get_inventory_analytics(
             movement_summary["stock_out"] += abs(change)
     
     return {
-        "stock_by_location": list(stock_by_location.values()),
+        "stock_by_location": [],
         "low_stock_alerts": low_stock_products,
         "expiring_products": sorted(expiring_batches, key=lambda x: x["days_to_expiry"]),
         "movement_summary": movement_summary,
@@ -265,7 +236,6 @@ def get_all_movements(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
-    location: str | None = Query(None),
     reason: str | None = Query(None),
     days: int = Query(30, ge=1, le=365),
 ):
@@ -286,10 +256,6 @@ def get_all_movements(
             Product.branch_id == active_branch_id,
         )
     )
-    
-    # Filter by location
-    if location:
-        query = query.where(StockMovement.location == location)
     
     # Filter by reason
     if reason:
@@ -319,7 +285,6 @@ def get_all_movements(
             "reason": movement.reason,
             "batch_number": movement.batch_number,
             "expiry_date": movement.expiry_date.isoformat() if movement.expiry_date else None,
-            "location": movement.location or "Main Store",
             "created_at": movement.created_at.isoformat(),
         })
     
@@ -397,7 +362,6 @@ def export_movements_pdf(
             "change": float(movement.change),
             "reason": movement.reason,
             "batch_number": movement.batch_number or "-",
-            "location": movement.location or "Main Store",
             "type": "Stock In" if movement.change > 0 else ("Sale" if classification == "sales" else "Stock Out"),
         })
     
@@ -480,7 +444,7 @@ def export_movements_pdf(
     
     # Movement table
     if filtered_movements:
-        header = ["Date", "Product", "SKU", "Change", "Type", "Reason", "Batch", "Location"]
+        header = ["Date", "Product", "SKU", "Change", "Type", "Reason", "Batch"]
         data = [header]
         
         for m in filtered_movements:
@@ -493,10 +457,9 @@ def export_movements_pdf(
                 m["type"],
                 m["reason"],
                 m["batch_number"],
-                m["location"],
             ])
         
-        col_widths = [1.2 * inch, 1.8 * inch, 0.9 * inch, 0.7 * inch, 0.8 * inch, 1.0 * inch, 0.8 * inch, 1.0 * inch]
+        col_widths = [1.2 * inch, 2.0 * inch, 1.0 * inch, 0.8 * inch, 0.9 * inch, 1.2 * inch, 1.1 * inch]
         table = Table(data, colWidths=col_widths, repeatRows=1)
         
         table.setStyle(TableStyle([

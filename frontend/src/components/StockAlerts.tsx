@@ -16,7 +16,6 @@ type ExpiringProduct = {
   expiry_date: string;
   days_to_expiry: number;
   status: "expired" | "expiring_soon" | "expiring_30" | "expiring_90";
-  location: string;
 };
 
 type Props = {
@@ -153,7 +152,7 @@ export default function StockAlerts({ lowStock, expiring, hideExpiringSection = 
                 <div style={{ flex: 1 }}>
                   <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>{item.product_name}</p>
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6b7280" }}>
-                    Batch: {item.batch_number || "N/A"} • Qty: {item.quantity} • {item.location}
+                    Batch: {item.batch_number || "N/A"} • Qty: {item.quantity}
                   </p>
                 </div>
                 <div style={{ textAlign: "right" }}>

@@ -170,7 +170,6 @@ def create_sale(
                 expiry_date=b.expiry_date,
                 unit_cost_price=unit_cost_by_batch.get(b.batch_number) if b.batch_number else (product.cost_price if product.cost_price is not None else None),
                 unit_selling_price=sale.unit_price,
-                location=b.location or "Main Store",
             )
         )
         deducted_batches.append(
@@ -178,7 +177,6 @@ def create_sale(
                 "batch_number": b.batch_number,
                 "expiry_date": b.expiry_date.isoformat() if b.expiry_date else None,
                 "quantity": float(take),
-                "location": b.location or "Main Store",
             }
         )
         remaining = remaining - take
@@ -196,7 +194,6 @@ def create_sale(
                 reason="Sale",
                 unit_cost_price=product.cost_price if product.cost_price is not None else None,
                 unit_selling_price=sale.unit_price,
-                location="Main Store",
             )
         )
         deducted_batches.append(
@@ -204,7 +201,6 @@ def create_sale(
                 "batch_number": None,
                 "expiry_date": None,
                 "quantity": float(remaining),
-                "location": "Main Store",
             }
         )
         remaining = Decimal(0)

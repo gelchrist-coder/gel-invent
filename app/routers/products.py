@@ -73,7 +73,6 @@ def create_product(
 
     # Extract initial_stock before creating product
     initial_stock = payload.initial_stock
-    initial_location = payload.initial_location or "Main Store"
     product_data = payload.model_dump(exclude={'initial_stock', 'initial_location'})
     product_data['user_id'] = current_user.id
     product_data['branch_id'] = active_branch_id
@@ -96,7 +95,6 @@ def create_product(
             reason="Initial Stock",
             batch_number=batch_number,
             expiry_date=product.expiry_date,
-            location=initial_location
         )
         db.add(movement)
         db.commit()

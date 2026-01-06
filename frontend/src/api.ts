@@ -563,15 +563,14 @@ export async function updateSystemSettings(payload: SystemSettings): Promise<Sys
   });
 }
 
-export async function fetchAllMovements(days: number = 30, location?: string, reason?: string): Promise<JsonArray> {
-  const cacheKey = `movements:${days}:${location || ""}:${reason || ""}`;
+export async function fetchAllMovements(days: number = 30, reason?: string): Promise<JsonArray> {
+  const cacheKey = `movements:${days}:${reason || ""}`;
   const cached = getCached<JsonArray>(cacheKey);
   if (cached && isCacheFresh(cacheKey)) {
     return cached;
   }
   
   const params = new URLSearchParams({ days: days.toString() });
-  if (location) params.append("location", location);
   if (reason) params.append("reason", reason);
   const data = await jsonRequest<JsonArray>(`/inventory/movements?${params.toString()}`);
   setCache(cacheKey, data);

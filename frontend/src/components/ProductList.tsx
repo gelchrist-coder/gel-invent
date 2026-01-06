@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Product, Branch } from "../types";
-import { fetchMovements, updateMyCategories, fetchBranches } from "../api";
+import { Product } from "../types";
+import { fetchMovements, updateMyCategories } from "../api";
 import { useAppCategories } from "../categories";
 import { useExpiryTracking } from "../settings";
 
@@ -15,7 +15,6 @@ type Props = {
     change: number,
     reason: string,
     expiry_date?: string,
-    location?: string,
     unit_cost_price?: number | null,
     unit_selling_price?: number | null,
   ) => Promise<void>;
@@ -50,47 +49,17 @@ export default function ProductList({
     unit_type: "piece" as "piece" | "pack",
     cost_price: "",
     selling_price: "",
-    location: "Main Store",
   });
   const [stockData, setStockData] = useState<Record<number, number>>({});
-  const [activeBranchName, setActiveBranchName] = useState<string>("Main Store");
   const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
   const [damageId, setDamageId] = useState<number | null>(null);
-  const [damageForm, setDamageForm] = useState({ quantity: "", reason: "Damaged", details: "", location: "" });
+  const [damageForm, setDamageForm] = useState({ quantity: "", reason: "Damaged", details: "" });
 
-  // Get active branch name for location
+  // Fetch initial stock data for all products
   useEffect(() => {
-    const loadActiveBranch = async () => {
-      try {
-        const branches = await fetchBranches();
-        const activeBranchId = localStorage.getItem("activeBranchId");
-        if (branches.length > 0) {
-          const activeBranch = activeBranchId 
-            ? branches.find(b => b.id === Number(activeBranchId)) 
-            : branches[0];
-          const branchName = activeBranch?.name || branches[0]?.name || "Main Store";
-          setActiveBranchName(branchName);
-          setAdjustment(prev => ({ ...prev, location: branchName }));
-          setDamageForm(prev => ({ ...prev, location: branchName }));
-        }
-      } catch {
-        // Keep default if branches can't be fetched
-        setActiveBranchName("Main Store");
-      }
-    };
-    loadActiveBranch();
-
-    // Also listen for branch changes
-    const handleBranchChange = () => loadActiveBranch();
-    window.addEventListener("activeBranchChanged", handleBranchChange);
-    return () => window.removeEventListener("activeBranchChanged", handleBranchChange);
-  }, []);
-
-  // Use current_stock from products (already computed by backend) - much faster!
-  useEffect(() => {
+    // Stock is already in product.current_stock - use it directly
     const loadAdditionalData = async () => {
-      // Stock is already in product.current_stock - use it directly
       const stockMap: Record<number, number> = {};
       const expiryMap: Record<number, string | null> = {};
       
@@ -186,7 +155,6 @@ export default function ProductList({
       unit_type: "piece",
       cost_price: "",
       selling_price: "",
-      location: activeBranchName,
     });
 
     // Prefill cost/selling for stock-in using product defaults when available.
@@ -201,7 +169,7 @@ export default function ProductList({
 
   const cancelAdjustment = () => {
     setAdjustingId(null);
-    setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: activeBranchName });
+    setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "" });
   };
 
   const saveAdjustment = async (productId: number) => {
@@ -272,12 +240,11 @@ export default function ProductList({
         qty,
         adjustment.reason,
         adjustment.expiry_date || undefined,
-        adjustment.location,
         unitCostToSend,
         unitSellingToSend,
       );
       setAdjustingId(null);
-      setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "", location: "Main Store" });
+      setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "" });
       // Refresh stock data
       const movements = await fetchMovements(productId);
       const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
@@ -687,23 +654,6 @@ export default function ProductList({
                   />
                 </label>
               )}
-              <label>
-                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                  Branch
-                </span>
-                <div
-                  style={{
-                    fontSize: 14,
-                    padding: 10,
-                    background: "#f5f5f5",
-                    borderRadius: 6,
-                    border: "1px solid #e0e0e0",
-                    color: "#333"
-                  }}
-                >
-                  {activeBranchName}
-                </div>
-              </label>
               {usesExpiryTracking && adjustment.reason === "New Stock" && adjustingId !== null && products.find((p) => p.id === adjustingId)?.expiry_date && (
                 <label>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
@@ -831,23 +781,6 @@ export default function ProductList({
                   style={{ fontSize: 14, padding: 10, resize: "vertical" }}
                 />
               </label>
-              <label>
-                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                  Branch
-                </span>
-                <div
-                  style={{
-                    fontSize: 14,
-                    padding: 10,
-                    background: "#f5f5f5",
-                    borderRadius: 6,
-                    border: "1px solid #e0e0e0",
-                    color: "#333"
-                  }}
-                >
-                  {activeBranchName}
-                </div>
-              </label>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <button
                   className="button"
@@ -875,12 +808,11 @@ export default function ProductList({
                         -qty, // Negative to deduct
                         reasonText,
                         undefined,
-                        activeBranchName,
                         null,
                         null,
                       );
                       setDamageId(null);
-                      setDamageForm({ quantity: "", reason: "Damaged", details: "", location: activeBranchName });
+                      setDamageForm({ quantity: "", reason: "Damaged", details: "" });
                       // Refresh stock data
                       const movements = await fetchMovements(damageId);
                       const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
@@ -1069,7 +1001,7 @@ export default function ProductList({
                         <button
                           onClick={() => {
                             setDamageId(p.id);
-                            setDamageForm({ quantity: "", reason: "Damaged", details: "", location: "Main Store" });
+                            setDamageForm({ quantity: "", reason: "Damaged", details: "" });
                           }}
                           disabled={busy || (stockData[p.id] ?? 0) === 0}
                           style={{

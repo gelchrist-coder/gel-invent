@@ -9,7 +9,6 @@ type MovementHistory = {
   reason: string;
   batch_number: string | null;
   expiry_date: string | null;
-  location: string;
   created_at: string;
 };
 

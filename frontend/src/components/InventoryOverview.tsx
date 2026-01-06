@@ -31,12 +31,7 @@ const ClockIcon = () => (
 );
 
 type InventoryAnalytics = {
-  stock_by_location: {
-    location: string;
-    products: number;
-    total_units: number;
-    value: number;
-  }[];
+  stock_by_location: never[];
   low_stock_alerts: {
     id: number;
     name: string;
@@ -54,7 +49,6 @@ type InventoryAnalytics = {
     expiry_date: string;
     days_to_expiry: number;
     status: "expired" | "expiring_soon" | "expiring_30" | "expiring_90";
-    location: string;
   }[];
   movement_summary: {
     stock_in: number;

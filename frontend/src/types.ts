@@ -26,7 +26,6 @@ export type StockMovement = {
   expiry_date?: string | null;
   unit_cost_price?: number | null;
   unit_selling_price?: number | null;
-  location?: string | null;
   created_at: string;
 };
 
@@ -43,7 +42,6 @@ export type NewProduct = {
   selling_price?: number | null;
   pack_selling_price?: number | null;
   initial_stock?: number;
-  initial_location?: string | null;
 };
 
 export type NewMovement = {
@@ -53,7 +51,6 @@ export type NewMovement = {
   expiry_date?: string | null;
   unit_cost_price?: number | null;
   unit_selling_price?: number | null;
-  location?: string | null;
 };
 
 export type Sale = {
@@ -73,7 +70,6 @@ export type Sale = {
     batch_number?: string | null;
     expiry_date?: string | null;
     quantity: number;
-    location?: string | null;
   }> | null;
 };
 

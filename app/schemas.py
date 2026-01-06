@@ -40,7 +40,6 @@ class StockMovementBase(BaseModel):
     expiry_date: date | None = Field(default=None)
     unit_cost_price: Decimal | None = Field(default=None, decimal_places=2)
     unit_selling_price: Decimal | None = Field(default=None, decimal_places=2)
-    location: str | None = Field(default="Main Store", max_length=100)
 
 
 class StockMovementCreate(StockMovementBase):
