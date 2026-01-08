@@ -44,7 +44,6 @@ class UserCreate(BaseModel):
     business_name: Optional[str] = None
     categories: Optional[list[str]] = None
     branches: Optional[list[str]] = None  # Optional list of branch names
-    uses_expiry_tracking: bool = True  # Whether business uses expiry date tracking
 
 
 class UserResponse(BaseModel):
@@ -174,10 +173,10 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
         db.add(branch)
         db.commit()
 
-    # Create SystemSettings with user's expiry tracking preference
+    # Create SystemSettings with default values
     settings = SystemSettings(
         owner_user_id=new_user.id,
-        uses_expiry_tracking=user_data.uses_expiry_tracking,
+        uses_expiry_tracking=True,
     )
     db.add(settings)
     db.commit()

@@ -70,7 +70,7 @@ export const useSystemSettings = (): SystemSettings => {
 };
 
 // Convenience hook for just the expiry tracking setting
+// Always returns true now since expiry tracking is per-product (perishable vs non-perishable)
 export const useExpiryTracking = (): boolean => {
-  const settings = useSystemSettings();
-  return settings.uses_expiry_tracking;
+  return true;
 };

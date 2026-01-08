@@ -15,14 +15,6 @@ from app.utils.movement_reasons import validate_reason_and_change
 from app.utils.expiry import writeoff_expired_batches
 
 
-def _uses_expiry_tracking(db: Session, owner_user_id: int) -> bool:
-    """Check if the business uses expiry tracking."""
-    settings = db.query(models.SystemSettings).filter(
-        models.SystemSettings.owner_user_id == owner_user_id
-    ).first()
-    return settings.uses_expiry_tracking if settings else True
-
-
 router = APIRouter(prefix="/products", tags=["products"])
 
 
@@ -235,11 +227,9 @@ def record_movement(
     if error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error)
 
-    # New Stock requires explicit expiry date for the new batch (only if business uses expiry tracking).
-    owner_id = current_user.id if current_user.role == "Admin" else (current_user.created_by or current_user.id)
-    if _uses_expiry_tracking(db, owner_id):
-        if (payload.reason or "").strip().lower() == "new stock" and payload.expiry_date is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expiry date is required for New Stock")
+    # New Stock requires explicit expiry date only if the product is perishable (has an expiry date)
+    if (payload.reason or "").strip().lower() == "new stock" and product.expiry_date is not None and payload.expiry_date is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expiry date is required for New Stock of perishable products")
 
     if payload.change < 0:
         available_stock = db.query(func.coalesce(func.sum(models.StockMovement.change), 0)).filter(

@@ -76,7 +76,6 @@ export default function Profile() {
   const [systemSettings, setSystemSettings] = useState({
     lowStockThreshold: "10",
     expiryWarningDays: "180",
-    usesExpiryTracking: true,
     autoBackup: true,
     emailNotifications: false,
   });
@@ -144,7 +143,6 @@ export default function Profile() {
         setSystemSettings({
           lowStockThreshold: String(settings.low_stock_threshold),
           expiryWarningDays: String(settings.expiry_warning_days),
-          usesExpiryTracking: settings.uses_expiry_tracking,
           autoBackup: settings.auto_backup,
           emailNotifications: settings.email_notifications,
         });
@@ -173,7 +171,7 @@ export default function Profile() {
       const payload = {
         low_stock_threshold: Number(systemSettings.lowStockThreshold) || 0,
         expiry_warning_days: Number(systemSettings.expiryWarningDays) || 0,
-        uses_expiry_tracking: systemSettings.usesExpiryTracking,
+        uses_expiry_tracking: true,
         auto_backup: systemSettings.autoBackup,
         email_notifications: systemSettings.emailNotifications,
       };
@@ -181,7 +179,6 @@ export default function Profile() {
       setSystemSettings({
         lowStockThreshold: String(updated.low_stock_threshold),
         expiryWarningDays: String(updated.expiry_warning_days),
-        usesExpiryTracking: updated.uses_expiry_tracking,
         autoBackup: updated.auto_backup,
         emailNotifications: updated.email_notifications,
       });
@@ -800,48 +797,11 @@ export default function Profile() {
             System Settings
           </h2>
           <div style={{ display: "grid", gap: 24 }}>
-            {/* Expiry Tracking Toggle */}
             <div>
-              <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 16px", color: "#374151" }}>
-                Product Features
-              </h3>
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: 16,
-                  background: "#f9fafb",
-                  borderRadius: 8,
-                  border: "1px solid #e5e7eb",
-                  cursor: editing ? "pointer" : "not-allowed",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={systemSettings.usesExpiryTracking}
-                  onChange={(e) =>
-                    setSystemSettings({ ...systemSettings, usesExpiryTracking: e.target.checked })
-                  }
-                  disabled={!editing}
-                  style={{ width: 18, height: 18, cursor: editing ? "pointer" : "not-allowed" }}
-                />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    Enable Expiry Date Tracking
-                  </div>
-                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-                    Track expiry dates for perishable goods like food, medicine, or cosmetics
-                  </div>
-                </div>
-              </label>
-            </div>
-
-            <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 24 }}>
               <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 16px", color: "#374151" }}>
                 Inventory Alerts
               </h3>
-              <div style={{ display: "grid", gridTemplateColumns: systemSettings.usesExpiryTracking ? "1fr 1fr" : "1fr", gap: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                     Low Stock Threshold
@@ -861,7 +821,6 @@ export default function Profile() {
                     Alert when stock falls below this number
                   </small>
                 </label>
-                {systemSettings.usesExpiryTracking && (
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                     Expiry Warning (Days)
@@ -878,10 +837,9 @@ export default function Profile() {
                     style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
                   />
                   <small style={{ fontSize: 12, color: "#6b7280" }}>
-                    Alert when products expire within this many days
+                    Alert when perishable products expire within this many days
                   </small>
                 </label>
-                )}
               </div>
             </div>
 

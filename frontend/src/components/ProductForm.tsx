@@ -3,7 +3,6 @@ import React, { useMemo, useState } from "react";
 import { Branch, NewProduct } from "../types";
 import { useAppCategories } from "../categories";
 import { updateMyCategories } from "../api";
-import { useExpiryTracking } from "../settings";
 
 type Props = {
   onCreate: (payload: NewProduct, branchIdOverride?: number | null) => Promise<void>;
@@ -23,7 +22,6 @@ export default function ProductForm({
   activeBranchId,
 }: Props) {
   const categoryOptions = useAppCategories();
-  const usesExpiryTracking = useExpiryTracking();
 
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -91,7 +89,7 @@ export default function ProductForm({
     const mode = (submitter?.dataset.saveMode as "save" | "saveAndNew" | undefined) ?? "save";
 
     // Validate perishable goods have an expiry date
-    if (usesExpiryTracking && isPerishable && !form.expiry_date) {
+    if (isPerishable && !form.expiry_date) {
       setError("Expiry date is required for perishable goods");
       return;
     }
@@ -313,7 +311,6 @@ export default function ProductForm({
                 rows={3}
               />
             </label>
-            {usesExpiryTracking && (
             <div style={{ marginTop: 8 }}>
               <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "block" }}>Product Type</span>
               <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
@@ -358,7 +355,6 @@ export default function ProductForm({
                 </label>
               )}
             </div>
-            )}
           </div>
         </div>
 
