@@ -56,6 +56,11 @@ type InventoryAnalytics = {
     adjustments: number;
     sales: number;
   };
+  total_stock_left: number;
+  owner_movement_totals: {
+    stock_in: number;
+    stock_out: number;
+  };
   total_stock_value: number;
   total_products: number;
 };
@@ -69,6 +74,8 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
   const formatCurrency = (value: number) => {
     return `GHS ${value.toFixed(2)}`;
   };
+
+  const formatQty = (value: number) => value.toFixed(2);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
@@ -133,6 +140,103 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Stock Value</p>
             <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700 }}>
               {formatCurrency(analytics.total_stock_value)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Total Stock Left */}
+      <div
+        style={{
+          backgroundColor: "white",
+          borderRadius: 8,
+          border: "1px solid #e5e7eb",
+          padding: 20,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 8,
+              backgroundColor: "#e0e7ff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#4338ca",
+            }}
+          >
+            <PackageIcon />
+          </div>
+          <div>
+            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Total Stock Left</p>
+            <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700 }}>{formatQty(analytics.total_stock_left)}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Owner Stock In */}
+      <div
+        style={{
+          backgroundColor: "white",
+          borderRadius: 8,
+          border: "1px solid #e5e7eb",
+          padding: 20,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 8,
+              backgroundColor: "#d1fae5",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#059669",
+            }}
+          >
+            <PackageIcon />
+          </div>
+          <div>
+            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Owner Stock In</p>
+            <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#059669" }}>
+              +{formatQty(analytics.owner_movement_totals?.stock_in ?? 0)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Owner Stock Out */}
+      <div
+        style={{
+          backgroundColor: "white",
+          borderRadius: 8,
+          border: "1px solid #e5e7eb",
+          padding: 20,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 8,
+              backgroundColor: "#fee2e2",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#dc2626",
+            }}
+          >
+            <PackageIcon />
+          </div>
+          <div>
+            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Owner Stock Out</p>
+            <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#dc2626" }}>
+              -{formatQty(analytics.owner_movement_totals?.stock_out ?? 0)}
             </p>
           </div>
         </div>

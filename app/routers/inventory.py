@@ -4,7 +4,7 @@ from io import BytesIO
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -50,7 +50,8 @@ def get_inventory_analytics(
     - Stock value
     """
     tenant_user_ids = get_tenant_user_ids(current_user, db)
-    settings = _get_or_create_settings(db, _get_tenant_owner_id(current_user))
+    owner_user_id = _get_tenant_owner_id(current_user)
+    settings = _get_or_create_settings(db, owner_user_id)
     low_stock_threshold = settings.low_stock_threshold
     expiry_warning_days = settings.expiry_warning_days
 
@@ -76,6 +77,7 @@ def get_inventory_analytics(
     low_stock_products = []
     expiring_batches = []
     total_stock_value = Decimal(0)
+    total_stock_left = Decimal(0)
     
     today = datetime.now().date()
     
@@ -95,6 +97,7 @@ def get_inventory_analytics(
         # Calculate total stock
         total_stock_raw = sum(m.change for m in movements)
         total_stock = total_stock_raw if total_stock_raw > 0 else Decimal(0)
+        total_stock_left += total_stock
         
         # Stock value (prefer per-batch unit cost; fallback to product cost)
         if total_stock > 0:
@@ -220,12 +223,34 @@ def get_inventory_analytics(
             movement_summary["stock_in"] += change
         else:
             movement_summary["stock_out"] += abs(change)
+
+    # Owner-only movement totals (all-time) for this branch.
+    owner_in_out = db.execute(
+        select(
+            func.coalesce(
+                func.sum(case((StockMovement.change > 0, StockMovement.change), else_=0)),
+                0,
+            ).label("stock_in"),
+            func.coalesce(
+                func.sum(case((StockMovement.change < 0, -StockMovement.change), else_=0)),
+                0,
+            ).label("stock_out"),
+        ).where(
+            StockMovement.user_id == owner_user_id,
+            StockMovement.branch_id == active_branch_id,
+        )
+    ).one()
     
     return {
         "stock_by_location": [],
         "low_stock_alerts": low_stock_products,
         "expiring_products": sorted(expiring_batches, key=lambda x: x["days_to_expiry"]),
         "movement_summary": movement_summary,
+        "total_stock_left": float(total_stock_left),
+        "owner_movement_totals": {
+            "stock_in": float(owner_in_out.stock_in),
+            "stock_out": float(owner_in_out.stock_out),
+        },
         "total_stock_value": float(total_stock_value),
         "total_products": len(products),
     }
