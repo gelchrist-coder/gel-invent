@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from app import models
@@ -39,7 +40,10 @@ def list_branches(
     return (
         db.query(models.Branch)
         .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.is_active.is_(True))
-        .order_by(models.Branch.created_at.asc())
+        .order_by(
+            case((models.Branch.name == "Main Branch", 1), else_=0).asc(),
+            models.Branch.created_at.asc(),
+        )
         .all()
     )
 

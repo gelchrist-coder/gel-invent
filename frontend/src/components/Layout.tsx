@@ -150,10 +150,13 @@ export default function Layout({
   // Filter navigation items based on user role
   const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || userRole === "Admin");
 
-  const firstBranchId = branches && branches.length > 0 ? branches[0].id : undefined;
+  const visibleBranches =
+    branches && branches.length > 1 ? branches.filter((b) => b.name !== "Main Branch") : branches;
+
+  const firstBranchId = visibleBranches && visibleBranches.length > 0 ? visibleBranches[0].id : undefined;
   const activeBranchName =
-    branches && branches.length > 0
-      ? branches.find((b) => b.id === (activeBranchId ?? firstBranchId))?.name ?? branches[0].name
+    visibleBranches && visibleBranches.length > 0
+      ? visibleBranches.find((b) => b.id === (activeBranchId ?? firstBranchId))?.name ?? visibleBranches[0].name
       : undefined;
 
   // On desktop: collapsed by default, expands on hover
@@ -251,13 +254,13 @@ export default function Layout({
         </div>
 
         {/* Branch Selector / Indicator (Sidebar) */}
-        {isExpanded && branches && branches.length > 0 && (
+        {isExpanded && visibleBranches && visibleBranches.length > 0 && (
           <div style={{ padding: "0 16px", marginBottom: 16 }}>
             <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 6, letterSpacing: 0.2 }}>Branch</div>
 
-            {userRole === "Admin" && onChangeBranch && branches.length > 1 ? (
+            {userRole === "Admin" && onChangeBranch && visibleBranches.length > 1 ? (
               <select
-                value={activeBranchId ?? branches[0]?.id}
+                value={activeBranchId ?? visibleBranches[0]?.id}
                 onChange={(e) => onChangeBranch?.(Number(e.target.value))}
                 style={{
                   width: "100%",
@@ -271,7 +274,7 @@ export default function Layout({
                 }}
                 aria-label="Select branch"
               >
-                {branches.map((b) => (
+                {visibleBranches.map((b) => (
                   <option key={b.id} value={b.id} style={{ color: "#0b1021" }}>
                     {b.name}
                   </option>

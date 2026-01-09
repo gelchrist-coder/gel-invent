@@ -41,6 +41,28 @@ def ensure_main_branch(db: Session, owner_user_id: int) -> models.Branch:
     return branch
 
 
+def get_preferred_default_branch(db: Session, owner_user_id: int) -> models.Branch:
+    """Pick the default branch for a tenant.
+
+    Prefer any active branch that is NOT the auto-created 'Main Branch'.
+    Fall back to 'Main Branch' only when it's the only available option.
+    """
+    preferred = (
+        db.query(models.Branch)
+        .filter(
+            models.Branch.owner_user_id == owner_user_id,
+            models.Branch.is_active.is_(True),
+            models.Branch.name != "Main Branch",
+        )
+        .order_by(models.Branch.created_at.asc())
+        .first()
+    )
+    if preferred:
+        return preferred
+
+    return ensure_main_branch(db, owner_user_id)
+
+
 def resolve_active_branch_id(
     *,
     db: Session,
@@ -54,13 +76,13 @@ def resolve_active_branch_id(
         if current_user.branch_id:
             return int(current_user.branch_id)
 
-        main_branch = ensure_main_branch(db, owner_user_id)
-        current_user.branch_id = main_branch.id
+        default_branch = get_preferred_default_branch(db, owner_user_id)
+        current_user.branch_id = default_branch.id
         db.add(current_user)
         db.commit()
-        return main_branch.id
+        return int(default_branch.id)
 
-    # Admin can switch branches via header, defaulting to Main Branch.
+    # Admin can switch branches via header.
     if header_branch_id:
         branch = (
             db.query(models.Branch)
@@ -75,8 +97,8 @@ def resolve_active_branch_id(
             raise HTTPException(status_code=400, detail="Invalid branch")
         return int(branch.id)
 
-    main_branch = ensure_main_branch(db, owner_user_id)
-    return int(main_branch.id)
+    default_branch = get_preferred_default_branch(db, owner_user_id)
+    return int(default_branch.id)
 
 
 def get_active_branch_id(

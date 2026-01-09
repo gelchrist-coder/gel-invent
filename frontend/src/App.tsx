@@ -125,13 +125,17 @@ export default function App() {
         setBranches(data);
 
         const existing = activeBranchId;
-        const stillValid = existing != null && data.some((b) => b.id === existing);
-        if (stillValid) {
+        const existingBranch = existing != null ? data.find((b) => b.id === existing) : undefined;
+        const hasNonMain = data.some((b) => b.name !== "Main Branch");
+
+        // Keep selection if still valid and not forcing away from Main Branch.
+        if (existingBranch && !(hasNonMain && existingBranch.name === "Main Branch")) {
           return;
         }
 
-        // Use first branch as default (no longer requiring "Main Branch" name)
-        const nextId = data[0]?.id ?? null;
+        // Prefer owner-added branches over the auto-created "Main Branch".
+        const preferred = data.find((b) => b.name !== "Main Branch");
+        const nextId = (preferred ?? data[0])?.id ?? null;
         setActiveBranchId(nextId);
         if (nextId != null) {
           localStorage.setItem("activeBranchId", String(nextId));
@@ -157,10 +161,13 @@ export default function App() {
       fetchBranches()
         .then((data) => {
           setBranches(data);
-          const stillValid = activeBranchId != null && data.some((b) => b.id === activeBranchId);
-          if (stillValid) return;
-          // Use first branch as default
-          const nextId = data[0]?.id ?? null;
+          const existing = activeBranchId;
+          const existingBranch = existing != null ? data.find((b) => b.id === existing) : undefined;
+          const hasNonMain = data.some((b) => b.name !== "Main Branch");
+          if (existingBranch && !(hasNonMain && existingBranch.name === "Main Branch")) return;
+
+          const preferred = data.find((b) => b.name !== "Main Branch");
+          const nextId = (preferred ?? data[0])?.id ?? null;
           setActiveBranchId(nextId);
           if (nextId != null) localStorage.setItem("activeBranchId", String(nextId));
           else localStorage.removeItem("activeBranchId");
