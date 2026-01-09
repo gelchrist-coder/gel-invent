@@ -132,9 +132,21 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
 
   // Update quantity
   const updateQuantity = (productId: number, unit: 'piece' | 'pack', newQuantity: number) => {
-    if (newQuantity < 1) {
-      removeFromCart(productId, unit);
-      return;
+    const normalizedQuantity =
+      unit === "pack" ? Math.floor(newQuantity) : newQuantity;
+
+    if (!Number.isFinite(normalizedQuantity)) return;
+
+    if (unit === "pack") {
+      if (normalizedQuantity < 1) {
+        removeFromCart(productId, unit);
+        return;
+      }
+    } else {
+      if (normalizedQuantity <= 0) {
+        removeFromCart(productId, unit);
+        return;
+      }
     }
 
     const product = products.find((p) => p.id === productId);
@@ -147,7 +159,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
 
     const nextPiecesForProduct = cart.reduce((sum, item) => {
       if (item.product.id !== productId) return sum;
-      const qty = item.sellingUnit === unit ? newQuantity : item.quantity;
+      const qty = item.sellingUnit === unit ? normalizedQuantity : item.quantity;
       const pieceQty = item.sellingUnit === 'pack'
         ? qty * (item.product.pack_size || 1)
         : qty;
@@ -160,7 +172,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     }
     setCart(cart.map(item => 
       item.product.id === productId && item.sellingUnit === unit
-        ? { ...item, quantity: newQuantity }
+        ? { ...item, quantity: normalizedQuantity }
         : item
     ));
   };
@@ -226,6 +238,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   }, 0);
 
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const formattedTotalItems = Number.isInteger(totalItems) ? String(totalItems) : totalItems.toFixed(2);
 
   // Submit order
   const handleSubmit = (e: React.FormEvent) => {
@@ -552,7 +565,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 14, fontWeight: 600 }}>Order</span>
-            <span style={{ fontSize: 13, opacity: 0.8 }}>{totalItems} items</span>
+            <span style={{ fontSize: 13, opacity: 0.8 }}>{formattedTotalItems} items</span>
           </div>
         </div>
 
@@ -645,14 +658,53 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                       >
                         −
                       </button>
-                      <span style={{ 
-                        width: 32, 
-                        textAlign: "center", 
-                        fontSize: 14, 
-                        fontWeight: 600 
-                      }}>
-                        {item.quantity}
-                      </span>
+                      {item.sellingUnit === "piece" ? (
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(item.product.id, item.sellingUnit, 0.5)}
+                          style={{
+                            height: 28,
+                            padding: "0 10px",
+                            border: "1px solid #e5e7eb",
+                            background: "white",
+                            borderRadius: 4,
+                            cursor: "pointer",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#6b7280",
+                          }}
+                        >
+                          Half
+                        </button>
+                      ) : null}
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step={item.sellingUnit === "pack" ? 1 : 0.01}
+                        min={item.sellingUnit === "pack" ? 1 : 0.01}
+                        value={Number.isFinite(item.quantity) ? String(item.quantity) : ""}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (!raw) return;
+                          const parsed = Number(raw);
+                          if (!Number.isFinite(parsed)) return;
+                          updateQuantity(item.product.id, item.sellingUnit, parsed);
+                        }}
+                        aria-label={`Quantity for ${item.product.name}`}
+                        style={{
+                          width: 60,
+                          height: 28,
+                          textAlign: "center",
+                          fontSize: 14,
+                          fontWeight: 600,
+                          border: "1px solid #e5e7eb",
+                          borderRadius: 4,
+                          padding: "0 6px",
+                        }}
+                      />
                       <button
                         type="button"
                         onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity + 1)}
