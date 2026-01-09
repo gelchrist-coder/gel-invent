@@ -821,25 +821,6 @@ export default function Profile() {
                     Alert when stock falls below this number
                   </small>
                 </label>
-                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    Expiry Warning (Days)
-                  </span>
-                  <input
-                    type="number"
-                    value={systemSettings.expiryWarningDays}
-                    onChange={(e) =>
-                      setSystemSettings({ ...systemSettings, expiryWarningDays: e.target.value })
-                    }
-                    disabled={!editing}
-                    className="input"
-                    min="0"
-                    style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
-                  />
-                  <small style={{ fontSize: 12, color: "#6b7280" }}>
-                    Alert when perishable products expire within this many days
-                  </small>
-                </label>
               </div>
             </div>
 

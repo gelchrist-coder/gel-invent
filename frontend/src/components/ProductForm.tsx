@@ -88,7 +88,6 @@ export default function ProductForm({
     const submitter = nativeEvent.submitter as HTMLButtonElement | null;
     const mode = (submitter?.dataset.saveMode as "save" | "saveAndNew" | undefined) ?? "save";
 
-    // Validate perishable goods have an expiry date
     if (isPerishable && !form.expiry_date) {
       setError("Expiry date is required for perishable goods");
       return;
@@ -127,7 +126,7 @@ export default function ProductForm({
         unit: form.unit || "pcs",
         pack_size: form.packSize ? parseInt(form.packSize) : undefined,
         category: form.category || undefined,
-        expiry_date: form.expiry_date || undefined,
+        expiry_date: isPerishable ? (form.expiry_date || undefined) : undefined,
         cost_price: form.costPrice ? parseFloat(form.costPrice) : undefined,
         pack_cost_price: form.packCostPrice ? parseFloat(form.packCostPrice) : undefined,
         selling_price: form.sellingPrice ? parseFloat(form.sellingPrice) : undefined,
@@ -311,6 +310,7 @@ export default function ProductForm({
                 rows={3}
               />
             </label>
+
             <div style={{ marginTop: 8 }}>
               <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "block" }}>Product Type</span>
               <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
@@ -338,6 +338,7 @@ export default function ProductForm({
                   <span style={{ fontSize: 14 }}>Perishable</span>
                 </label>
               </div>
+
               {isPerishable && (
                 <label>
                   Expiry Date *
@@ -346,7 +347,7 @@ export default function ProductForm({
                     type="date"
                     value={form.expiry_date ?? ""}
                     onChange={(e) => setForm({ ...form, expiry_date: e.target.value || null })}
-                    min={new Date().toISOString().split('T')[0]}
+                    min={new Date().toISOString().split("T")[0]}
                     required
                   />
                   <small style={{ color: "#ef4444", fontSize: 12, marginTop: 4, display: "block" }}>

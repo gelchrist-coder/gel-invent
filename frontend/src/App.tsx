@@ -44,7 +44,7 @@ export default function App() {
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
 
-  const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.every((p) => !!p.expiry_date);
+  const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
 
   useEffect(() => {
     if (!showExpiryStatusFilter && filterExpiry !== "all") {

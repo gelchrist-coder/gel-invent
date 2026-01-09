@@ -37,7 +37,7 @@ export default function ProductList({
   const isAdmin = userRole === "Admin";
   const categoryOptions = useAppCategories();
   const usesExpiryTracking = useExpiryTracking();
-  const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.every((p) => !!p.expiry_date);
+  const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
   const effectiveFilterExpiry = showExpiryStatusFilter ? filterExpiry : "all";
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
@@ -470,7 +470,16 @@ export default function ProductList({
                   </label>
                 </div>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: usesExpiryTracking ? "1fr 1fr" : "1fr", gap: 12 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    usesExpiryTracking && !!products.find((p) => p.id === editingId)?.expiry_date
+                      ? "1fr 1fr"
+                      : "1fr",
+                  gap: 12,
+                }}
+              >
                 <label>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Unit
@@ -484,7 +493,7 @@ export default function ProductList({
                     style={{ fontSize: 14, padding: 10 }}
                   />
                 </label>
-                {usesExpiryTracking && (
+                {usesExpiryTracking && !!products.find((p) => p.id === editingId)?.expiry_date && (
                 <label>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Expiry Date
