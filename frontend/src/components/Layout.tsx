@@ -150,9 +150,11 @@ export default function Layout({
   // Filter navigation items based on user role
   const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || userRole === "Admin");
 
+  const firstBranchId = branches && branches.length > 0 ? branches[0].id : undefined;
   const activeBranchName =
-    branches?.find((b) => b.id === (activeBranchId ?? branches?.[0]?.id))?.name ??
-    branches?.[0]?.name;
+    branches && branches.length > 0
+      ? branches.find((b) => b.id === (activeBranchId ?? firstBranchId))?.name ?? branches[0].name
+      : undefined;
 
   // On desktop: collapsed by default, expands on hover
   const isExpanded = isMobile || sidebarHovered;
