@@ -20,7 +20,25 @@ export default function Inventory() {
   const [movements, setMovements] = useState<MovementHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [movementDays, setMovementDays] = useState(30);
+
+  const toISODate = (d: Date) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const todayISO = toISODate(new Date());
+  const defaultFrom = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 29);
+    return toISODate(d);
+  })();
+
+  const [draftMovementFrom, setDraftMovementFrom] = useState<string>(defaultFrom);
+  const [draftMovementTo, setDraftMovementTo] = useState<string>(todayISO);
+  const [movementFrom, setMovementFrom] = useState<string>(defaultFrom);
+  const [movementTo, setMovementTo] = useState<string>(todayISO);
   const [exporting, setExporting] = useState(false);
   const [exportType, setExportType] = useState<string>("all");
 
@@ -33,7 +51,7 @@ export default function Inventory() {
     try {
       const [analyticsData, movementsData] = await Promise.all([
         fetchInventoryAnalytics(),
-        fetchAllMovements(movementDays),
+        fetchAllMovements({ startDate: movementFrom, endDate: movementTo }),
       ]);
       setAnalytics(analyticsData as InventoryAnalytics);
       setMovements(movementsData as MovementHistoryRow[]);
@@ -42,7 +60,7 @@ export default function Inventory() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, movementDays]);
+  }, [isAdmin, movementFrom, movementTo]);
 
   useEffect(() => {
     if (isAdmin) {
@@ -50,16 +68,16 @@ export default function Inventory() {
     } else {
       setLoading(false);
     }
-  }, [isAdmin, loadData, movementDays]);
+  }, [isAdmin, loadData]);
 
   const handleExportPdf = async () => {
     setExporting(true);
     try {
-      const blob = await exportMovementsPdf(movementDays, exportType);
+      const blob = await exportMovementsPdf({ startDate: movementFrom, endDate: movementTo }, exportType);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `stock_movements_${exportType}_${new Date().toISOString().slice(0, 10)}.pdf`;
+      a.download = `stock_movements_${exportType}_${movementFrom}_to_${movementTo}.pdf`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -172,23 +190,112 @@ export default function Inventory() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Movement History</h3>
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <label style={{ fontSize: 14, color: "#6b7280" }}>Show last:</label>
-              <select
-                value={movementDays}
-                onChange={(e) => setMovementDays(Number(e.target.value))}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ fontSize: 14, color: "#6b7280" }}>From:</label>
+              <input
+                type="date"
+                value={draftMovementFrom}
+                onChange={(e) => setDraftMovementFrom(e.target.value)}
                 style={{
                   padding: "6px 10px",
                   borderRadius: 6,
                   border: "1px solid #d1d5db",
                   fontSize: 14,
                 }}
+              />
+              <label style={{ fontSize: 14, color: "#6b7280" }}>To:</label>
+              <input
+                type="date"
+                value={draftMovementTo}
+                onChange={(e) => setDraftMovementTo(e.target.value)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  fontSize: 14,
+                }}
+              />
+
+              <button
+                onClick={() => {
+                  const today = toISODate(new Date());
+                  setDraftMovementFrom(today);
+                  setDraftMovementTo(today);
+                }}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  cursor: "pointer",
+                  fontSize: 13,
+                }}
               >
-                <option value={7}>7 days</option>
-                <option value={30}>30 days</option>
-                <option value={90}>90 days</option>
-                <option value={365}>1 year</option>
-              </select>
+                Today
+              </button>
+
+              <button
+                onClick={() => {
+                  const now = new Date();
+                  const day = now.getDay();
+                  const diffToMonday = (day + 6) % 7; // Mon=0 ... Sun=6
+                  const monday = new Date(now);
+                  monday.setDate(now.getDate() - diffToMonday);
+                  const sunday = new Date(monday);
+                  sunday.setDate(monday.getDate() + 6);
+                  setDraftMovementFrom(toISODate(monday));
+                  setDraftMovementTo(toISODate(sunday));
+                }}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  cursor: "pointer",
+                  fontSize: 13,
+                }}
+              >
+                This Week
+              </button>
+
+              <button
+                onClick={() => {
+                  const now = new Date();
+                  const first = new Date(now.getFullYear(), now.getMonth(), 1);
+                  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                  setDraftMovementFrom(toISODate(first));
+                  setDraftMovementTo(toISODate(last));
+                }}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  cursor: "pointer",
+                  fontSize: 13,
+                }}
+              >
+                This Month
+              </button>
+
+              <button
+                onClick={() => {
+                  setMovementFrom(draftMovementFrom);
+                  setMovementTo(draftMovementTo);
+                }}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "none",
+                  backgroundColor: "#3b82f6",
+                  color: "white",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                Apply
+              </button>
             </div>
             
             {/* Export to PDF */}

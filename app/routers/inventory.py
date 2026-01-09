@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date, time
 from decimal import Decimal
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.orm import Session
@@ -263,6 +263,8 @@ def get_all_movements(
     active_branch_id: int = Depends(get_active_branch_id),
     reason: str | None = Query(None),
     days: int = Query(30, ge=1, le=365),
+    start_date: date | None = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: date | None = Query(None, description="End date (YYYY-MM-DD)"),
 ):
     """
     Get all stock movements with optional filters.
@@ -271,10 +273,23 @@ def get_all_movements(
     query = select(StockMovement).join(Product)
     
     # Filter by date and user
-    since_date = datetime.now() - timedelta(days=days)
+    if start_date or end_date:
+        sd = start_date or end_date
+        ed = end_date or start_date
+        assert sd is not None and ed is not None
+
+        if ed < sd:
+            raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
+
+        start_dt = datetime.combine(sd, time.min)
+        end_dt = datetime.combine(ed + timedelta(days=1), time.min)
+        query = query.where(and_(StockMovement.created_at >= start_dt, StockMovement.created_at < end_dt))
+    else:
+        since_date = datetime.now() - timedelta(days=days)
+        query = query.where(StockMovement.created_at >= since_date)
+
     query = query.where(
         and_(
-            StockMovement.created_at >= since_date,
             StockMovement.user_id.in_(tenant_user_ids),
             StockMovement.branch_id == active_branch_id,
             Product.user_id.in_(tenant_user_ids),
@@ -322,6 +337,8 @@ def export_movements_pdf(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
     days: int = Query(30, ge=1, le=365),
+    start_date: date | None = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: date | None = Query(None, description="End date (YYYY-MM-DD)"),
     movement_type: str | None = Query(None, description="Filter by: stock_in, stock_out, sale, all"),
 ):
     """
@@ -342,16 +359,35 @@ def export_movements_pdf(
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     
     # Fetch movements
-    since_date = datetime.now() - timedelta(days=days)
-    query = select(StockMovement).join(Product).where(
-        and_(
-            StockMovement.created_at >= since_date,
-            StockMovement.user_id.in_(tenant_user_ids),
-            StockMovement.branch_id == active_branch_id,
-            Product.user_id.in_(tenant_user_ids),
-            Product.branch_id == active_branch_id,
+    query = select(StockMovement).join(Product)
+
+    range_label: str | None = None
+    if start_date or end_date:
+        sd = start_date or end_date
+        ed = end_date or start_date
+        assert sd is not None and ed is not None
+        if ed < sd:
+            raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
+        start_dt = datetime.combine(sd, time.min)
+        end_dt = datetime.combine(ed + timedelta(days=1), time.min)
+        query = query.where(and_(StockMovement.created_at >= start_dt, StockMovement.created_at < end_dt))
+        range_label = f"{sd.isoformat()} to {ed.isoformat()}"
+    else:
+        since_date = datetime.now() - timedelta(days=days)
+        query = query.where(StockMovement.created_at >= since_date)
+        range_label = f"Last {days} days"
+
+    query = (
+        query.where(
+            and_(
+                StockMovement.user_id.in_(tenant_user_ids),
+                StockMovement.branch_id == active_branch_id,
+                Product.user_id.in_(tenant_user_ids),
+                Product.branch_id == active_branch_id,
+            )
         )
-    ).order_by(StockMovement.created_at.desc())
+        .order_by(StockMovement.created_at.desc())
+    )
     
     movements = db.scalars(query).all()
     
@@ -434,7 +470,7 @@ def export_movements_pdf(
         spaceAfter=20,
     )
     subtitle = Paragraph(
-        f"Generated on {datetime.now().strftime('%d %b %Y %H:%M')} | Last {days} days | {len(filtered_movements)} records",
+        f"Generated on {datetime.now().strftime('%d %b %Y %H:%M')} | {range_label} | {len(filtered_movements)} records",
         subtitle_style,
     )
     elements.append(subtitle)

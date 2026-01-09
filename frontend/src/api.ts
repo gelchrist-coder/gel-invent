@@ -563,22 +563,50 @@ export async function updateSystemSettings(payload: SystemSettings): Promise<Sys
   });
 }
 
-export async function fetchAllMovements(days: number = 30, reason?: string): Promise<JsonArray> {
-  const cacheKey = `movements:${days}:${reason || ""}`;
+export type MovementsQuery = {
+  days?: number;
+  reason?: string;
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+};
+
+export async function fetchAllMovements(query: MovementsQuery = {}): Promise<JsonArray> {
+  const days = query.days ?? 30;
+  const reason = query.reason;
+  const startDate = query.startDate;
+  const endDate = query.endDate;
+
+  const cacheKey = `movements:${startDate || ""}:${endDate || ""}:${days}:${reason || ""}`;
   const cached = getCached<JsonArray>(cacheKey);
   if (cached && isCacheFresh(cacheKey)) {
     return cached;
   }
-  
-  const params = new URLSearchParams({ days: days.toString() });
+
+  const params = new URLSearchParams();
+  if (startDate || endDate) {
+    if (startDate) params.append("start_date", startDate);
+    if (endDate) params.append("end_date", endDate);
+  } else {
+    params.append("days", days.toString());
+  }
   if (reason) params.append("reason", reason);
+
   const data = await jsonRequest<JsonArray>(`/inventory/movements?${params.toString()}`);
   setCache(cacheKey, data);
   return data;
 }
 
-export async function exportMovementsPdf(days: number = 30, movementType?: string): Promise<Blob> {
-  const params = new URLSearchParams({ days: days.toString() });
+export async function exportMovementsPdf(
+  query: { days?: number; startDate?: string; endDate?: string } = {},
+  movementType?: string,
+): Promise<Blob> {
+  const params = new URLSearchParams();
+  if (query.startDate || query.endDate) {
+    if (query.startDate) params.append("start_date", query.startDate);
+    if (query.endDate) params.append("end_date", query.endDate);
+  } else {
+    params.append("days", String(query.days ?? 30));
+  }
   if (movementType && movementType !== "all") {
     params.append("movement_type", movementType);
   }
