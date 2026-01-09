@@ -150,6 +150,10 @@ export default function Layout({
   // Filter navigation items based on user role
   const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || userRole === "Admin");
 
+  const activeBranchName =
+    branches?.find((b) => b.id === (activeBranchId ?? branches?.[0]?.id))?.name ??
+    branches?.[0]?.name;
+
   // On desktop: collapsed by default, expands on hover
   const isExpanded = isMobile || sidebarHovered;
   const sidebarWidth = isMobile ? 260 : (isExpanded ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH);
@@ -244,30 +248,55 @@ export default function Layout({
           )}
         </div>
 
-        {/* Branch Selector for Mobile */}
-        {isMobile && userRole === "Admin" && onChangeBranch && branches && branches.length > 0 && (
+        {/* Branch Selector / Indicator (Sidebar) */}
+        {isExpanded && branches && branches.length > 0 && (
           <div style={{ padding: "0 16px", marginBottom: 16 }}>
-            <select
-              value={activeBranchId ?? branches[0]?.id}
-              onChange={(e) => onChangeBranch?.(Number(e.target.value))}
-              style={{
-                width: "100%",
-                height: 36,
-                borderRadius: 8,
-                border: "1px solid rgba(255,255,255,0.2)",
-                background: "rgba(255,255,255,0.1)",
-                padding: "0 10px",
-                fontSize: 13,
-                color: "#fff",
-              }}
-              aria-label="Select branch"
-            >
-              {branches.map((b) => (
-                <option key={b.id} value={b.id} style={{ color: "#0b1021" }}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
+            <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 6, letterSpacing: 0.2 }}>Branch</div>
+
+            {userRole === "Admin" && onChangeBranch && branches.length > 1 ? (
+              <select
+                value={activeBranchId ?? branches[0]?.id}
+                onChange={(e) => onChangeBranch?.(Number(e.target.value))}
+                style={{
+                  width: "100%",
+                  height: 36,
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  background: "rgba(255,255,255,0.1)",
+                  padding: "0 10px",
+                  fontSize: 13,
+                  color: "#fff",
+                }}
+                aria-label="Select branch"
+              >
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id} style={{ color: "#0b1021" }}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div
+                style={{
+                  width: "100%",
+                  minHeight: 36,
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  background: "rgba(255,255,255,0.08)",
+                  padding: "8px 10px",
+                  fontSize: 13,
+                  color: "#fff",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  display: "flex",
+                  alignItems: "center",
+                }}
+                title={activeBranchName}
+              >
+                {activeBranchName ?? "Branch"}
+              </div>
+            )}
           </div>
         )}
 

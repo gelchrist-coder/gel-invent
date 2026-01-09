@@ -51,9 +51,10 @@ export default function TopBar({
         height: 70,
         background: "#ffffff",
         borderBottom: "1px solid #e6e9f2",
-        display: "flex",
+        display: isMobile ? "flex" : "grid",
+        gridTemplateColumns: isMobile ? undefined : "1fr auto 1fr",
         alignItems: "center",
-        justifyContent: "space-between",
+        justifyContent: isMobile ? "space-between" : undefined,
         padding: isMobile ? "0 16px" : "0 32px",
         boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
         position: "sticky",
@@ -61,9 +62,9 @@ export default function TopBar({
         zIndex: 100,
       }}
     >
-      {/* Left - Menu Button (mobile) + Business Name */}
-      <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 12 }}>
-        {isMobile && onMenuClick && (
+      {/* Left - Menu Button (mobile) */}
+      <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 12, justifyContent: "flex-start" }}>
+        {isMobile && onMenuClick ? (
           <button
             onClick={onMenuClick}
             style={{
@@ -81,71 +82,37 @@ export default function TopBar({
             <span style={{ width: 20, height: 2, background: "#0b1021", borderRadius: 1 }} />
             <span style={{ width: 20, height: 2, background: "#0b1021", borderRadius: 1 }} />
           </button>
-        )}
+        ) : null}
+      </div>
+
+      {/* Center - Business Name (desktop) / Business Name (mobile) */}
+      <div
+        style={{
+          minWidth: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: isMobile ? "flex-start" : "center",
+        }}
+      >
         <h1
           style={{
             margin: 0,
-            fontSize: isMobile ? 18 : 22,
-            fontWeight: 700,
+            fontSize: isMobile ? 18 : 34,
+            fontWeight: 800,
             background: "linear-gradient(120deg, #1f7aff, #8246ff)",
             WebkitBackgroundClip: "text",
             WebkitTextFillColor: "transparent",
             backgroundClip: "text",
-            letterSpacing: "-0.5px",
+            letterSpacing: "-0.6px",
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
-            maxWidth: isMobile ? 160 : 520,
+            maxWidth: isMobile ? 160 : 720,
           }}
           title={businessName}
         >
           {businessName}
         </h1>
-
-        {!isMobile && userRole === "Admin" && onChangeBranch && branches && branches.length > 1 ? (
-          <select
-            value={activeBranchId ?? branches[0]?.id}
-            onChange={(e) => onChangeBranch?.(Number(e.target.value))}
-            style={{
-              height: 36,
-              borderRadius: 10,
-              border: "1px solid #e6e9f2",
-              background: "#ffffff",
-              padding: "0 10px",
-              fontSize: 13,
-              color: "#0b1021",
-              maxWidth: 220,
-            }}
-            aria-label="Select branch"
-          >
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        ) : !isMobile && branches && branches.length > 1 ? (
-          <div
-            style={{
-              height: 36,
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "0 10px",
-              borderRadius: 10,
-              border: "1px solid #e6e9f2",
-              background: "#ffffff",
-              fontSize: 13,
-              color: "#0b1021",
-              maxWidth: 240,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-            title={branches.find((b) => b.id === (activeBranchId ?? branches[0]?.id))?.name}
-          >
-            {branches.find((b) => b.id === (activeBranchId ?? branches[0]?.id))?.name ?? branches[0]?.name ?? "Branch"}
-          </div>
-        ) : null}
       </div>
 
       {/* Right - User Info */}
