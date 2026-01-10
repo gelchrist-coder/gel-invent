@@ -184,20 +184,26 @@ export default function Sales() {
     const total = pendingSales.reduce((sum, sale) => sum + (Number(sale.total_price) || 0), 0);
     const customerName = pendingSales[0]?.customer_name;
     const paymentMethod = pendingSales[0]?.payment_method ?? "cash";
-    const amountPaid = Number(pendingSales[0]?.amount_paid) || 0;
-    const remainingBalance = paymentMethod === "credit" ? total - amountPaid : 0;
+    const totalPaid = pendingSales.reduce((sum, sale) => sum + (Number(sale.amount_paid) || 0), 0);
+    const receivedMethod = pendingSales.find((s) => s.partial_payment_method)?.partial_payment_method;
+    const remainingBalance = paymentMethod === "credit" ? Math.max(0, total - totalPaid) : 0;
 
     // Build items HTML
     const itemsHTML = pendingSales
       .map((sale) => {
         const product = productById.get(sale.product_id);
         if (!product) return "";
-        const quantity = Number(sale.quantity) || 0;
+
+        const isPack = sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number";
+        const qtyDisplay = isPack ? sale.pack_quantity : Number(sale.quantity) || 0;
+        const qtyLabel = isPack ? " pack" : "";
+
         const unitPrice = Number(sale.unit_price) || 0;
-        const lineTotal = Number(sale.total_price) || quantity * unitPrice;
+        const lineTotal = Number(sale.total_price) || 0;
+
         return `
           <div class="item-row"><div><strong>${product.name}</strong></div></div>
-          <div class="item-row"><div>${quantity} × GHS ${unitPrice.toFixed(2)}</div><div>GHS ${lineTotal.toFixed(2)}</div></div>
+          <div class="item-row"><div>${qtyDisplay}${qtyLabel} × GHS ${unitPrice.toFixed(2)}</div><div>GHS ${lineTotal.toFixed(2)}</div></div>
         `;
       })
       .join("");
@@ -236,8 +242,9 @@ export default function Sales() {
           <div class="item-row"><div>Payment:</div><div>${paymentMethod.toUpperCase()}</div></div>
           ${paymentMethod === 'credit' ? `
             <div class="item-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #000;">
-              <div>Paid:</div><div>GHS ${amountPaid.toFixed(2)}</div>
+              <div>Paid:</div><div>GHS ${totalPaid.toFixed(2)}</div>
             </div>
+            ${receivedMethod ? `<div class="item-row"><div>Received via:</div><div>${String(receivedMethod).toUpperCase()}</div></div>` : ''}
             <div class="item-row" style="font-weight: bold;">
               <div>Balance:</div><div>GHS ${remainingBalance.toFixed(2)}</div>
             </div>
@@ -649,7 +656,9 @@ export default function Sales() {
                               {product?.name}
                             </div>
                             <div style={{ fontSize: 13, color: "#6b7280" }}>
-                              {sale.quantity} × GHS {sale.unit_price.toFixed(2)}
+                              {sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number"
+                                ? `${sale.pack_quantity} pack`
+                                : sale.quantity} × GHS {Number(sale.unit_price).toFixed(2)}
                             </div>
                           </div>
                           <div style={{ 
