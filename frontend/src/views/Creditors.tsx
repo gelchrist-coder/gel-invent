@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import CreditorList from "../components/CreditorList";
 import CreditorForm from "../components/CreditorForm";
 import CreditorDetails from "../components/CreditorDetails";
@@ -40,6 +40,18 @@ export default function Creditors() {
   const handleSuccess = () => {
     handleRefresh();
   };
+
+  useEffect(() => {
+    const handler = () => {
+      setSelectedCreditor(null);
+      setShowEditModal(false);
+      setShowAddModal(false);
+      handleRefresh();
+    };
+    window.addEventListener("activeBranchChanged", handler as EventListener);
+    return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="app-shell">

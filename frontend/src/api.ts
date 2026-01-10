@@ -611,15 +611,7 @@ export async function exportMovementsPdf(
     params.append("movement_type", movementType);
   }
   
-  const headers: Record<string, string> = {};
-  const token = localStorage.getItem("token");
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-  const branchId = localStorage.getItem("activeBranchId");
-  if (branchId) {
-    headers["X-Branch-ID"] = branchId;
-  }
+  const headers = buildAuthHeaders();
   
   const resp = await fetch(`${API_BASE}/inventory/movements/export-pdf?${params.toString()}`, {
     method: "GET",

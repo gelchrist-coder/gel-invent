@@ -69,6 +69,15 @@ export default function Sales() {
   }, []);
 
   useEffect(() => {
+    const handler = () => {
+      void loadData();
+    };
+    window.addEventListener("activeBranchChanged", handler as EventListener);
+    return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     const handler = () => setOutboxCount(getSalesOutboxCount());
     window.addEventListener("offlineOutboxChanged", handler);
     window.addEventListener("online", handler);

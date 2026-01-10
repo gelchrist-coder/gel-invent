@@ -70,6 +70,15 @@ export default function Inventory() {
     }
   }, [isAdmin, loadData]);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    const handler = () => {
+      void loadData();
+    };
+    window.addEventListener("activeBranchChanged", handler as EventListener);
+    return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
+  }, [isAdmin, loadData]);
+
   const handleExportPdf = async () => {
     setExporting(true);
     try {

@@ -60,6 +60,36 @@ export default function Dashboard({ onNavigate }: Props) {
   const isAdmin = userRole === "Admin";
   const token = localStorage.getItem("token");
 
+  const reloadDashboardData = async () => {
+    if (!token) {
+      setLoading(false);
+      setDashboardLoading(false);
+      return;
+    }
+
+    try {
+      const data = await fetchProducts();
+      setProducts(data);
+    } finally {
+      setLoading(false);
+    }
+
+    // Only fetch dashboard if admin
+    if (!isAdmin) {
+      setDashboardLoading(false);
+      return;
+    }
+    setDashboardLoading(true);
+    try {
+      const data = await fetchSalesDashboard(topProductsDate || undefined);
+      setDashboardData(data);
+    } catch (error) {
+      console.error("Error loading dashboard:", error);
+    } finally {
+      setDashboardLoading(false);
+    }
+  };
+
   useEffect(() => {
     // Only fetch products if authenticated
     if (!token) {
@@ -77,6 +107,15 @@ export default function Dashboard({ onNavigate }: Props) {
     };
     loadData();
   }, [token]);
+
+  useEffect(() => {
+    const handler = () => {
+      void reloadDashboardData();
+    };
+    window.addEventListener("activeBranchChanged", handler as EventListener);
+    return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, isAdmin, topProductsDate]);
 
   useEffect(() => {
     if (!token) return;
