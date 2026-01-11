@@ -57,7 +57,11 @@ type InventoryAnalytics = {
     sales: number;
   };
   total_stock_left: number;
-  owner_movement_totals: {
+  movement_totals: {
+    stock_in: number;
+    stock_out: number;
+  };
+  owner_movement_totals?: {
     stock_in: number;
     stock_out: number;
   };
@@ -176,7 +180,7 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
         </div>
       </div>
 
-      {/* Owner Stock In */}
+      {/* Stock In */}
       <div
         style={{
           backgroundColor: "white",
@@ -201,15 +205,15 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
             <PackageIcon />
           </div>
           <div>
-            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Owner Stock In</p>
+            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Stock In</p>
             <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#059669" }}>
-              +{formatQty(analytics.owner_movement_totals?.stock_in ?? 0)}
+              +{formatQty(analytics.movement_totals?.stock_in ?? 0)}
             </p>
           </div>
         </div>
       </div>
 
-      {/* Owner Stock Out */}
+      {/* Stock Out */}
       <div
         style={{
           backgroundColor: "white",
@@ -234,9 +238,9 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
             <PackageIcon />
           </div>
           <div>
-            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Owner Stock Out</p>
+            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Stock Out</p>
             <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#dc2626" }}>
-              -{formatQty(analytics.owner_movement_totals?.stock_out ?? 0)}
+              -{formatQty(analytics.movement_totals?.stock_out ?? 0)}
             </p>
           </div>
         </div>

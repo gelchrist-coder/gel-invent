@@ -224,6 +224,23 @@ def get_inventory_analytics(
         else:
             movement_summary["stock_out"] += abs(change)
 
+    # All-time movement totals (this branch, all tenant users).
+    all_time_in_out = db.execute(
+        select(
+            func.coalesce(
+                func.sum(case((StockMovement.change > 0, StockMovement.change), else_=0)),
+                0,
+            ).label("stock_in"),
+            func.coalesce(
+                func.sum(case((StockMovement.change < 0, -StockMovement.change), else_=0)),
+                0,
+            ).label("stock_out"),
+        ).where(
+            StockMovement.user_id.in_(tenant_user_ids),
+            StockMovement.branch_id == active_branch_id,
+        )
+    ).one()
+
     # Owner-only movement totals (all-time) for this branch.
     owner_in_out = db.execute(
         select(
@@ -247,6 +264,10 @@ def get_inventory_analytics(
         "expiring_products": sorted(expiring_batches, key=lambda x: x["days_to_expiry"]),
         "movement_summary": movement_summary,
         "total_stock_left": float(total_stock_left),
+        "movement_totals": {
+            "stock_in": float(all_time_in_out.stock_in),
+            "stock_out": float(all_time_in_out.stock_out),
+        },
         "owner_movement_totals": {
             "stock_in": float(owner_in_out.stock_in),
             "stock_out": float(owner_in_out.stock_out),
