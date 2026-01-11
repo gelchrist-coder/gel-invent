@@ -47,6 +47,12 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
     }
   };
 
+  const outstandingFor = (amount: number) => {
+    const n = Number(amount);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, n);
+  };
+
   const filteredCreditors = creditors.filter(
     (creditor) =>
       creditor.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -71,8 +77,6 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
       currency: "GHS",
     }).format(amount);
   };
-
-  const outstandingFor = (amount: number) => Math.max(0, amount);
 
   if (loading) {
     return (
