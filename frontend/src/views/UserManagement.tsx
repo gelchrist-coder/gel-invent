@@ -19,6 +19,12 @@ export default function UserManagement() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [branchName, setBranchName] = useState("");
   const [branchError, setBranchError] = useState("");
+
+  const isMainBranchName = (name: string | undefined | null) =>
+    String(name ?? "").trim().toLowerCase() === "main branch";
+
+  const hasNonMainBranch = branches.some((b) => !isMainBranchName(b.name));
+  const visibleBranches = hasNonMainBranch ? branches.filter((b) => !isMainBranchName(b.name)) : branches;
   
   // Check if current user is Admin
   const currentUser = localStorage.getItem("user");
@@ -45,7 +51,9 @@ export default function UserManagement() {
       // Default employee branch selection to first branch if not set.
       setFormData((prev) => {
         if (prev.branch_id !== "") return prev;
-        const nextId = data[0]?.id ?? "";
+        const hasNonMain = data.some((b) => !isMainBranchName(b.name));
+        const preferred = hasNonMain ? data.find((b) => !isMainBranchName(b.name)) : data[0];
+        const nextId = preferred?.id ?? "";
         return { ...prev, branch_id: nextId };
       });
     } catch (err) {
@@ -291,7 +299,7 @@ export default function UserManagement() {
             + Create Branch
           </button>
           <div style={{ color: "#5f6475", fontSize: 13 }}>
-            Current: {branches.map((b) => b.name).join(", ") || "No branches"}
+            Current: {visibleBranches.map((b) => b.name).join(", ") || "No branches"}
           </div>
         </div>
         {branchError && <div style={{ marginTop: 10, color: "#c33", fontSize: 13 }}>{branchError}</div>}
@@ -405,10 +413,10 @@ export default function UserManagement() {
                   fontSize: 14,
                 }}
               >
-                {branches.length === 0 ? (
+                {visibleBranches.length === 0 ? (
                   <option value="">{branches[0]?.name ?? "Select Branch"}</option>
                 ) : (
-                  branches.map((b) => (
+                  visibleBranches.map((b) => (
                     <option key={b.id} value={String(b.id)}>
                       {b.name}
                     </option>
@@ -515,11 +523,16 @@ export default function UserManagement() {
                       {branches.length === 0 ? (
                         <option value={String(employee.branch_id ?? "")}>Current Branch</option>
                       ) : (
-                        branches.map((b) => (
-                          <option key={b.id} value={String(b.id)}>
-                            {b.name}
-                          </option>
-                        ))
+                        (() => {
+                          const current = branches.find((b) => b.id === employee.branch_id);
+                          const shouldIncludeCurrent = current && !visibleBranches.some((b) => b.id === current.id);
+                          const options = shouldIncludeCurrent ? [...visibleBranches, current] : visibleBranches;
+                          return options.map((b) => (
+                            <option key={b.id} value={String(b.id)}>
+                              {b.name}
+                            </option>
+                          ));
+                        })()
                       )}
                     </select>
                   </td>
