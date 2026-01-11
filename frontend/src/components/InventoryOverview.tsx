@@ -81,6 +81,9 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
 
   const formatQty = (value: number) => value.toFixed(2);
 
+  const stockIn = analytics.movement_totals?.stock_in ?? 0;
+  const stockOut = analytics.movement_totals?.stock_out ?? 0;
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
       {/* Total Products */}
@@ -207,7 +210,7 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
           <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Stock In</p>
             <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#059669" }}>
-              +{formatQty(analytics.movement_totals?.stock_in ?? 0)}
+              {stockIn === 0 ? formatQty(0) : `+${formatQty(stockIn)}`}
             </p>
           </div>
         </div>
@@ -240,7 +243,7 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
           <div>
             <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Stock Out</p>
             <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#dc2626" }}>
-              -{formatQty(analytics.movement_totals?.stock_out ?? 0)}
+              {stockOut === 0 ? formatQty(0) : `-${formatQty(stockOut)}`}
             </p>
           </div>
         </div>

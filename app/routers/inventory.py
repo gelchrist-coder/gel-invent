@@ -78,6 +78,8 @@ def get_inventory_analytics(
     expiring_batches = []
     total_stock_value = Decimal(0)
     total_stock_left = Decimal(0)
+    all_time_stock_in = Decimal(0)
+    all_time_stock_out = Decimal(0)
     
     today = datetime.now().date()
     
@@ -93,6 +95,13 @@ def get_inventory_analytics(
             )
             .order_by(StockMovement.created_at.desc())
         ).all()
+
+        # Accumulate all-time in/out totals for this branch.
+        for m in movements:
+            if m.change > 0:
+                all_time_stock_in += m.change
+            elif m.change < 0:
+                all_time_stock_out += -m.change
         
         # Calculate total stock
         total_stock_raw = sum(m.change for m in movements)
@@ -224,23 +233,6 @@ def get_inventory_analytics(
         else:
             movement_summary["stock_out"] += abs(change)
 
-    # All-time movement totals (this branch, all tenant users).
-    all_time_in_out = db.execute(
-        select(
-            func.coalesce(
-                func.sum(case((StockMovement.change > 0, StockMovement.change), else_=0)),
-                0,
-            ).label("stock_in"),
-            func.coalesce(
-                func.sum(case((StockMovement.change < 0, -StockMovement.change), else_=0)),
-                0,
-            ).label("stock_out"),
-        ).where(
-            StockMovement.user_id.in_(tenant_user_ids),
-            StockMovement.branch_id == active_branch_id,
-        )
-    ).one()
-
     # Owner-only movement totals (all-time) for this branch.
     owner_in_out = db.execute(
         select(
@@ -265,8 +257,8 @@ def get_inventory_analytics(
         "movement_summary": movement_summary,
         "total_stock_left": float(total_stock_left),
         "movement_totals": {
-            "stock_in": float(all_time_in_out.stock_in),
-            "stock_out": float(all_time_in_out.stock_out),
+            "stock_in": float(all_time_stock_in),
+            "stock_out": float(all_time_stock_out),
         },
         "owner_movement_totals": {
             "stock_in": float(owner_in_out.stock_in),
