@@ -54,6 +54,17 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
       creditor.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const sortedCreditors = [...filteredCreditors].sort((a, b) => {
+    const aDebt = outstandingFor(a.actual_debt);
+    const bDebt = outstandingFor(b.actual_debt);
+    const aOwes = aDebt > 0;
+    const bOwes = bDebt > 0;
+
+    if (aOwes !== bOwes) return aOwes ? -1 : 1;
+    if (bDebt !== aDebt) return bDebt - aDebt;
+    return a.name.localeCompare(b.name);
+  });
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-GH", {
       style: "currency",
@@ -153,14 +164,14 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
             </tr>
           </thead>
           <tbody>
-            {filteredCreditors.length === 0 ? (
+            {sortedCreditors.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>
                   {searchTerm ? "No creditors found matching your search." : "No creditors yet. Click 'Add Creditor' to get started."}
                 </td>
               </tr>
             ) : (
-              filteredCreditors.map((creditor) => (
+              sortedCreditors.map((creditor) => (
                 <tr
                   key={creditor.id}
                   style={{
