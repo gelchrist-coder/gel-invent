@@ -6,7 +6,7 @@ function normalizeBaseUrl(url: string): string {
 
 // API base URL (configure via VITE_API_URL on Vercel/Netlify/etc)
 const API_BASE = normalizeBaseUrl(
-  (import.meta.env.VITE_API_URL as string | undefined) ?? "https://gel-invent-production.up.railway.app"
+  (import.meta.env.VITE_API_URL as string | undefined) ?? "https://your-backend.vercel.app"
 );
 
 // Export for use in other components
