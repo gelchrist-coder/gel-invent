@@ -1,6 +1,7 @@
 import os
 import asyncio
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -265,6 +266,17 @@ async def on_startup() -> None:
 async def root() -> dict[str, str]:
     """Root endpoint - also serves as health check."""
     return {"message": "Gel Invent API", "status": "healthy"}
+
+
+@app.get("/health/db")
+async def health_db() -> JSONResponse:
+    """Database connectivity check."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return JSONResponse(status_code=200, content={"status": "ok"})
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"status": "error", "detail": str(exc)})
 
 
 @app.get("/health")
