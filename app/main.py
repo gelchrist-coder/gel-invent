@@ -214,17 +214,21 @@ def _run_startup_migrations_sync() -> None:
 # Allow all origins in production (Railway/Vercel), specific origins in development
 is_production_host = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("VERCEL"))
 
-allowed_origins = [
-    "https://gel-invent.vercel.app",
-    "https://*.vercel.app",
-    "http://127.0.0.1:5173",
-    "http://localhost:5173",
-    "http://127.0.0.1:5174",
-    "http://localhost:5174",
-] if not is_production_host else ["*"]
+env_allowed_origins = os.getenv("ALLOWED_ORIGINS")
+if env_allowed_origins:
+    allowed_origins = [o.strip() for o in env_allowed_origins.split(",") if o.strip()]
+else:
+    allowed_origins = [
+        "https://gel-invent.vercel.app",
+        "https://*.vercel.app",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+    ] if not is_production_host else ["*"]
 
 # When using allow_origins=["*"], cannot use allow_credentials=True
-allow_credentials = False if is_production_host else True
+allow_credentials = False if (is_production_host and allowed_origins == ["*"]) else True
 
 app.add_middleware(
     CORSMiddleware,
