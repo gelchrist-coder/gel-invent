@@ -102,6 +102,11 @@ export default function Profile() {
   const [branchSaving, setBranchSaving] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
 
+  const managedBranches = useMemo(
+    () => branches.filter((branch) => branch.name !== "Main Branch"),
+    [branches],
+  );
+
   const todayStamp = useMemo(() => {
     const d = new Date();
     const pad = (n: number) => String(n).padStart(2, "0");
@@ -899,7 +904,7 @@ export default function Profile() {
             </div>
 
             {/* Branch Management */}
-            {branches.length > 0 && (
+            {isAdmin && (
               <div
                 style={{
                   borderTop: "1px solid #e5e7eb",
@@ -909,8 +914,22 @@ export default function Profile() {
                 <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 16px", color: "#374151" }}>
                   Branch Management
                 </h3>
+                {managedBranches.length === 0 ? (
+                  <div
+                    style={{
+                      padding: 14,
+                      background: "#f9fafb",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 8,
+                      color: "#6b7280",
+                      fontSize: 14,
+                    }}
+                  >
+                    No extra branches created yet.
+                  </div>
+                ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {branches.map((branch) => (
+                  {managedBranches.map((branch) => (
                     <div
                       key={branch.id}
                       style={{
@@ -993,6 +1012,7 @@ export default function Profile() {
                     </div>
                   )}
                 </div>
+                )}
               </div>
             )}
 
