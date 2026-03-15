@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { API_BASE } from "../api";
 
 type LoginProps = {
@@ -61,6 +61,8 @@ function PasswordInput({
 
 export default function Login({ onLogin }: LoginProps) {
   const [isSignUp, setIsSignUp] = useState(false);
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const [formPanelAnimation, setFormPanelAnimation] = useState<"" | "auth-panel-enter-signin" | "auth-panel-enter-signup">("");
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -87,6 +89,31 @@ export default function Login({ onLogin }: LoginProps) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const next = Math.min(window.scrollY / 700, 1);
+      setScrollProgress(next);
+    };
+
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const switchAuthMode = (nextIsSignUp: boolean) => {
+    if (nextIsSignUp === isSignUp) return;
+
+    setIsSignUp(nextIsSignUp);
+    setShowReset(false);
+    setError("");
+    setInfo("");
+    setFormPanelAnimation(nextIsSignUp ? "auth-panel-enter-signup" : "auth-panel-enter-signin");
+
+    window.setTimeout(() => {
+      setFormPanelAnimation("");
+    }, 380);
+  };
 
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
@@ -370,7 +397,7 @@ export default function Login({ onLogin }: LoginProps) {
   };
 
   return (
-    <div className="auth-page">
+    <div className="auth-page" style={{ ["--scroll-progress" as string]: scrollProgress } as React.CSSProperties}>
       <header className="auth-top-nav">
         <div className="auth-brand-wrap">
           <div className="auth-brand-mark">GI</div>
@@ -400,14 +427,14 @@ export default function Login({ onLogin }: LoginProps) {
             <button
               type="button"
               className="auth-primary-cta"
-              onClick={() => setIsSignUp(true)}
+              onClick={() => switchAuthMode(true)}
             >
               Start Free
             </button>
             <button
               type="button"
               className="auth-secondary-cta"
-              onClick={() => setIsSignUp(false)}
+              onClick={() => switchAuthMode(false)}
             >
               Explore Sign In
             </button>
@@ -438,6 +465,27 @@ export default function Login({ onLogin }: LoginProps) {
               <button type="button" className="auth-magic-btn">Smart Sign-in</button>
             </div>
 
+
+              <div className="auth-mode-switch" role="tablist" aria-label="Authentication mode">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={!isSignUp}
+                  className={`auth-mode-btn ${!isSignUp ? "active" : ""}`}
+                  onClick={() => switchAuthMode(false)}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={isSignUp}
+                  className={`auth-mode-btn ${isSignUp ? "active" : ""}`}
+                  onClick={() => switchAuthMode(true)}
+                >
+                  Sign Up
+                </button>
+              </div>
             <h2>{isSignUp ? "Create your account" : "Sign in"}</h2>
             <p>
               {isSignUp
@@ -447,6 +495,7 @@ export default function Login({ onLogin }: LoginProps) {
 
             <form onSubmit={handleSubmit}>
 
+            <div className={`auth-form-shell ${formPanelAnimation}`}>
           {error && (
             <div
               style={{
@@ -893,46 +942,14 @@ export default function Login({ onLogin }: LoginProps) {
           {/* Toggle Sign In/Sign Up */}
           {!showReset && (
           <div style={{ marginTop: 24, textAlign: "center" }}>
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setError("");
-                setInfo("");
-                setFormData({
-                  name: "",
-                  email: "",
-                  password: "",
-                  confirmPassword: "",
-                  businessName: "",
-                  categories: [],
-                  hasBranches: false,
-                  branches: [],
-                });
-                setCategoryInput("");
-                setBranchInput("");
-                setShowReset(false);
-                setResetEmail("");
-                setResetCode("");
-                setResetPassword("");
-                setResetConfirmPassword("");
-              }}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "#1f7aff",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-                textDecoration: "underline",
-              }}
-            >
+            <span style={{ color: "#6b7280", fontSize: 14 }}>
               {isSignUp
                 ? "Already have an account? Sign In"
                 : "Don't have an account? Sign Up"}
-            </button>
+            </span>
           </div>
           )}
+          </div>
             </form>
           </div>
 

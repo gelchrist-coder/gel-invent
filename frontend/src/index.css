@@ -269,6 +269,7 @@ label {
 }
 
 .auth-page {
+  --scroll-progress: 0;
   min-height: 100vh;
   background:
     radial-gradient(circle at 10% 10%, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0) 45%),
@@ -342,6 +343,8 @@ label {
   display: grid;
   grid-template-columns: 1.1fr 0.9fr;
   gap: 20px;
+  transform: translateY(calc(var(--scroll-progress) * -26px));
+  transition: transform 120ms linear;
 }
 
 .auth-kicker {
@@ -404,6 +407,8 @@ label {
   min-height: 340px;
   border-radius: 18px;
   background: linear-gradient(180deg, #d6b6ad 0%, #f0dbd4 65%);
+  transform: translateY(calc(var(--scroll-progress) * -12px));
+  transition: transform 140ms linear;
 }
 
 .auth-hero-card {
@@ -468,6 +473,71 @@ label {
   overflow: hidden;
   display: grid;
   grid-template-columns: 1fr 0.9fr;
+  transform: translateY(calc(var(--scroll-progress) * -14px));
+  transition: transform 120ms linear;
+}
+
+.auth-mode-switch {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  background: #f0f3fa;
+  border: 1px solid #d9e0ee;
+  border-radius: 10px;
+  padding: 5px;
+}
+
+.auth-mode-btn {
+  border: none;
+  border-radius: 8px;
+  height: 38px;
+  background: transparent;
+  color: #3d465d;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, transform 160ms ease;
+}
+
+.auth-mode-btn.active {
+  background: #ffffff;
+  color: #17328f;
+  box-shadow: 0 6px 14px rgba(32, 64, 171, 0.14);
+  transform: translateY(-1px);
+}
+
+.auth-form-shell {
+  will-change: transform, opacity;
+}
+
+.auth-panel-enter-signup {
+  animation: authPanelFromRight 360ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.auth-panel-enter-signin {
+  animation: authPanelFromLeft 360ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+@keyframes authPanelFromRight {
+  0% {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes authPanelFromLeft {
+  0% {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .auth-signin-left {
@@ -606,6 +676,7 @@ label {
   .auth-hero {
     border-radius: 12px;
     padding: 28px 16px;
+    transform: none;
   }
 
   .auth-hero-actions {
@@ -615,6 +686,11 @@ label {
   .auth-signin-left,
   .auth-signin-right {
     padding: 20px 16px;
+  }
+
+  .auth-signin-card,
+  .auth-hero-visual {
+    transform: none;
   }
 
   .auth-signin-left h2 {
@@ -628,5 +704,18 @@ label {
   .auth-hero-card-float-1,
   .auth-hero-card-float-2 {
     width: 150px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-hero,
+  .auth-hero-visual,
+  .auth-signin-card,
+  .auth-mode-btn,
+  .auth-panel-enter-signin,
+  .auth-panel-enter-signup {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
   }
 }
