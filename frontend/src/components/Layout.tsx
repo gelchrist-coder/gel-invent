@@ -85,7 +85,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: <DashboardIcon /> },
   { id: "products", label: "Products", icon: <ProductsIcon /> },
   { id: "sales", label: "Sales", icon: <SalesIcon /> },
-  { id: "inventory", label: "Inventory", icon: <InventoryIcon />, adminOnly: true },
+  { id: "inventory", label: "Inventory", icon: <InventoryIcon /> },
   { id: "revenue", label: "Revenue", icon: <RevenueIcon />, adminOnly: true },
   { id: "reports", label: "Reports", icon: <ReportsIcon />, adminOnly: true },
   { id: "creditors", label: "Creditors", icon: <CreditorsIcon /> },

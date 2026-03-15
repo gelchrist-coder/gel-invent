@@ -22,6 +22,7 @@ type Props = {
   filterCategory: string;
   filterExpiry: string;
   userRole?: string;
+  onOpenInventory: () => void;
 };
 
 export default function ProductList({ 
@@ -33,6 +34,7 @@ export default function ProductList({
   filterCategory,
   filterExpiry,
   userRole = "Admin",
+  onOpenInventory,
 }: Props) {
   const isAdmin = userRole === "Admin";
   const categoryOptions = useAppCategories();
@@ -891,7 +893,7 @@ export default function ProductList({
                 <th style={{ padding: "12px", textAlign: "right", fontWeight: 600, color: "#374151" }}>Selling Price</th>
                 <th style={{ padding: "12px", textAlign: "right", fontWeight: 600, color: "#374151" }}>Profit Margin</th>
                 <th style={{ padding: "12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>Created By</th>
-                <th style={{ padding: "12px", textAlign: "center", fontWeight: 600, color: "#374151", width: "180px" }}>Actions</th>
+                <th style={{ padding: "12px", textAlign: "center", fontWeight: 600, color: "#374151", width: "220px" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -991,7 +993,7 @@ export default function ProductList({
                           </button>
                         )}
                         <button
-                          onClick={() => startAdjustment(p.id, "New Stock")}
+                          onClick={onOpenInventory}
                           disabled={busy}
                           style={{
                             padding: "6px 12px",
@@ -1003,50 +1005,10 @@ export default function ProductList({
                             cursor: busy ? "not-allowed" : "pointer",
                             fontWeight: 500,
                           }}
-                          title="Add new stock"
+                          title="Open Inventory actions"
                         >
-                          New Stock
+                          Inventory Actions
                         </button>
-                        <button
-                          onClick={() => {
-                            setDamageId(p.id);
-                            setDamageForm({ quantity: "", reason: "Damaged", details: "" });
-                          }}
-                          disabled={busy || (stockData[p.id] ?? 0) === 0}
-                          style={{
-                            padding: "6px 12px",
-                            fontSize: 12,
-                            background: "#f59e0b",
-                            color: "white",
-                            border: "none",
-                            borderRadius: 6,
-                            cursor: busy || (stockData[p.id] ?? 0) === 0 ? "not-allowed" : "pointer",
-                            fontWeight: 500,
-                            opacity: (stockData[p.id] ?? 0) === 0 ? 0.5 : 1,
-                          }}
-                          title="Report damaged stock"
-                        >
-                          Damage
-                        </button>
-                        {isAdmin && (
-                          <button
-                            onClick={() => handleDelete(p)}
-                            disabled={busy}
-                            style={{
-                              padding: "6px 12px",
-                              fontSize: 12,
-                              background: "#ef4444",
-                              color: "white",
-                              border: "none",
-                              borderRadius: 6,
-                              cursor: busy ? "not-allowed" : "pointer",
-                              fontWeight: 500,
-                            }}
-                            title="Delete product"
-                          >
-                            Delete
-                          </button>
-                        )}
                       </div>
                     </td>
                   </tr>

@@ -543,6 +543,7 @@ export default function App() {
                 onEdit={handleEditProduct}
                 onDelete={handleDeleteProduct}
                 onStockAdjust={handleStockAdjustment}
+                onOpenInventory={() => setActiveView("inventory")}
                 searchTerm={searchTerm}
                 filterCategory={filterCategory}
                 filterExpiry={filterExpiry}

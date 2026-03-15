@@ -208,7 +208,7 @@ export default function Dashboard({ onNavigate }: Props) {
   const quickActions = [
     { label: "Add Product", icon: "+", color: "#1f7aff", action: "products" },
     { label: "Record Sale", icon: "$", color: "#10b981", action: "sales" },
-    { label: "Stock Movement", icon: "#", color: "#8246ff", action: "inventory", adminOnly: true },
+    { label: "Stock Movement", icon: "#", color: "#8246ff", action: "inventory" },
     { label: "View Reports", icon: "~", color: "#f59e0b", action: "reports", adminOnly: true },
   ].filter(action => !action.adminOnly || isAdmin);
 
