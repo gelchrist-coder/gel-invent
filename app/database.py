@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import NullPool
 
 # Load environment variables from .env file
 load_dotenv()
@@ -29,18 +30,34 @@ class Base(DeclarativeBase):
     """Base declarative class for SQLAlchemy models."""
 
 
-engine = create_engine(
-    DATABASE_URL,
-    echo=False,
-    future=True,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-    pool_recycle=3600,
-    connect_args={
-        "connect_timeout": 10,
-    },
-)
+is_serverless_runtime = bool(os.getenv("VERCEL"))
+
+connect_args = {
+    "connect_timeout": 10,
+    # TCP keepalive settings reduce idle SSL disconnects on managed Postgres.
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 5,
+}
+
+
+engine_kwargs = {
+    "echo": False,
+    "future": True,
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+    "connect_args": connect_args,
+}
+
+if is_serverless_runtime:
+    # Serverless functions are short-lived; avoid reusing stale pooled sockets.
+    engine_kwargs["poolclass"] = NullPool
+else:
+    engine_kwargs["pool_size"] = 5
+    engine_kwargs["max_overflow"] = 10
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
