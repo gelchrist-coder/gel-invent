@@ -212,29 +212,27 @@ def _run_startup_migrations_sync() -> None:
             )
         )
 
-# Allow all origins in production (Railway/Vercel), specific origins in development
-is_production_host = bool(os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("VERCEL"))
-
 env_allowed_origins = os.getenv("ALLOWED_ORIGINS")
 if env_allowed_origins:
     allowed_origins = [o.strip() for o in env_allowed_origins.split(",") if o.strip()]
 else:
     allowed_origins = [
         "https://gel-invent.vercel.app",
-        "https://*.vercel.app",
         "http://127.0.0.1:5173",
         "http://localhost:5173",
         "http://127.0.0.1:5174",
         "http://localhost:5174",
-    ] if not is_production_host else ["*"]
+    ]
 
-# When using allow_origins=["*"], cannot use allow_credentials=True
-allow_credentials = False if (is_production_host and allowed_origins == ["*"]) else True
+# FastAPI CORS does not support wildcard domains in allow_origins (e.g. https://*.vercel.app).
+# Use allow_origin_regex to support Vercel preview deployment URLs.
+allow_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX") or r"^https://gel-invent(-[a-z0-9-]+)?\.vercel\.app$"
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=allow_credentials,
+    allow_origin_regex=allow_origin_regex,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
