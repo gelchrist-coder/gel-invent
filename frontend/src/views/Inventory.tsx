@@ -93,6 +93,10 @@ export default function Inventory() {
 
   const selectedProduct = products.find((p) => p.id === selectedProductId) ?? null;
   const selectedProductStock = selectedProduct ? Math.max(0, Number(selectedProduct.current_stock ?? 0)) : 0;
+  const isNewStockAction = actionType === "new_stock";
+  const isDamageAction = actionType === "damage";
+  const isDeleteAction = actionType === "delete";
+  const isPerishableProduct = usesExpiryTracking && !!selectedProduct?.expiry_date;
 
   const resetActionForm = () => {
     setQuantity("");
@@ -144,6 +148,11 @@ export default function Inventory() {
       return;
     }
 
+    if (isNewStockAction && isPerishableProduct && !expiryDate) {
+      alert("This product is perishable. Please set an expiry date for the new stock batch.");
+      return;
+    }
+
     const reasonPrefix = actionType === "new_stock" ? stockReason : damageReason;
     const reason = notes.trim() ? `${reasonPrefix}: ${notes.trim()}` : reasonPrefix;
     const change = actionType === "new_stock" ? qty : -qty;
@@ -155,9 +164,9 @@ export default function Inventory() {
       await createMovement(selectedProductId, {
         change,
         reason,
-        expiry_date: actionType === "new_stock" ? (expiryDate || null) : null,
-        unit_cost_price: actionType === "new_stock" && Number.isFinite(parsedCost) ? parsedCost : null,
-        unit_selling_price: actionType === "new_stock" && Number.isFinite(parsedSelling) ? parsedSelling : null,
+        expiry_date: isNewStockAction && isPerishableProduct ? (expiryDate || null) : null,
+        unit_cost_price: isNewStockAction && Number.isFinite(parsedCost) ? parsedCost : null,
+        unit_selling_price: isNewStockAction && Number.isFinite(parsedSelling) ? parsedSelling : null,
       });
       resetActionForm();
       await loadData();
@@ -265,11 +274,43 @@ export default function Inventory() {
 
       {/* Stock Actions */}
       <div className="card" style={{ marginBottom: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
-          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Stock Actions</h3>
-          <span style={{ fontSize: 13, color: "#6b7280" }}>
-            Use this section for stock-in, damage, and product delete so every change appears in movement history.
-          </span>
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Stock Actions</h3>
+          <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
+            Select a product, choose what you want to do, then save. Every action is recorded in movement history and reports.
+          </p>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 12,
+            marginBottom: 12,
+            padding: 12,
+            background: "#f8fafc",
+            border: "1px solid #e2e8f0",
+            borderRadius: 10,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Selected product</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
+              {selectedProduct ? `${selectedProduct.name} (${selectedProduct.sku})` : "No product selected"}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current stock</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: selectedProductStock > 0 ? "#059669" : "#dc2626" }}>
+              {selectedProductStock}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Perishability</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: isPerishableProduct ? "#b45309" : "#334155" }}>
+              {isPerishableProduct ? "Perishable (expiry required)" : "Non-perishable (no expiry needed)"}
+            </div>
+          </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
@@ -290,40 +331,87 @@ export default function Inventory() {
             </select>
           </label>
 
-          <label>
+          <div>
             <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Action</span>
-            <select
-              value={actionType}
-              onChange={(e) => setActionType(e.target.value as "new_stock" | "damage" | "delete")}
-              style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
-              disabled={submittingAction}
-            >
-              <option value="new_stock">New Stock</option>
-              <option value="damage">Record Damage/Loss</option>
-              {isAdmin ? <option value="delete">Delete Product</option> : null}
-            </select>
-          </label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => setActionType("new_stock")}
+                disabled={submittingAction}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  background: actionType === "new_stock" ? "#dcfce7" : "white",
+                  color: actionType === "new_stock" ? "#166534" : "#334155",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: submittingAction ? "not-allowed" : "pointer",
+                }}
+              >
+                Add Stock
+              </button>
+              <button
+                type="button"
+                onClick={() => setActionType("damage")}
+                disabled={submittingAction}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  background: actionType === "damage" ? "#fef3c7" : "white",
+                  color: actionType === "damage" ? "#92400e" : "#334155",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: submittingAction ? "not-allowed" : "pointer",
+                }}
+              >
+                Record Damage
+              </button>
+              {isAdmin ? (
+                <button
+                  type="button"
+                  onClick={() => setActionType("delete")}
+                  disabled={submittingAction}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: actionType === "delete" ? "#fee2e2" : "white",
+                    color: actionType === "delete" ? "#b91c1c" : "#334155",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: submittingAction ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Delete Product
+                </button>
+              ) : null}
+            </div>
+          </div>
 
-          {actionType !== "delete" ? (
+          {!isDeleteAction ? (
             <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Quantity</span>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>
+                {isDamageAction ? "Quantity Damaged" : "Quantity Added"}
+              </span>
               <input
                 type="number"
                 min="1"
                 step="1"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                placeholder={actionType === "new_stock" ? "Enter stock added" : "Enter quantity damaged"}
+                placeholder={isNewStockAction ? "Enter stock added" : "Enter quantity damaged"}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
                 disabled={submittingAction}
               />
-              {actionType === "damage" ? (
+              {isDamageAction ? (
                 <small style={{ color: "#6b7280", fontSize: 12 }}>Available stock: {selectedProductStock}</small>
               ) : null}
             </label>
           ) : null}
 
-          {actionType === "new_stock" ? (
+          {isNewStockAction ? (
             <label>
               <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Reason</span>
               <select
@@ -338,7 +426,7 @@ export default function Inventory() {
             </label>
           ) : null}
 
-          {actionType === "damage" ? (
+          {isDamageAction ? (
             <label>
               <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Damage Type</span>
               <select
@@ -355,20 +443,21 @@ export default function Inventory() {
             </label>
           ) : null}
 
-          {actionType === "new_stock" ? (
+          {isNewStockAction && isPerishableProduct ? (
             <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Expiry Date (Optional)</span>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Expiry Date *</span>
               <input
                 type="date"
                 value={expiryDate}
                 onChange={(e) => setExpiryDate(e.target.value)}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
-                disabled={submittingAction || (!usesExpiryTracking && !selectedProduct?.expiry_date)}
+                disabled={submittingAction}
               />
+              <small style={{ color: "#6b7280", fontSize: 12 }}>Required for perishable stock-in.</small>
             </label>
           ) : null}
 
-          {actionType === "new_stock" ? (
+          {isNewStockAction ? (
             <label>
               <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Unit Cost Price (Optional)</span>
               <input
@@ -384,7 +473,7 @@ export default function Inventory() {
             </label>
           ) : null}
 
-          {actionType === "new_stock" ? (
+          {isNewStockAction ? (
             <label>
               <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Unit Selling Price (Optional)</span>
               <input
@@ -400,18 +489,24 @@ export default function Inventory() {
             </label>
           ) : null}
 
-          {actionType !== "delete" ? (
+          {!isDeleteAction ? (
             <label style={{ gridColumn: "1 / -1" }}>
               <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Notes (Optional)</span>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={2}
-                placeholder={actionType === "new_stock" ? "Optional stock note" : "Optional damage details"}
+                placeholder={isNewStockAction ? "Optional stock note" : "Optional damage details"}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14, resize: "vertical" }}
                 disabled={submittingAction}
               />
             </label>
+          ) : null}
+
+          {isDeleteAction ? (
+            <div style={{ gridColumn: "1 / -1", padding: 10, borderRadius: 8, border: "1px solid #fecaca", background: "#fef2f2", color: "#991b1b", fontSize: 13 }}>
+              Deleting a product will permanently remove the product and its stock movement history.
+            </div>
           ) : null}
         </div>
 
@@ -424,7 +519,7 @@ export default function Inventory() {
               borderRadius: 6,
               border: "none",
               backgroundColor:
-                actionType === "delete" ? "#ef4444" : actionType === "damage" ? "#f59e0b" : "#10b981",
+                isDeleteAction ? "#ef4444" : isDamageAction ? "#f59e0b" : "#10b981",
               color: "white",
               cursor: submittingAction || !selectedProductId ? "not-allowed" : "pointer",
               fontWeight: 600,
@@ -433,9 +528,9 @@ export default function Inventory() {
           >
             {submittingAction
               ? "Saving..."
-              : actionType === "delete"
+              : isDeleteAction
                 ? "Delete Product"
-                : actionType === "damage"
+                : isDamageAction
                   ? "Record Damage"
                   : "Add Stock"}
           </button>
