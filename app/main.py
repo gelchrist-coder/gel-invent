@@ -1,12 +1,13 @@
 import os
 import asyncio
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .database import Base, engine
+from .auth import get_current_active_user
 from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns
 from . import models
 
@@ -307,6 +308,39 @@ async def health_check() -> dict[str, str]:
         "status": "healthy",
         "migrations_done": "true" if _startup_migrations_done else "false",
         "migrations_error": _startup_migrations_error or "",
+    }
+
+
+@app.get("/health/runtime")
+async def health_runtime(
+    current_user: models.User = Depends(get_current_active_user),
+) -> dict[str, object]:
+    """Admin-only runtime health/status snapshot for production diagnostics."""
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Admin can access runtime health")
+
+    db_ok = True
+    db_error = ""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:
+        db_ok = False
+        db_error = f"{type(exc).__name__}: {exc}"
+
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "runtime": {
+            "vercel": bool(os.getenv("VERCEL")),
+            "railway_environment": os.getenv("RAILWAY_ENVIRONMENT", ""),
+            "startup_migrations_enabled": _should_run_startup_migrations(),
+            "startup_migrations_done": _startup_migrations_done,
+            "startup_migrations_error": _startup_migrations_error or "",
+        },
+        "database": {
+            "connectivity": "ok" if db_ok else "error",
+            "error": db_error,
+        },
     }
 
 
