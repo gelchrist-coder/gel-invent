@@ -4,10 +4,19 @@ function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
+function resolveApiBaseUrl(): string {
+  const configured = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+
+  // Use same-origin proxy by default so preview/staging deployments avoid CORS issues.
+  if (!configured || configured === "https://your-backend.vercel.app") {
+    return "/api";
+  }
+
+  return configured;
+}
+
 // API base URL (configure via VITE_API_URL on Vercel/Netlify/etc)
-const API_BASE = normalizeBaseUrl(
-  (import.meta.env.VITE_API_URL as string | undefined) ?? "https://your-backend.vercel.app"
-);
+const API_BASE = normalizeBaseUrl(resolveApiBaseUrl());
 
 // Export for use in other components
 export { API_BASE };
