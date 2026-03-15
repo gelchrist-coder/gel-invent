@@ -66,14 +66,22 @@ export default function ProductForm({
 
   const role = userRole;
 
+  const isMainBranchName = (name: string | undefined | null) =>
+    String(name ?? "").trim().toLowerCase() === "main branch";
+
+  const visibleBranches = useMemo(
+    () => (branches ?? []).filter((b) => !isMainBranchName(b.name)),
+    [branches]
+  );
+
   const effectiveBranchId = useMemo(() => {
     if (role === "Admin") {
       if (selectedBranchId != null) return selectedBranchId;
       if (activeBranchId != null) return activeBranchId;
-      return branches?.[0]?.id ?? null;
+      return visibleBranches[0]?.id ?? null;
     }
     return activeBranchId ?? null;
-  }, [role, selectedBranchId, activeBranchId, branches]);
+  }, [role, selectedBranchId, activeBranchId, visibleBranches]);
 
   const generateSKU = () => {
     const prefix = form.category?.substring(0, 3).toUpperCase() || "PRD";
@@ -482,13 +490,13 @@ export default function ProductForm({
               </label>
               <label>
                 Branch
-                {role === "Admin" && branches && branches.length > 0 ? (
+                {role === "Admin" && visibleBranches.length > 0 ? (
                   <select
                     className="input"
-                    value={String(effectiveBranchId ?? branches[0].id)}
+                    value={String(effectiveBranchId ?? visibleBranches[0].id)}
                     onChange={(e) => setSelectedBranchId(Number(e.target.value))}
                   >
-                    {branches.map((b) => (
+                    {visibleBranches.map((b) => (
                       <option key={b.id} value={String(b.id)}>
                         {b.name}
                       </option>
@@ -498,9 +506,9 @@ export default function ProductForm({
                   <input
                     className="input"
                     value={
-                      branches && branches.length > 0
-                        ? (branches.find((b) => b.id === effectiveBranchId)?.name ?? branches[0]?.name ?? "Branch")
-                        : "Branch"
+                      visibleBranches.length > 0
+                        ? (visibleBranches.find((b) => b.id === effectiveBranchId)?.name ?? visibleBranches[0]?.name ?? "Branch")
+                        : "No branch available"
                     }
                     readOnly
                   />
