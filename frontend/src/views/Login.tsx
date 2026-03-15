@@ -370,55 +370,82 @@ export default function Login({ onLogin }: LoginProps) {
   };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-        padding: 20,
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 440,
-          background: "white",
-          borderRadius: 16,
-          boxShadow: "0 20px 60px rgba(0, 0, 0, 0.3)",
-          overflow: "hidden",
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            background: "linear-gradient(135deg, #1f7aff, #8246ff)",
-            padding: "32px 24px",
-            textAlign: "center",
-            color: "white",
-          }}
-        >
-          <h1 style={{ margin: "0 0 8px", fontSize: 32, fontWeight: 700 }}>
-            Gel Invent
-          </h1>
-          <p style={{ margin: 0, opacity: 0.9, fontSize: 15 }}>
-            Inventory Management System
-          </p>
-        </div>
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} style={{ padding: "32px 24px" }}>
-          <div style={{ marginBottom: 24, textAlign: "center" }}>
-            <h2 style={{ margin: "0 0 8px", fontSize: 24, fontWeight: 600, color: "#1a2235" }}>
-              {isSignUp ? "Create Account" : "Welcome Back"}
-            </h2>
-            <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>
-              {isSignUp
-                ? "Sign up to start managing your inventory"
-                : "Sign in to continue to your account"}
-            </p>
+    <div className="auth-page">
+      <header className="auth-top-nav">
+        <div className="auth-brand-wrap">
+          <div className="auth-brand-mark">GI</div>
+          <div>
+            <p className="auth-brand-title">Gel Invent</p>
+            <p className="auth-brand-subtitle">Inventory Management System</p>
           </div>
+        </div>
+        <nav className="auth-top-links" aria-label="Marketing links">
+          <a href="#features">Features</a>
+          <a href="#benefits">Benefits</a>
+          <a href="#pricing">Pricing</a>
+        </nav>
+      </header>
+
+      <section className="auth-hero" id="features">
+        <div className="auth-hero-copy">
+          <p className="auth-kicker">Built for modern retail teams</p>
+          <h1>
+            Manage inventory and fulfill orders
+            <span> the right way</span>
+          </h1>
+          <p>
+            Track stock, prevent losses, monitor branch performance, and move faster with a clean dashboard built for everyday operations.
+          </p>
+          <div className="auth-hero-actions">
+            <button
+              type="button"
+              className="auth-primary-cta"
+              onClick={() => setIsSignUp(true)}
+            >
+              Start Free
+            </button>
+            <button
+              type="button"
+              className="auth-secondary-cta"
+              onClick={() => setIsSignUp(false)}
+            >
+              Explore Sign In
+            </button>
+          </div>
+        </div>
+        <div className="auth-hero-visual" aria-hidden>
+          <div className="auth-hero-card auth-hero-card-large">
+            <p>Stock Value</p>
+            <strong>GHS 124,580</strong>
+            <span>+8.4% this month</span>
+          </div>
+          <div className="auth-hero-card auth-hero-card-float-1">
+            <p>Low Stock Alerts</p>
+            <strong>12 Items</strong>
+          </div>
+          <div className="auth-hero-card auth-hero-card-float-2">
+            <p>Orders Fulfilled</p>
+            <strong>2,340</strong>
+          </div>
+        </div>
+      </section>
+
+      <section className="auth-signin-zone" id="benefits">
+        <div className="auth-signin-card">
+          <div className="auth-signin-left">
+            <div className="auth-signin-header">
+              <div className="auth-mini-brand">GI</div>
+              <button type="button" className="auth-magic-btn">Smart Sign-in</button>
+            </div>
+
+            <h2>{isSignUp ? "Create your account" : "Sign in"}</h2>
+            <p>
+              {isSignUp
+                ? "Set up your business and start managing inventory in minutes"
+                : "Access your Gel Invent workspace"}
+            </p>
+
+            <form onSubmit={handleSubmit}>
 
           {error && (
             <div
@@ -906,22 +933,31 @@ export default function Login({ onLogin }: LoginProps) {
             </button>
           </div>
           )}
-        </form>
+            </form>
+          </div>
 
-        {/* Footer */}
-        <div
-          style={{
-            padding: "16px 24px",
-            background: "#f9fafb",
-            borderTop: "1px solid #e5e7eb",
-            textAlign: "center",
-          }}
-        >
-          <p style={{ margin: 0, fontSize: 12, color: "#6b7280" }}>
-            © 2025 Gel Invent. All rights reserved.
-          </p>
+          <div className="auth-signin-right" id="pricing">
+            <div className="auth-signin-right-illustration" aria-hidden>
+              <div className="dot dot-a" />
+              <div className="dot dot-b" />
+              <div className="dot dot-c" />
+            </div>
+            <h3>Run every branch from one place</h3>
+            <p>
+              Use one dashboard to track sales, monitor stock levels, and coordinate teams without switching tools.
+            </p>
+            <ul>
+              <li>Live stock updates and reorder warnings</li>
+              <li>Branch-aware sales and inventory reporting</li>
+              <li>Fast checkout and movement history tracking</li>
+            </ul>
+          </div>
         </div>
-      </div>
+      </section>
+
+      <footer className="auth-page-footer">
+        © 2026 Gel Invent. All rights reserved.
+      </footer>
     </div>
   );
 }
