@@ -18,6 +18,20 @@ _startup_migrations_done: bool = False
 _startup_migrations_error: str | None = None
 
 
+def _should_run_startup_migrations() -> bool:
+    """Control runtime schema patches/backfills.
+
+    In serverless/production, running ALTER/BACKFILL on every cold start can hit
+    DB statement timeout and degrade request handling. Keep it opt-in there.
+    """
+    explicit = os.getenv("RUN_STARTUP_MIGRATIONS")
+    if explicit is not None:
+        return explicit.strip().lower() in {"1", "true", "yes", "on"}
+
+    is_serverless_or_prod = bool(os.getenv("VERCEL") or os.getenv("RAILWAY_ENVIRONMENT"))
+    return not is_serverless_or_prod
+
+
 def _run_startup_migrations_sync() -> None:
     """Run idempotent schema patches/backfills.
 
@@ -244,6 +258,10 @@ async def on_startup() -> None:
     print("🚀 Starting Gel Invent API...")
     print(f"Railway Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'Not set')}")
     print(f"Database URL set: {'Yes' if os.getenv('DATABASE_URL') else 'No'}")
+
+    if not _should_run_startup_migrations():
+        print("ℹ️ Startup migrations skipped (RUN_STARTUP_MIGRATIONS disabled)")
+        return
 
     async def _runner() -> None:
         global _startup_migrations_done, _startup_migrations_error
