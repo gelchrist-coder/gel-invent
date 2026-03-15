@@ -39,6 +39,8 @@ connect_args = {
     "keepalives_idle": 30,
     "keepalives_interval": 10,
     "keepalives_count": 5,
+    # Avoid overly aggressive DB-side defaults cancelling simple auth queries.
+    "options": "-c statement_timeout=30000 -c lock_timeout=5000",
 }
 
 

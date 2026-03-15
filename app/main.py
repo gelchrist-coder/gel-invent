@@ -24,11 +24,16 @@ def _should_run_startup_migrations() -> bool:
     In serverless/production, running ALTER/BACKFILL on every cold start can hit
     DB statement timeout and degrade request handling. Keep it opt-in there.
     """
-    explicit = os.getenv("RUN_STARTUP_MIGRATIONS")
-    if explicit is not None:
-        return explicit.strip().lower() in {"1", "true", "yes", "on"}
-
+    explicit = (os.getenv("RUN_STARTUP_MIGRATIONS") or "").strip().lower()
     is_serverless_or_prod = bool(os.getenv("VERCEL") or os.getenv("RAILWAY_ENVIRONMENT"))
+
+    # Safety-first in production/serverless: require an explicit "force" to run
+    # runtime DDL/backfills during request-serving startup.
+    if is_serverless_or_prod:
+        return explicit == "force"
+
+    if explicit:
+        return explicit in {"1", "true", "yes", "on"}
     return not is_serverless_or_prod
 
 
