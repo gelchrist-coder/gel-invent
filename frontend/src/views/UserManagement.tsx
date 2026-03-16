@@ -19,12 +19,7 @@ export default function UserManagement() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [branchName, setBranchName] = useState("");
   const [branchError, setBranchError] = useState("");
-
-  const isMainBranchName = (name: string | undefined | null) =>
-    String(name ?? "").trim().toLowerCase() === "main branch";
-
-  const hasNonMainBranch = branches.some((b) => !isMainBranchName(b.name));
-  const visibleBranches = hasNonMainBranch ? branches.filter((b) => !isMainBranchName(b.name)) : branches;
+  const visibleBranches = branches;
   
   // Check if current user is Admin
   const currentUser = localStorage.getItem("user");
@@ -51,9 +46,7 @@ export default function UserManagement() {
       // Default employee branch selection to first branch if not set.
       setFormData((prev) => {
         if (prev.branch_id !== "") return prev;
-        const hasNonMain = data.some((b) => !isMainBranchName(b.name));
-        const preferred = hasNonMain ? data.find((b) => !isMainBranchName(b.name)) : data[0];
-        const nextId = preferred?.id ?? "";
+        const nextId = data[0]?.id ?? "";
         return { ...prev, branch_id: nextId };
       });
     } catch (err) {

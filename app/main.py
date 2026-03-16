@@ -117,86 +117,127 @@ def _run_startup_migrations_sync() -> None:
             # Don't block startup; the API also enforces this rule at write-time.
             print(f"⚠️  Could not create unique index for product names: {e}")
 
-    # Backfill branch IDs for existing rows into each tenant's Main Branch.
+    # Backfill branch IDs for existing rows into each tenant's first active branch.
     with Session(engine) as db:
         admin_users = db.query(models.User).filter(models.User.role == "Admin").all()
         for admin in admin_users:
-            main_branch = (
+            default_branch = (
                 db.query(models.Branch)
                 .filter(
                     models.Branch.owner_user_id == admin.id,
-                    models.Branch.name == "Main Branch",
+                    models.Branch.is_active.is_(True),
                 )
+                .order_by(models.Branch.created_at.asc(), models.Branch.id.asc())
                 .first()
             )
-            if not main_branch:
-                main_branch = models.Branch(owner_user_id=admin.id, name="Main Branch", is_active=True)
-                db.add(main_branch)
+            if not default_branch:
+                default_branch = models.Branch(owner_user_id=admin.id, name="Default Branch", is_active=True)
+                db.add(default_branch)
                 db.flush()
 
         db.commit()
 
     # Use SQL for bulk backfills (idempotent).
     with engine.begin() as conn:
-        # Employees without a branch_id get their admin's Main Branch.
+                # Employees without a branch_id get their owner's first active branch.
         conn.execute(
             text(
                 """
                 UPDATE users u
-                SET branch_id = b.id
-                FROM branches b
+                                SET branch_id = (
+                                        SELECT b.id
+                                        FROM branches b
+                                        WHERE b.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b.is_active IS TRUE
+                                        ORDER BY b.created_at ASC, b.id ASC
+                                        LIMIT 1
+                                )
                 WHERE u.role <> 'Admin'
                   AND u.branch_id IS NULL
-                  AND b.owner_user_id = COALESCE(u.created_by, u.id)
-                  AND b.name = 'Main Branch'
+                                    AND EXISTS (
+                                        SELECT 1
+                                        FROM branches b2
+                                        WHERE b2.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b2.is_active IS TRUE
+                                    )
                 """
             )
         )
 
-        # Products created before branches go to tenant Main Branch.
+                # Products created before branches go to tenant's first active branch.
         conn.execute(
             text(
                 """
                 UPDATE products p
-                SET branch_id = b.id
-                FROM users u
-                JOIN branches b
-                  ON b.owner_user_id = COALESCE(u.created_by, u.id)
-                 AND b.name = 'Main Branch'
+                                SET branch_id = (
+                                        SELECT b.id
+                                        FROM branches b
+                                        WHERE b.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b.is_active IS TRUE
+                                        ORDER BY b.created_at ASC, b.id ASC
+                                        LIMIT 1
+                                )
+                                FROM users u
                 WHERE p.branch_id IS NULL
                   AND p.user_id = u.id
+                                    AND EXISTS (
+                                        SELECT 1
+                                        FROM branches b2
+                                        WHERE b2.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b2.is_active IS TRUE
+                                    )
                 """
             )
         )
 
-        # Stock movements inherit product/tenant Main Branch.
+                # Stock movements inherit product/tenant first active branch.
         conn.execute(
             text(
                 """
                 UPDATE stock_movements m
-                SET branch_id = b.id
-                FROM users u
-                JOIN branches b
-                  ON b.owner_user_id = COALESCE(u.created_by, u.id)
-                 AND b.name = 'Main Branch'
+                                SET branch_id = (
+                                        SELECT b.id
+                                        FROM branches b
+                                        WHERE b.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b.is_active IS TRUE
+                                        ORDER BY b.created_at ASC, b.id ASC
+                                        LIMIT 1
+                                )
+                                FROM users u
                 WHERE m.branch_id IS NULL
                   AND m.user_id = u.id
+                                    AND EXISTS (
+                                        SELECT 1
+                                        FROM branches b2
+                                        WHERE b2.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b2.is_active IS TRUE
+                                    )
                 """
             )
         )
 
-        # Sales go to tenant Main Branch.
+                # Sales go to tenant's first active branch.
         conn.execute(
             text(
                 """
                 UPDATE sales s
-                SET branch_id = b.id
-                FROM users u
-                JOIN branches b
-                  ON b.owner_user_id = COALESCE(u.created_by, u.id)
-                 AND b.name = 'Main Branch'
+                                SET branch_id = (
+                                        SELECT b.id
+                                        FROM branches b
+                                        WHERE b.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b.is_active IS TRUE
+                                        ORDER BY b.created_at ASC, b.id ASC
+                                        LIMIT 1
+                                )
+                                FROM users u
                 WHERE s.branch_id IS NULL
                   AND s.user_id = u.id
+                                    AND EXISTS (
+                                        SELECT 1
+                                        FROM branches b2
+                                        WHERE b2.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b2.is_active IS TRUE
+                                    )
                 """
             )
         )
@@ -206,13 +247,23 @@ def _run_startup_migrations_sync() -> None:
             text(
                 """
                 UPDATE creditors c
-                SET branch_id = b.id
-                FROM users u
-                JOIN branches b
-                  ON b.owner_user_id = COALESCE(u.created_by, u.id)
-                 AND b.name = 'Main Branch'
+                                SET branch_id = (
+                                        SELECT b.id
+                                        FROM branches b
+                                        WHERE b.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b.is_active IS TRUE
+                                        ORDER BY b.created_at ASC, b.id ASC
+                                        LIMIT 1
+                                )
+                                FROM users u
                 WHERE c.branch_id IS NULL
                   AND c.user_id = u.id
+                                    AND EXISTS (
+                                        SELECT 1
+                                        FROM branches b2
+                                        WHERE b2.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b2.is_active IS TRUE
+                                    )
                 """
             )
         )
@@ -221,13 +272,23 @@ def _run_startup_migrations_sync() -> None:
             text(
                 """
                 UPDATE credit_transactions ct
-                SET branch_id = b.id
-                FROM users u
-                JOIN branches b
-                  ON b.owner_user_id = COALESCE(u.created_by, u.id)
-                 AND b.name = 'Main Branch'
+                                SET branch_id = (
+                                        SELECT b.id
+                                        FROM branches b
+                                        WHERE b.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b.is_active IS TRUE
+                                        ORDER BY b.created_at ASC, b.id ASC
+                                        LIMIT 1
+                                )
+                                FROM users u
                 WHERE ct.branch_id IS NULL
                   AND ct.user_id = u.id
+                                    AND EXISTS (
+                                        SELECT 1
+                                        FROM branches b2
+                                        WHERE b2.owner_user_id = COALESCE(u.created_by, u.id)
+                                            AND b2.is_active IS TRUE
+                                    )
                 """
             )
         )

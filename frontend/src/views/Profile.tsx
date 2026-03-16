@@ -102,10 +102,7 @@ export default function Profile() {
   const [branchSaving, setBranchSaving] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
 
-  const managedBranches = useMemo(
-    () => branches.filter((branch) => branch.name !== "Main Branch"),
-    [branches],
-  );
+  const managedBranches = useMemo(() => branches, [branches]);
 
   const todayStamp = useMemo(() => {
     const d = new Date();

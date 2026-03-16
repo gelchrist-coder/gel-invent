@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from app import models
 from app.deps import get_db
 from app.auth import get_current_active_user
-from app.utils.branch import get_owner_user_id, ensure_main_branch
+from app.utils.branch import get_owner_user_id, ensure_default_branch
 
 router = APIRouter(prefix="/branches", tags=["branches"])
 
@@ -34,16 +33,13 @@ def list_branches(
 ):
     owner_user_id = get_owner_user_id(current_user)
 
-    # Ensure Main Branch always exists for the tenant
-    ensure_main_branch(db, owner_user_id)
+    # Ensure at least one default branch exists for the tenant.
+    ensure_default_branch(db, owner_user_id)
 
     return (
         db.query(models.Branch)
         .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.is_active.is_(True))
-        .order_by(
-            case((models.Branch.name == "Main Branch", 1), else_=0).asc(),
-            models.Branch.created_at.asc(),
-        )
+        .order_by(models.Branch.created_at.asc(), models.Branch.id.asc())
         .all()
     )
 

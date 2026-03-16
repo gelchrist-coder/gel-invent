@@ -126,16 +126,13 @@ export default function App() {
 
         const existing = activeBranchId;
         const existingBranch = existing != null ? data.find((b) => b.id === existing) : undefined;
-        const hasNonMain = data.some((b) => b.name !== "Main Branch");
 
-        // Keep selection if still valid and not forcing away from Main Branch.
-        if (existingBranch && !(hasNonMain && existingBranch.name === "Main Branch")) {
+        // Keep selection if still valid.
+        if (existingBranch) {
           return;
         }
 
-        // Prefer owner-added branches over the auto-created "Main Branch".
-        const preferred = data.find((b) => b.name !== "Main Branch");
-        const nextId = (preferred ?? data[0])?.id ?? null;
+        const nextId = data[0]?.id ?? null;
         setActiveBranchId(nextId);
         if (nextId != null) {
           localStorage.setItem("activeBranchId", String(nextId));
@@ -163,11 +160,9 @@ export default function App() {
           setBranches(data);
           const existing = activeBranchId;
           const existingBranch = existing != null ? data.find((b) => b.id === existing) : undefined;
-          const hasNonMain = data.some((b) => b.name !== "Main Branch");
-          if (existingBranch && !(hasNonMain && existingBranch.name === "Main Branch")) return;
+          if (existingBranch) return;
 
-          const preferred = data.find((b) => b.name !== "Main Branch");
-          const nextId = (preferred ?? data[0])?.id ?? null;
+          const nextId = data[0]?.id ?? null;
           setActiveBranchId(nextId);
           if (nextId != null) localStorage.setItem("activeBranchId", String(nextId));
           else localStorage.removeItem("activeBranchId");

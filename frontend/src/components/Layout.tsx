@@ -150,8 +150,7 @@ export default function Layout({
   // Filter navigation items based on user role
   const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || userRole === "Admin");
 
-  const visibleBranches =
-    branches && branches.length > 1 ? branches.filter((b) => b.name !== "Main Branch") : branches;
+  const visibleBranches = branches;
 
   const firstBranchId = visibleBranches && visibleBranches.length > 0 ? visibleBranches[0].id : undefined;
   const activeBranchName =

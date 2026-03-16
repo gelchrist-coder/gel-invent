@@ -18,23 +18,20 @@ def get_owner_user_id(current_user: models.User) -> int:
     return current_user.id
 
 
-def ensure_main_branch(db: Session, owner_user_id: int) -> models.Branch:
-    """Ensure at least one branch exists for the tenant.
-    
-    This function creates a default 'Main Branch' only if NO branches exist.
-    If any branch exists (even with a different name), no new branch is created.
-    """
+def ensure_default_branch(db: Session, owner_user_id: int) -> models.Branch:
+    """Ensure at least one active branch exists for the tenant."""
     # Check if ANY branch exists for this owner
     any_branch = (
         db.query(models.Branch)
         .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.is_active.is_(True))
+        .order_by(models.Branch.created_at.asc(), models.Branch.id.asc())
         .first()
     )
     if any_branch:
         return any_branch
 
-    # No branches exist, create the default one
-    branch = models.Branch(owner_user_id=owner_user_id, name="Main Branch", is_active=True)
+    # No branches exist, create a generic first branch.
+    branch = models.Branch(owner_user_id=owner_user_id, name="Default Branch", is_active=True)
     db.add(branch)
     db.commit()
     db.refresh(branch)
@@ -42,25 +39,20 @@ def ensure_main_branch(db: Session, owner_user_id: int) -> models.Branch:
 
 
 def get_preferred_default_branch(db: Session, owner_user_id: int) -> models.Branch:
-    """Pick the default branch for a tenant.
-
-    Prefer any active branch that is NOT the auto-created 'Main Branch'.
-    Fall back to 'Main Branch' only when it's the only available option.
-    """
+    """Pick the default active branch for a tenant."""
     preferred = (
         db.query(models.Branch)
         .filter(
             models.Branch.owner_user_id == owner_user_id,
             models.Branch.is_active.is_(True),
-            models.Branch.name != "Main Branch",
         )
-        .order_by(models.Branch.created_at.asc())
+        .order_by(models.Branch.created_at.asc(), models.Branch.id.asc())
         .first()
     )
     if preferred:
         return preferred
 
-    return ensure_main_branch(db, owner_user_id)
+    return ensure_default_branch(db, owner_user_id)
 
 
 def resolve_active_branch_id(

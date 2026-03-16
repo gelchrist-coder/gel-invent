@@ -66,13 +66,7 @@ export default function ProductForm({
 
   const role = userRole;
 
-  const isMainBranchName = (name: string | undefined | null) =>
-    String(name ?? "").trim().toLowerCase() === "main branch";
-
-  const visibleBranches = useMemo(
-    () => (branches ?? []).filter((b) => !isMainBranchName(b.name)),
-    [branches]
-  );
+  const visibleBranches = useMemo(() => branches ?? [], [branches]);
 
   const effectiveBranchId = useMemo(() => {
     if (role === "Admin") {
