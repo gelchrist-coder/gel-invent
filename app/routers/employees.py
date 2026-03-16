@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User, Branch
 from app.auth import get_current_active_user, get_password_hash
-from app.utils.branch import get_owner_user_id, ensure_main_branch
+from app.utils.branch import get_owner_user_id, ensure_default_branch
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
@@ -70,7 +70,7 @@ def create_employee(
 
     branch_id = employee_data.branch_id
     if branch_id is None:
-        branch_id = ensure_main_branch(db, owner_user_id).id
+        branch_id = ensure_default_branch(db, owner_user_id).id
     else:
         branch = (
             db.query(Branch)
@@ -87,7 +87,7 @@ def create_employee(
     hashed_password = get_password_hash(employee_data.password)
     new_employee = User(
         email=email,
-        name=employee_data.name,
+        name=employee_data.name.strip(),
         hashed_password=hashed_password,
         role=employee_data.role,
         created_by=current_user.id,

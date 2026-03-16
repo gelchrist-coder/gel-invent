@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import models
@@ -54,16 +55,22 @@ def create_branch(
         raise HTTPException(status_code=403, detail="Only Admin can create branches")
 
     owner_user_id = get_owner_user_id(current_user)
+    branch_name = payload.name.strip()
+    if not branch_name:
+        raise HTTPException(status_code=400, detail="Branch name cannot be empty")
 
     existing = (
         db.query(models.Branch)
-        .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.name == payload.name)
+        .filter(
+            models.Branch.owner_user_id == owner_user_id,
+            func.lower(func.trim(models.Branch.name)) == branch_name.lower(),
+        )
         .first()
     )
     if existing:
         raise HTTPException(status_code=400, detail="Branch name already exists")
 
-    branch = models.Branch(owner_user_id=owner_user_id, name=payload.name, is_active=True)
+    branch = models.Branch(owner_user_id=owner_user_id, name=branch_name, is_active=True)
     db.add(branch)
     db.commit()
     db.refresh(branch)
@@ -94,12 +101,16 @@ def update_branch(
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
+    branch_name = payload.name.strip()
+    if not branch_name:
+        raise HTTPException(status_code=400, detail="Branch name cannot be empty")
+
     # Check if name already exists (excluding current branch)
     existing = (
         db.query(models.Branch)
         .filter(
             models.Branch.owner_user_id == owner_user_id,
-            models.Branch.name == payload.name,
+            func.lower(func.trim(models.Branch.name)) == branch_name.lower(),
             models.Branch.id != branch_id,
         )
         .first()
@@ -107,7 +118,7 @@ def update_branch(
     if existing:
         raise HTTPException(status_code=400, detail="Branch name already exists")
 
-    branch.name = payload.name
+    branch.name = branch_name
     db.commit()
     db.refresh(branch)
     return branch
@@ -145,11 +156,12 @@ def delete_branch(
     # Check if branch has any products, sales, or other data
     has_products = db.query(models.Product).filter(models.Product.branch_id == branch_id).first()
     has_sales = db.query(models.Sale).filter(models.Sale.branch_id == branch_id).first()
+    has_employees = db.query(models.User).filter(models.User.branch_id == branch_id).first()
     
-    if has_products or has_sales:
+    if has_products or has_sales or has_employees:
         raise HTTPException(
             status_code=400, 
-            detail="Cannot delete branch with existing products or sales. Transfer or delete them first."
+            detail="Cannot delete branch with assigned employees, products, or sales. Reassign or remove them first."
         )
 
     # Soft delete by marking inactive (or hard delete if preferred)

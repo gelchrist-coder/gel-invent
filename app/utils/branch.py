@@ -66,7 +66,17 @@ def resolve_active_branch_id(
     # Employees are locked to a single branch.
     if current_user.role != "Admin":
         if current_user.branch_id:
-            return int(current_user.branch_id)
+            assigned_branch = (
+                db.query(models.Branch)
+                .filter(
+                    models.Branch.id == current_user.branch_id,
+                    models.Branch.owner_user_id == owner_user_id,
+                    models.Branch.is_active.is_(True),
+                )
+                .first()
+            )
+            if assigned_branch:
+                return int(assigned_branch.id)
 
         default_branch = get_preferred_default_branch(db, owner_user_id)
         current_user.branch_id = default_branch.id
