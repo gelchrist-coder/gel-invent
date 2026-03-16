@@ -206,11 +206,6 @@ class SystemSettings(Base):
     uses_expiry_tracking: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_backup: Mapped[bool] = mapped_column(Boolean, default=True)
     email_notifications: Mapped[bool] = mapped_column(Boolean, default=False)
-    whatsapp_notifications: Mapped[bool] = mapped_column(Boolean, default=False)
-    whatsapp_number: Mapped[str | None] = mapped_column(String(32), default=None)
-    last_whatsapp_low_stock_alert_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

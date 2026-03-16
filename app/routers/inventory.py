@@ -15,7 +15,6 @@ from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.movement_reasons import classify_movement
 from app.utils.expiry import get_batch_balances, writeoff_expired_batches
-from app.utils.whatsapp import send_whatsapp_message, whatsapp_configured
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
@@ -306,44 +305,6 @@ def get_inventory_analytics(
                 "recommended_reorder": round(suggested_reorder, 2),
             })
 
-    # Optional WhatsApp low-stock summary (throttled to avoid spam).
-    can_send_whatsapp = (
-        settings.whatsapp_notifications
-        and bool((settings.whatsapp_number or "").strip())
-        and whatsapp_configured()
-        and len(low_stock_products) > 0
-    )
-    if can_send_whatsapp:
-        now = datetime.now()
-        cooldown_hours = 6
-        last_sent = settings.last_whatsapp_low_stock_alert_at
-        should_send = last_sent is None or (now - last_sent) >= timedelta(hours=cooldown_hours)
-        if should_send:
-            top_items = low_stock_products[:5]
-            lines = [
-                f"{item['name']} ({item['sku']}): {item['current_stock']} left"
-                for item in top_items
-            ]
-            overflow = ""
-            if len(low_stock_products) > len(top_items):
-                overflow = f"\n+{len(low_stock_products) - len(top_items)} more items"
-
-            message = (
-                f"Low stock alert ({len(low_stock_products)} items).\n"
-                + "\n".join(lines)
-                + overflow
-            )
-            try:
-                send_whatsapp_message(
-                    to_number=settings.whatsapp_number or "",
-                    message=message,
-                )
-                settings.last_whatsapp_low_stock_alert_at = now
-                db.add(settings)
-                db.commit()
-            except Exception as exc:
-                print(f"⚠️  WhatsApp low-stock alert failed: {exc}")
-        
         # Expiring batches (true remaining per batch)
         if total_stock > 0:
             balances = get_batch_balances(
