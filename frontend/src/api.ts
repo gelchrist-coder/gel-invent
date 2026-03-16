@@ -107,6 +107,8 @@ export type SystemSettings = {
   uses_expiry_tracking: boolean;
   auto_backup: boolean;
   email_notifications: boolean;
+  whatsapp_notifications: boolean;
+  whatsapp_number?: string | null;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -583,6 +585,13 @@ export async function updateSystemSettings(payload: SystemSettings): Promise<Sys
   return jsonRequest<SystemSettings>("/settings/system", {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function sendWhatsAppTest(message?: string): Promise<{ message: string }> {
+  return jsonRequest<{ message: string }>("/settings/system/whatsapp-test", {
+    method: "POST",
+    body: JSON.stringify({ message }),
   });
 }
 

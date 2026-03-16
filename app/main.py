@@ -92,6 +92,11 @@ def _run_startup_migrations_sync() -> None:
         conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
         conn.execute(text("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
 
+        # WhatsApp notification settings
+        conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS whatsapp_notifications BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS whatsapp_number VARCHAR(32)"))
+        conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS last_whatsapp_low_stock_alert_at TIMESTAMP WITH TIME ZONE"))
+
         # Offline/poor-network idempotency for sales
         try:
             conn.execute(

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, deleteBranch, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
+import { changePassword, deleteBranch, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, sendWhatsAppTest, updateBranch, updateSystemSettings } from "../api";
 import { Branch } from "../types";
 
 type PasswordInputProps = {
@@ -78,7 +78,10 @@ export default function Profile() {
     expiryWarningDays: "180",
     autoBackup: true,
     emailNotifications: false,
+    whatsappNotifications: false,
+    whatsappNumber: "",
   });
+  const [sendingWhatsAppTest, setSendingWhatsAppTest] = useState(false);
 
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -147,6 +150,8 @@ export default function Profile() {
           expiryWarningDays: String(settings.expiry_warning_days),
           autoBackup: settings.auto_backup,
           emailNotifications: settings.email_notifications,
+          whatsappNotifications: settings.whatsapp_notifications,
+          whatsappNumber: settings.whatsapp_number || "",
         });
       } catch {
         // If unauthenticated or API unavailable, keep defaults.
@@ -176,6 +181,8 @@ export default function Profile() {
         uses_expiry_tracking: true,
         auto_backup: systemSettings.autoBackup,
         email_notifications: systemSettings.emailNotifications,
+        whatsapp_notifications: systemSettings.whatsappNotifications,
+        whatsapp_number: systemSettings.whatsappNumber || null,
       };
       const updated = await updateSystemSettings(payload);
       setSystemSettings({
@@ -183,6 +190,8 @@ export default function Profile() {
         expiryWarningDays: String(updated.expiry_warning_days),
         autoBackup: updated.auto_backup,
         emailNotifications: updated.email_notifications,
+        whatsappNotifications: updated.whatsapp_notifications,
+        whatsappNumber: updated.whatsapp_number || "",
       });
       // Notify other components that settings have changed
       window.dispatchEvent(new CustomEvent("systemSettingsChanged", { detail: updated }));
@@ -258,6 +267,19 @@ export default function Profile() {
       setDataMessage(error instanceof Error ? error.message : "Export failed");
     } finally {
       setExportingData(false);
+    }
+  };
+
+  const handleWhatsAppTest = async () => {
+    setDataMessage(null);
+    setSendingWhatsAppTest(true);
+    try {
+      const result = await sendWhatsAppTest();
+      setDataMessage(result.message);
+    } catch (error) {
+      setDataMessage(error instanceof Error ? error.message : "WhatsApp test failed");
+    } finally {
+      setSendingWhatsAppTest(false);
     }
   };
 
@@ -897,6 +919,72 @@ export default function Profile() {
                     </div>
                   </div>
                 </label>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                    padding: 16,
+                    background: "#f9fafb",
+                    borderRadius: 8,
+                    border: "1px solid #e5e7eb",
+                  }}
+                >
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      cursor: editing ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={systemSettings.whatsappNotifications}
+                      onChange={(e) =>
+                        setSystemSettings({ ...systemSettings, whatsappNotifications: e.target.checked })
+                      }
+                      disabled={!editing}
+                      style={{ width: 18, height: 18, cursor: editing ? "pointer" : "not-allowed" }}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                        WhatsApp Notifications
+                      </div>
+                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                        Receive low stock alerts on WhatsApp (auto summary every 6 hours max)
+                      </div>
+                    </div>
+                  </label>
+
+                  <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>WhatsApp Number</span>
+                    <input
+                      type="text"
+                      value={systemSettings.whatsappNumber}
+                      onChange={(e) =>
+                        setSystemSettings({ ...systemSettings, whatsappNumber: e.target.value })
+                      }
+                      disabled={!editing}
+                      className="input"
+                      placeholder="e.g. +233XXXXXXXXX"
+                      style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
+                    />
+                  </label>
+
+                  <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                    <button
+                      type="button"
+                      className="button"
+                      style={{ background: "#16a34a", fontSize: 13, padding: "8px 12px" }}
+                      disabled={sendingWhatsAppTest || !systemSettings.whatsappNumber.trim()}
+                      onClick={handleWhatsAppTest}
+                    >
+                      {sendingWhatsAppTest ? "Sending..." : "Send WhatsApp Test"}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
