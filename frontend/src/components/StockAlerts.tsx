@@ -5,6 +5,7 @@ type LowStockAlert = {
   current_stock: number;
   threshold: number;
   category: string | null;
+  recommended_reorder?: number;
 };
 
 type ExpiringProduct = {
@@ -110,6 +111,11 @@ export default function StockAlerts({ lowStock, expiring, hideExpiringSection = 
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
                     Min: {item.threshold}
                   </p>
+                  {typeof item.recommended_reorder === "number" ? (
+                    <p style={{ margin: "4px 0 0", fontSize: 12, color: "#1d4ed8", fontWeight: 600 }}>
+                      Reorder: {item.recommended_reorder}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             ))

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ComponentProps } from "react";
-import { createMovement, deleteProduct, fetchAllMovements, fetchInventoryAnalytics, fetchProducts, exportMovementsPdf } from "../api";
+import { createBranchTransfer, createMovement, deleteProduct, fetchAllMovements, fetchBranches, fetchInventoryAnalytics, fetchProducts, exportMovementsPdf } from "../api";
 import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
 import MovementHistory from "../components/MovementHistory";
 import { useExpiryTracking } from "../settings";
-import type { Product } from "../types";
+import type { Branch, Product } from "../types";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
@@ -19,13 +19,15 @@ export default function Inventory() {
 
   const [analytics, setAnalytics] = useState<InventoryAnalytics | null>(null);
   const [movements, setMovements] = useState<MovementHistoryRow[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
-  const [actionType, setActionType] = useState<"new_stock" | "damage" | "delete">("new_stock");
+  const [actionType, setActionType] = useState<"new_stock" | "damage" | "transfer" | "delete">("new_stock");
   const [quantity, setQuantity] = useState<string>("");
   const [stockReason, setStockReason] = useState<string>("New Stock");
   const [damageReason, setDamageReason] = useState<string>("Damaged");
   const [notes, setNotes] = useState<string>("");
+  const [destinationBranchId, setDestinationBranchId] = useState<number | null>(null);
   const [expiryDate, setExpiryDate] = useState<string>("");
   const [unitCostPrice, setUnitCostPrice] = useState<string>("");
   const [unitSellingPrice, setUnitSellingPrice] = useState<string>("");
@@ -63,10 +65,16 @@ export default function Inventory() {
         fetchAllMovements({ startDate: movementFrom, endDate: movementTo }),
         fetchProducts(),
       ]);
+      const branchData = await fetchBranches();
       setAnalytics(analyticsData as InventoryAnalytics);
       setMovements(movementsData as MovementHistoryRow[]);
+      setBranches(branchData);
       const typedProducts = productsData as Product[];
       setProducts(typedProducts);
+      const rawActiveBranchId = localStorage.getItem("activeBranchId");
+      const activeBranchId = rawActiveBranchId ? Number(rawActiveBranchId) : null;
+      const nextDestination = branchData.find((b) => b.id !== activeBranchId)?.id ?? null;
+      setDestinationBranchId((prev) => (prev == null ? nextDestination : prev));
       if (typedProducts.length > 0) {
         setSelectedProductId((prev) => prev ?? typedProducts[0].id);
       } else {
@@ -93,8 +101,13 @@ export default function Inventory() {
 
   const selectedProduct = products.find((p) => p.id === selectedProductId) ?? null;
   const selectedProductStock = selectedProduct ? Math.max(0, Number(selectedProduct.current_stock ?? 0)) : 0;
+  const rawActiveBranchId = localStorage.getItem("activeBranchId");
+  const activeBranchId = rawActiveBranchId ? Number(rawActiveBranchId) : null;
+  const destinationBranches = branches.filter((b) => b.id !== activeBranchId);
+  const destinationBranch = destinationBranches.find((b) => b.id === destinationBranchId) ?? null;
   const isNewStockAction = actionType === "new_stock";
   const isDamageAction = actionType === "damage";
+  const isTransferAction = actionType === "transfer";
   const isDeleteAction = actionType === "delete";
   const isPerishableProduct = usesExpiryTracking && !!selectedProduct?.expiry_date;
 
@@ -145,6 +158,38 @@ export default function Inventory() {
 
     if (actionType === "damage" && qty > selectedProductStock) {
       alert(`Cannot damage more than available stock (${selectedProductStock})`);
+      return;
+    }
+
+    if (isTransferAction) {
+      if (!isAdmin) {
+        alert("Only Admin can transfer stock between branches");
+        return;
+      }
+      if (!destinationBranchId) {
+        alert("Select a destination branch");
+        return;
+      }
+      if (qty > selectedProductStock) {
+        alert(`Cannot transfer more than available stock (${selectedProductStock})`);
+        return;
+      }
+
+      setSubmittingAction(true);
+      try {
+        await createBranchTransfer({
+          product_id: selectedProductId,
+          to_branch_id: destinationBranchId,
+          quantity: qty,
+          notes: notes.trim() || undefined,
+        });
+        resetActionForm();
+        await loadData();
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Failed to transfer stock");
+      } finally {
+        setSubmittingAction(false);
+      }
       return;
     }
 
@@ -371,6 +416,25 @@ export default function Inventory() {
               {isAdmin ? (
                 <button
                   type="button"
+                  onClick={() => setActionType("transfer")}
+                  disabled={submittingAction}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: actionType === "transfer" ? "#dbeafe" : "white",
+                    color: actionType === "transfer" ? "#1d4ed8" : "#334155",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: submittingAction ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Transfer Stock
+                </button>
+              ) : null}
+              {isAdmin ? (
+                <button
+                  type="button"
                   onClick={() => setActionType("delete")}
                   disabled={submittingAction}
                   style={{
@@ -393,7 +457,7 @@ export default function Inventory() {
           {!isDeleteAction ? (
             <label>
               <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>
-                {isDamageAction ? "Quantity Damaged" : "Quantity Added"}
+                {isTransferAction ? "Quantity to Transfer" : isDamageAction ? "Quantity Damaged" : "Quantity Added"}
               </span>
               <input
                 type="number"
@@ -401,12 +465,34 @@ export default function Inventory() {
                 step="1"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                placeholder={isNewStockAction ? "Enter stock added" : "Enter quantity damaged"}
+                placeholder={isTransferAction ? "Enter quantity to transfer" : isNewStockAction ? "Enter stock added" : "Enter quantity damaged"}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
                 disabled={submittingAction}
               />
-              {isDamageAction ? (
+              {isDamageAction || isTransferAction ? (
                 <small style={{ color: "#6b7280", fontSize: 12 }}>Available stock: {selectedProductStock}</small>
+              ) : null}
+            </label>
+          ) : null}
+
+          {isTransferAction ? (
+            <label>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Destination Branch</span>
+              <select
+                value={destinationBranchId ?? ""}
+                onChange={(e) => setDestinationBranchId(e.target.value ? Number(e.target.value) : null)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
+                disabled={submittingAction}
+              >
+                {destinationBranches.length === 0 ? <option value="">No destination branch available</option> : null}
+                {destinationBranches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+              {destinationBranch ? (
+                <small style={{ color: "#6b7280", fontSize: 12 }}>Transfer destination: {destinationBranch.name}</small>
               ) : null}
             </label>
           ) : null}
@@ -496,7 +582,7 @@ export default function Inventory() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={2}
-                placeholder={isNewStockAction ? "Optional stock note" : "Optional damage details"}
+                placeholder={isTransferAction ? "Optional transfer note" : isNewStockAction ? "Optional stock note" : "Optional damage details"}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14, resize: "vertical" }}
                 disabled={submittingAction}
               />
@@ -519,7 +605,7 @@ export default function Inventory() {
               borderRadius: 6,
               border: "none",
               backgroundColor:
-                isDeleteAction ? "#ef4444" : isDamageAction ? "#f59e0b" : "#10b981",
+                isDeleteAction ? "#ef4444" : isDamageAction ? "#f59e0b" : isTransferAction ? "#3b82f6" : "#10b981",
               color: "white",
               cursor: submittingAction || !selectedProductId ? "not-allowed" : "pointer",
               fontWeight: 600,
@@ -530,6 +616,8 @@ export default function Inventory() {
               ? "Saving..."
               : isDeleteAction
                 ? "Delete Product"
+                : isTransferAction
+                  ? "Transfer Stock"
                 : isDamageAction
                   ? "Record Damage"
                   : "Add Stock"}

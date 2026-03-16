@@ -559,6 +559,20 @@ export async function fetchInventoryAnalytics(): Promise<JsonObject> {
   return data;
 }
 
+export async function createBranchTransfer(payload: {
+  product_id: number;
+  to_branch_id: number;
+  quantity: number;
+  notes?: string;
+}): Promise<{ message: string }> {
+  const result = await jsonRequest<{ message: string }>("/inventory/transfers", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  clearDataCache();
+  return result;
+}
+
 // Settings API
 
 export async function fetchSystemSettings(): Promise<SystemSettings> {

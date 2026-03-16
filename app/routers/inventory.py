@@ -4,11 +4,12 @@ from io import BytesIO
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Product, StockMovement, Sale, User, SystemSettings
+from ..models import Product, StockMovement, Sale, User, SystemSettings, Branch
 from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
@@ -33,6 +34,136 @@ def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
     db.commit()
     db.refresh(settings)
     return settings
+
+
+class BranchTransferCreate(BaseModel):
+    product_id: int
+    to_branch_id: int
+    quantity: Decimal = Field(gt=0)
+    notes: str | None = None
+
+
+@router.post("/transfers")
+def transfer_stock_between_branches(
+    payload: BranchTransferCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Only Admin can transfer stock between branches")
+
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    owner_user_id = _get_tenant_owner_id(current_user)
+
+    if payload.to_branch_id == active_branch_id:
+        raise HTTPException(status_code=400, detail="Destination branch must be different from source branch")
+
+    source_branch = db.scalar(
+        select(Branch).where(
+            Branch.id == active_branch_id,
+            Branch.owner_user_id == owner_user_id,
+            Branch.is_active.is_(True),
+        )
+    )
+    destination_branch = db.scalar(
+        select(Branch).where(
+            Branch.id == payload.to_branch_id,
+            Branch.owner_user_id == owner_user_id,
+            Branch.is_active.is_(True),
+        )
+    )
+
+    if not source_branch or not destination_branch:
+        raise HTTPException(status_code=400, detail="Invalid source or destination branch")
+
+    source_product = db.scalar(
+        select(Product).where(
+            Product.id == payload.product_id,
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        )
+    )
+    if not source_product:
+        raise HTTPException(status_code=404, detail="Product not found in source branch")
+
+    available_stock = db.scalar(
+        select(func.coalesce(func.sum(StockMovement.change), 0)).where(
+            StockMovement.product_id == payload.product_id,
+            StockMovement.user_id.in_(tenant_user_ids),
+            StockMovement.branch_id == active_branch_id,
+        )
+    )
+    available = available_stock if isinstance(available_stock, Decimal) else Decimal(str(available_stock or 0))
+
+    transfer_qty = Decimal(payload.quantity)
+    if transfer_qty > available:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Insufficient stock in source branch. Available: {available}",
+        )
+
+    destination_product = db.scalar(
+        select(Product).where(
+            Product.sku == source_product.sku,
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == payload.to_branch_id,
+        )
+    )
+
+    if not destination_product:
+        destination_product = Product(
+            user_id=current_user.id,
+            branch_id=payload.to_branch_id,
+            sku=source_product.sku,
+            name=source_product.name,
+            description=source_product.description,
+            unit=source_product.unit,
+            pack_size=source_product.pack_size,
+            category=source_product.category,
+            expiry_date=source_product.expiry_date,
+            cost_price=source_product.cost_price,
+            pack_cost_price=source_product.pack_cost_price,
+            selling_price=source_product.selling_price,
+            pack_selling_price=source_product.pack_selling_price,
+        )
+        db.add(destination_product)
+        db.flush()
+
+    notes_suffix = ""
+    if payload.notes and payload.notes.strip():
+        notes_suffix = f": {payload.notes.strip()[:120]}"
+
+    move_out = StockMovement(
+        product_id=source_product.id,
+        user_id=current_user.id,
+        branch_id=active_branch_id,
+        change=-transfer_qty,
+        reason=f"Stock Transfer Out to {destination_branch.name}{notes_suffix}",
+        unit_cost_price=source_product.cost_price,
+        unit_selling_price=source_product.selling_price,
+    )
+    move_in = StockMovement(
+        product_id=destination_product.id,
+        user_id=current_user.id,
+        branch_id=payload.to_branch_id,
+        change=transfer_qty,
+        reason=f"Stock Transfer In from {source_branch.name}{notes_suffix}",
+        unit_cost_price=source_product.cost_price,
+        unit_selling_price=source_product.selling_price,
+    )
+
+    db.add(move_out)
+    db.add(move_in)
+    db.commit()
+
+    return {
+        "message": "Stock transferred successfully",
+        "product": source_product.name,
+        "quantity": float(transfer_qty),
+        "from_branch": source_branch.name,
+        "to_branch": destination_branch.name,
+    }
 
 
 @router.get("/analytics")
@@ -163,6 +294,7 @@ def get_inventory_analytics(
         
         # Low stock check
         if total_stock < low_stock_threshold:
+            suggested_reorder = max(float(low_stock_threshold * 2) - float(total_stock), 1.0)
             low_stock_products.append({
                 "id": product.id,
                 "name": product.name,
@@ -170,6 +302,7 @@ def get_inventory_analytics(
                 "current_stock": float(total_stock),
                 "threshold": low_stock_threshold,
                 "category": product.category,
+                "recommended_reorder": round(suggested_reorder, 2),
             })
         
         # Expiring batches (true remaining per batch)
