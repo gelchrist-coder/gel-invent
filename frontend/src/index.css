@@ -465,6 +465,59 @@ label {
   margin: 26px auto 0;
 }
 
+.auth-marketing-band {
+  max-width: 1240px;
+  margin: 26px auto 0;
+  background: #ffffff;
+  border: 1px solid #e7e1dc;
+  border-radius: 18px;
+  padding: 30px;
+}
+
+.auth-marketing-band-benefits {
+  background: linear-gradient(180deg, #fffdfb 0%, #f9f5f1 100%);
+}
+
+.auth-marketing-head h2 {
+  margin: 8px 0 0;
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1.2;
+}
+
+.auth-marketing-grid {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.auth-marketing-grid-benefits {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.auth-marketing-card {
+  background: #f9fbff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.auth-marketing-card h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.auth-marketing-card p {
+  margin: 8px 0 0;
+  color: #59637a;
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+.auth-marketing-card-benefit {
+  background: #ffffff;
+}
+
 .auth-signin-card {
   background: #ffffff;
   border: 1px solid #e6e6eb;
@@ -657,6 +710,14 @@ label {
     grid-template-columns: 1fr;
   }
 
+  .auth-marketing-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .auth-marketing-grid-benefits {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
   .auth-signin-right {
     border-left: none;
     border-top: 1px solid #e7e9ef;
@@ -686,6 +747,15 @@ label {
   .auth-signin-left,
   .auth-signin-right {
     padding: 20px 16px;
+  }
+
+  .auth-marketing-band {
+    border-radius: 12px;
+    padding: 20px 14px;
+  }
+
+  .auth-marketing-grid {
+    grid-template-columns: 1fr;
   }
 
   .auth-signin-card,

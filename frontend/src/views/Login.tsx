@@ -198,6 +198,40 @@ export default function Login({ onLogin }: LoginProps) {
     "Cleaning",
   ];
 
+  const FEATURE_ITEMS = [
+    {
+      title: "Inventory Tracking",
+      description: "See stock levels in real time and track every product movement across your business.",
+    },
+    {
+      title: "Branch Control",
+      description: "Manage multiple locations from one workspace with branch-specific stock and sales visibility.",
+    },
+    {
+      title: "Sales + Reports",
+      description: "Record sales quickly and review performance with clear daily, weekly, and monthly reporting.",
+    },
+    {
+      title: "Loss Prevention",
+      description: "Capture damages, returns, and adjustments with full history so reports stay accurate.",
+    },
+  ];
+
+  const BENEFIT_ITEMS = [
+    {
+      title: "Fewer Stockouts",
+      description: "Low-stock alerts help your team restock before products run out.",
+    },
+    {
+      title: "Faster Team Work",
+      description: "Clear workflows for admin and employees reduce mistakes and speed up daily operations.",
+    },
+    {
+      title: "Better Decisions",
+      description: "Get dependable numbers for stock, sales, and movement trends in one place.",
+    },
+  ];
+
   const addCategory = (raw: string) => {
     const value = raw.trim();
     if (!value) return;
@@ -413,7 +447,7 @@ export default function Login({ onLogin }: LoginProps) {
         </nav>
       </header>
 
-      <section className="auth-hero" id="features">
+      <section className="auth-hero">
         <div className="auth-hero-copy">
           <p className="auth-kicker">Built for modern retail teams</p>
           <h1>
@@ -457,7 +491,37 @@ export default function Login({ onLogin }: LoginProps) {
         </div>
       </section>
 
-      <section className="auth-signin-zone" id="benefits">
+      <section className="auth-marketing-band" id="features">
+        <div className="auth-marketing-head">
+          <p className="auth-kicker">Features</p>
+          <h2>Everything you need to run inventory with confidence</h2>
+        </div>
+        <div className="auth-marketing-grid">
+          {FEATURE_ITEMS.map((item) => (
+            <article key={item.title} className="auth-marketing-card">
+              <h3>{item.title}</h3>
+              <p>{item.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="auth-marketing-band auth-marketing-band-benefits" id="benefits">
+        <div className="auth-marketing-head">
+          <p className="auth-kicker">Benefits</p>
+          <h2>Why teams choose Gel Invent every day</h2>
+        </div>
+        <div className="auth-marketing-grid auth-marketing-grid-benefits">
+          {BENEFIT_ITEMS.map((item) => (
+            <article key={item.title} className="auth-marketing-card auth-marketing-card-benefit">
+              <h3>{item.title}</h3>
+              <p>{item.description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="auth-signin-zone">
         <div className="auth-signin-card">
           <div className="auth-signin-left">
             <div className="auth-signin-header">
