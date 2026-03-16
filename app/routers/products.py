@@ -139,10 +139,18 @@ def list_products(
         )
         stocks = {int(pid): (total if isinstance(total, Decimal) else Decimal(str(total))) for pid, total in stock_rows}
     
-    # Add created_by_name to each product
+    creator_ids = sorted({p.user_id for p in products})
+    creators = (
+        db.query(models.User.id, models.User.name)
+        .filter(models.User.id.in_(creator_ids))
+        .all()
+        if creator_ids
+        else []
+    )
+    creator_name_by_id = {int(uid): name for uid, name in creators}
+
     for product in products:
-        creator = db.query(models.User).filter(models.User.id == product.user_id).first()
-        product.created_by_name = creator.name if creator else None
+        product.created_by_name = creator_name_by_id.get(product.user_id)
         raw_stock = stocks.get(product.id, Decimal(0))
         product.current_stock = raw_stock if raw_stock > 0 else Decimal(0)
     

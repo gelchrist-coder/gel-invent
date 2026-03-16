@@ -14,6 +14,13 @@ from app.utils.branch import get_active_branch_id
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
+def _to_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except Exception:
+        return default
+
+
 def _get_tenant_owner_id(user: User) -> int:
     if user.role == "Admin":
         return user.id
@@ -122,37 +129,48 @@ def get_sales_dashboard(
         .limit(10)
     ).all()
     
-    # Recent sales
-    recent_sales = db.scalars(
-        select(Sale)
+    # Recent sales with product details in one query (avoids N+1 lookups)
+    recent_sales_rows = db.execute(
+        select(
+            Sale.id,
+            Sale.product_id,
+            Sale.quantity,
+            Sale.total_price,
+            Sale.customer_name,
+            Sale.payment_method,
+            Sale.created_at,
+            Product.name.label("product_name"),
+            Product.sku.label("product_sku"),
+        )
+        .outerjoin(
+            Product,
+            and_(
+                Product.id == Sale.product_id,
+                Product.user_id.in_(tenant_user_ids),
+                Product.branch_id == active_branch_id,
+            ),
+        )
         .where(Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id)
         .order_by(Sale.created_at.desc())
         .limit(10)
     ).all()
-    
-    # Add product details to recent sales
-    recent_sales_data = []
-    for s in recent_sales:
-        product = db.scalar(
-            select(Product).where(
-                Product.id == s.product_id,
-                Product.user_id.in_(tenant_user_ids),
-                Product.branch_id == active_branch_id,
-            )
-        )
-        recent_sales_data.append({
+
+    recent_sales_data = [
+        {
             "id": s.id,
             "product_id": s.product_id,
             "product": {
-                "name": product.name if product else "Unknown",
-                "sku": product.sku if product else "N/A"
+                "name": s.product_name or "Unknown",
+                "sku": s.product_sku or "N/A",
             },
-            "quantity": float(s.quantity),
-            "total_price": float(s.total_price),
+            "quantity": _to_float(s.quantity),
+            "total_price": _to_float(s.total_price),
             "customer_name": s.customer_name,
             "payment_method": s.payment_method,
-            "created_at": s.created_at.isoformat()
-        })
+            "created_at": s.created_at.isoformat(),
+        }
+        for s in recent_sales_rows
+    ]
     
     return {
         "today": {

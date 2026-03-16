@@ -104,6 +104,38 @@ def _run_startup_migrations_sync() -> None:
         except Exception as e:
             print(f"⚠️  Could not create unique index for offline sales idempotency: {e}")
 
+        # Performance indexes for high-traffic read paths.
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_stock_movements_branch_product_user_created_at "
+                "ON stock_movements (branch_id, product_id, user_id, created_at DESC)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_stock_movements_branch_user_created_at "
+                "ON stock_movements (branch_id, user_id, created_at DESC)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_sales_branch_user_created_at "
+                "ON sales (branch_id, user_id, created_at DESC)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_products_branch_user_created_at "
+                "ON products (branch_id, user_id, created_at DESC)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_credit_transactions_branch_creditor_created_at "
+                "ON credit_transactions (branch_id, creditor_id, created_at DESC)"
+            )
+        )
+
         # Prevent duplicate product names within a branch (case-insensitive)
         try:
             conn.execute(

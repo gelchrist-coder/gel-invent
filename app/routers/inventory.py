@@ -204,38 +204,52 @@ def get_inventory_analytics(
         )
     ).all()
     
+    stock_by_product_rows = db.execute(
+        select(
+            StockMovement.product_id,
+            func.coalesce(func.sum(StockMovement.change), 0).label("stock"),
+        )
+        .where(
+            StockMovement.user_id.in_(tenant_user_ids),
+            StockMovement.branch_id == active_branch_id,
+            StockMovement.product_id.in_([p.id for p in products]) if products else False,
+        )
+        .group_by(StockMovement.product_id)
+    ).all() if products else []
+    stock_by_product = {
+        int(pid): (stock if isinstance(stock, Decimal) else Decimal(str(stock or 0)))
+        for pid, stock in stock_by_product_rows
+    }
+
+    in_out_totals = db.execute(
+        select(
+            func.coalesce(
+                func.sum(case((StockMovement.change > 0, StockMovement.change), else_=0)),
+                0,
+            ).label("stock_in"),
+            func.coalesce(
+                func.sum(case((StockMovement.change < 0, -StockMovement.change), else_=0)),
+                0,
+            ).label("stock_out"),
+        ).where(
+            StockMovement.user_id.in_(tenant_user_ids),
+            StockMovement.branch_id == active_branch_id,
+        )
+    ).one()
+
     # Calculate stock for each product
     low_stock_products = []
     expiring_batches = []
     total_stock_value = Decimal(0)
     total_stock_left = Decimal(0)
-    all_time_stock_in = Decimal(0)
-    all_time_stock_out = Decimal(0)
+    all_time_stock_in = in_out_totals.stock_in if isinstance(in_out_totals.stock_in, Decimal) else Decimal(str(in_out_totals.stock_in or 0))
+    all_time_stock_out = in_out_totals.stock_out if isinstance(in_out_totals.stock_out, Decimal) else Decimal(str(in_out_totals.stock_out or 0))
     
     today = datetime.now().date()
     
     for product in products:
-        movements = db.scalars(
-            select(StockMovement)
-            .where(
-                and_(
-                    StockMovement.product_id == product.id,
-                    StockMovement.user_id.in_(tenant_user_ids),
-                    StockMovement.branch_id == active_branch_id,
-                )
-            )
-            .order_by(StockMovement.created_at.desc())
-        ).all()
-
-        # Accumulate all-time in/out totals for this branch.
-        for m in movements:
-            if m.change > 0:
-                all_time_stock_in += m.change
-            elif m.change < 0:
-                all_time_stock_out += -m.change
-        
-        # Calculate total stock
-        total_stock_raw = sum(m.change for m in movements)
+        # Calculate total stock from pre-aggregated movements
+        total_stock_raw = stock_by_product.get(product.id, Decimal(0))
         total_stock = total_stock_raw if total_stock_raw > 0 else Decimal(0)
         total_stock_left += total_stock
         
@@ -416,7 +430,24 @@ def get_all_movements(
     Get all stock movements with optional filters.
     """
     tenant_user_ids = get_tenant_user_ids(current_user, db)
-    query = select(StockMovement).join(Product)
+    query = select(
+        StockMovement.id,
+        StockMovement.product_id,
+        StockMovement.change,
+        StockMovement.reason,
+        StockMovement.batch_number,
+        StockMovement.expiry_date,
+        StockMovement.created_at,
+        Product.name,
+        Product.sku,
+    ).join(
+        Product,
+        and_(
+            Product.id == StockMovement.product_id,
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        ),
+    )
     
     # Filter by date and user
     if start_date or end_date:
@@ -449,24 +480,15 @@ def get_all_movements(
     
     query = query.order_by(StockMovement.created_at.desc())
     
-    movements = db.scalars(query).all()
+    movements = db.execute(query).all()
     
     result = []
     for movement in movements:
-        product = db.scalar(
-            select(Product).where(
-                and_(
-                    Product.id == movement.product_id,
-                    Product.user_id.in_(tenant_user_ids),
-                    Product.branch_id == active_branch_id,
-                )
-            )
-        )
         result.append({
             "id": movement.id,
             "product_id": movement.product_id,
-            "product_name": product.name if product else "Unknown",
-            "product_sku": product.sku if product else "N/A",
+            "product_name": movement.name,
+            "product_sku": movement.sku,
             "change": float(movement.change),
             "reason": movement.reason,
             "batch_number": movement.batch_number,

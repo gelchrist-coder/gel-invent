@@ -353,10 +353,14 @@ def list_sales(
         .order_by(models.Sale.created_at.desc())
     ).all()
     
-    # Add created_by_name to each sale
+    creator_ids = sorted({s.user_id for s in sales})
+    creators = db.execute(
+        select(models.User.id, models.User.name).where(models.User.id.in_(creator_ids))
+    ).all() if creator_ids else []
+    creator_name_by_id = {int(uid): name for uid, name in creators}
+
     for sale in sales:
-        creator = db.scalar(select(models.User).where(models.User.id == sale.user_id))
-        sale.created_by_name = creator.name if creator else None
+        sale.created_by_name = creator_name_by_id.get(sale.user_id)
     
     return sales
 

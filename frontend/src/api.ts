@@ -576,14 +576,23 @@ export async function createBranchTransfer(payload: {
 // Settings API
 
 export async function fetchSystemSettings(): Promise<SystemSettings> {
-  return jsonRequest<SystemSettings>("/settings/system");
+  const cached = getCached<SystemSettings>("systemSettings");
+  if (cached && isCacheFresh("systemSettings")) {
+    return cached;
+  }
+
+  const data = await jsonRequest<SystemSettings>("/settings/system");
+  setCache("systemSettings", data);
+  return data;
 }
 
 export async function updateSystemSettings(payload: SystemSettings): Promise<SystemSettings> {
-  return jsonRequest<SystemSettings>("/settings/system", {
+  const updated = await jsonRequest<SystemSettings>("/settings/system", {
     method: "PUT",
     body: JSON.stringify(payload),
   });
+  setCache("systemSettings", updated);
+  return updated;
 }
 
 export type MovementsQuery = {

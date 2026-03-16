@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { fetchProducts, fetchSalesDashboard, fetchSystemSettings, getCachedProducts } from "../api";
+import { fetchProductsCached, fetchSalesDashboard, fetchSystemSettings, getCachedProducts } from "../api";
 import { Product } from "../types";
 import { useExpiryTracking } from "../settings";
 
@@ -68,7 +68,7 @@ export default function Dashboard({ onNavigate }: Props) {
     }
 
     try {
-      const data = await fetchProducts();
+      const data = await fetchProductsCached((fresh) => setProducts(fresh));
       setProducts(data);
     } finally {
       setLoading(false);
@@ -91,22 +91,37 @@ export default function Dashboard({ onNavigate }: Props) {
   };
 
   useEffect(() => {
-    // Only fetch products if authenticated
     if (!token) {
       setLoading(false);
+      setDashboardLoading(false);
       return;
     }
 
     const loadData = async () => {
       try {
-        const data = await fetchProducts();
-        setProducts(data);
+        const [productsData, settingsData, dashboardResponse] = await Promise.all([
+          fetchProductsCached((fresh) => setProducts(fresh)),
+          fetchSystemSettings().catch(() => null),
+          isAdmin ? fetchSalesDashboard() : Promise.resolve(null),
+        ]);
+
+        setProducts(productsData);
+
+        if (settingsData) {
+          setLowStockThreshold(settingsData.low_stock_threshold);
+          setExpiryWarningDays(settingsData.expiry_warning_days);
+        }
+
+        if (isAdmin && dashboardResponse) {
+          setDashboardData(dashboardResponse);
+        }
       } finally {
         setLoading(false);
+        setDashboardLoading(false);
       }
     };
     loadData();
-  }, [token]);
+  }, [token, isAdmin]);
 
   useEffect(() => {
     const handler = () => {
@@ -116,38 +131,6 @@ export default function Dashboard({ onNavigate }: Props) {
     return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, isAdmin, topProductsDate]);
-
-  useEffect(() => {
-    if (!token) return;
-    (async () => {
-      try {
-        const settings = await fetchSystemSettings();
-        setLowStockThreshold(settings.low_stock_threshold);
-        setExpiryWarningDays(settings.expiry_warning_days);
-      } catch {
-        // ignore
-      }
-    })();
-  }, [token]);
-
-  useEffect(() => {
-    const loadDashboard = async () => {
-      // Only fetch dashboard if authenticated and admin
-      if (!token || !isAdmin) {
-        setDashboardLoading(false);
-        return;
-      }
-      try {
-        const data = await fetchSalesDashboard();
-        setDashboardData(data);
-      } catch (error) {
-        console.error("Error loading dashboard:", error);
-      } finally {
-        setDashboardLoading(false);
-      }
-    };
-    loadDashboard();
-  }, [token, isAdmin]);
 
   // Reload top products with date filter
   const handleFilterTopProducts = async () => {

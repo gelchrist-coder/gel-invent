@@ -119,28 +119,46 @@ def writeoff_expired_batches(
         .having(func.sum(models.StockMovement.change) > 0)
     ).all()
 
+    product_ids = sorted({int(pid) for pid, *_ in rows})
+    batch_numbers = sorted({str(batch_number) for _pid, batch_number, *_rest in rows if batch_number})
+
+    latest_unit_cost_by_key: dict[tuple[int, str], Decimal | None] = {}
+    if product_ids and batch_numbers:
+        unit_cost_rows = db.execute(
+            select(
+                models.StockMovement.product_id,
+                models.StockMovement.batch_number,
+                models.StockMovement.unit_cost_price,
+                models.StockMovement.created_at,
+            )
+            .where(
+                models.StockMovement.product_id.in_(product_ids),
+                models.StockMovement.branch_id == branch_id,
+                models.StockMovement.user_id.in_(tenant_user_ids),
+                models.StockMovement.batch_number.in_(batch_numbers),
+                models.StockMovement.change > 0,
+            )
+            .order_by(
+                models.StockMovement.product_id.asc(),
+                models.StockMovement.batch_number.asc(),
+                models.StockMovement.created_at.desc(),
+            )
+        ).all()
+
+        for pid, batch_number, unit_cost, _created_at in unit_cost_rows:
+            if not batch_number:
+                continue
+            key = (int(pid), str(batch_number))
+            if key not in latest_unit_cost_by_key:
+                latest_unit_cost_by_key[key] = unit_cost
+
     created = 0
     for pid, batch_number, expiry_dt, location, balance in rows:
         bal = balance if isinstance(balance, Decimal) else Decimal(str(balance or 0))
         if bal <= 0:
             continue
 
-        # Try to copy the latest known unit cost for this batch (from stock-in movements).
-        unit_cost_price = None
-        try:
-            unit_cost_price = db.scalar(
-                select(models.StockMovement.unit_cost_price)
-                .where(
-                    models.StockMovement.product_id == int(pid),
-                    models.StockMovement.branch_id == branch_id,
-                    models.StockMovement.user_id.in_(tenant_user_ids),
-                    models.StockMovement.batch_number == str(batch_number),
-                    models.StockMovement.change > 0,
-                )
-                .order_by(models.StockMovement.created_at.desc())
-            )
-        except Exception:
-            unit_cost_price = None
+        unit_cost_price = latest_unit_cost_by_key.get((int(pid), str(batch_number)))
         db.add(
             models.StockMovement(
                 user_id=actor_user_id,
