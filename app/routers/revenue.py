@@ -66,14 +66,12 @@ def get_revenue_analytics(
             start = datetime(2000, 1, 1)
             end = now
     
-    # Get sales in period (filtered by tenant)
-    sales_query = select(Sale).join(Product).where(
+    # Get sales in period (filtered by tenant + active branch)
+    sales_query = select(Sale).where(
         Sale.created_at >= start,
         Sale.created_at <= end,
+        Sale.user_id.in_(tenant_user_ids),
         Sale.branch_id == active_branch_id,
-        Product.user_id.in_(tenant_user_ids)
-        ,
-        Product.branch_id == active_branch_id,
     )
     sales = db.scalars(sales_query).all()
 
@@ -140,17 +138,30 @@ def get_revenue_analytics(
     
     # Get losses/write-offs (stock movements with negative change for expired/damaged goods)
     loss_reasons = ["Expired", "Damaged", "Lost", "Lost/Stolen", "Write-off", "Spoiled", "Destroyed"]
-    losses_query = select(StockMovement).join(Product).where(
+    losses_query = select(StockMovement).where(
         StockMovement.created_at >= start,
         StockMovement.created_at <= end,
         StockMovement.change < 0,
         StockMovement.reason.in_(loss_reasons),
+        StockMovement.user_id.in_(tenant_user_ids),
         StockMovement.branch_id == active_branch_id,
-        Product.user_id.in_(tenant_user_ids)
-        ,
-        Product.branch_id == active_branch_id,
     )
     losses = db.scalars(losses_query).all()
+
+    # Preload products used by this analytics run (avoids N+1 lookups).
+    sale_product_ids = {int(s.product_id) for s in sales}
+    loss_product_ids = {int(l.product_id) for l in losses}
+    analytics_product_ids = sorted(sale_product_ids | loss_product_ids)
+    products_by_id: dict[int, Product] = {}
+    if analytics_product_ids:
+        product_rows = db.scalars(
+            select(Product).where(
+                Product.id.in_(analytics_product_ids),
+                Product.user_id.in_(tenant_user_ids),
+                Product.branch_id == active_branch_id,
+            )
+        ).all()
+        products_by_id = {int(p.id): p for p in product_rows}
     
     # Calculate metrics
     total_revenue = Decimal(0)
@@ -178,7 +189,10 @@ def get_revenue_analytics(
             return "cash"
         return "cash"
 
-    def compute_returns_totals(range_start: datetime, range_end: datetime) -> tuple[Decimal, Decimal, Decimal]:
+    def compute_returns_totals(
+        range_start: datetime,
+        range_end: datetime,
+    ) -> tuple[Decimal, Decimal, Decimal, Decimal, Decimal, dict[str, Decimal]]:
         """
         Calculate returns totals from both:
         1. SaleReturn records (new system)
@@ -187,6 +201,9 @@ def get_revenue_analytics(
         returns_revenue = Decimal(0)
         returns_cost = Decimal(0)
         returns_profit = Decimal(0)
+        cash_refunds = Decimal(0)
+        credit_refunds = Decimal(0)
+        daily_refunds: dict[str, Decimal] = {}
         
         # First, check the new SaleReturn model
         sale_returns = db.scalars(
@@ -197,19 +214,38 @@ def get_revenue_analytics(
                 SaleReturn.user_id.in_(tenant_user_ids),
             )
         ).all()
+
+        sale_return_sale_ids = {int(sr.sale_id) for sr in sale_returns if sr.sale_id is not None}
+        return_product_ids = sorted({int(sr.product_id) for sr in sale_returns})
+        return_products = db.scalars(
+            select(Product).where(
+                Product.id.in_(return_product_ids),
+                Product.user_id.in_(tenant_user_ids),
+                Product.branch_id == active_branch_id,
+            )
+        ).all() if return_product_ids else []
+        return_product_by_id = {int(p.id): p for p in return_products}
         
         for sr in sale_returns:
             returns_revenue += sr.refund_amount
             # Estimate cost based on product
-            product = db.get(Product, sr.product_id)
-            if product and product.cost_price:
+            product = return_product_by_id.get(int(sr.product_id))
+            if product and product.cost_price is not None:
                 cost_value = sr.quantity_returned * product.cost_price
                 returns_cost += cost_value
+
+            if (sr.refund_method or "").lower() == "credit_to_account":
+                credit_refunds += sr.refund_amount
+            else:
+                cash_refunds += sr.refund_amount
+
+            day_key = sr.created_at.strftime("%Y-%m-%d")
+            daily_refunds[day_key] = daily_refunds.get(day_key, Decimal(0)) + sr.refund_amount
         
         returns_profit = returns_revenue - returns_cost
         
         # Also check legacy stock movements marked as returns (for backwards compatibility)
-        returns_query = select(StockMovement).join(Product).where(
+        returns_query = select(StockMovement).where(
             StockMovement.created_at >= range_start,
             StockMovement.created_at <= range_end,
             StockMovement.change > 0,
@@ -217,20 +253,32 @@ def get_revenue_analytics(
                 StockMovement.reason.like("Returned%"),
                 StockMovement.reason == "Customer Return",
             ),
+            StockMovement.user_id.in_(tenant_user_ids),
             StockMovement.branch_id == active_branch_id,
-            Product.user_id.in_(tenant_user_ids),
-            Product.branch_id == active_branch_id,
         )
-        returns_movements = db.scalars(returns_query).all()
-        returns_profit = Decimal(0)
-
-        for movement in returns_movements:
-            product = db.scalar(
-                select(Product).where(
-                    Product.id == movement.product_id,
-                    Product.user_id.in_(tenant_user_ids),
+        # Avoid double-counting modern returns already recorded in SaleReturn.
+        if sale_return_sale_ids:
+            returns_query = returns_query.where(
+                or_(
+                    StockMovement.sale_id.is_(None),
+                    ~StockMovement.sale_id.in_(sale_return_sale_ids),
                 )
             )
+
+        returns_movements = db.scalars(returns_query).all()
+
+        legacy_product_ids = sorted({int(m.product_id) for m in returns_movements})
+        legacy_products = db.scalars(
+            select(Product).where(
+                Product.id.in_(legacy_product_ids),
+                Product.user_id.in_(tenant_user_ids),
+                Product.branch_id == active_branch_id,
+            )
+        ).all() if legacy_product_ids else []
+        legacy_product_by_id = {int(p.id): p for p in legacy_products}
+
+        for movement in returns_movements:
+            product = legacy_product_by_id.get(int(movement.product_id))
             if not product:
                 continue
 
@@ -252,8 +300,12 @@ def get_revenue_analytics(
             returns_revenue += revenue_value
             returns_cost += cost_value
             returns_profit += profit_value
+            cash_refunds += revenue_value
 
-        return returns_revenue, returns_cost, returns_profit
+            day_key = movement.created_at.strftime("%Y-%m-%d")
+            daily_refunds[day_key] = daily_refunds.get(day_key, Decimal(0)) + revenue_value
+
+        return returns_revenue, returns_cost, returns_profit, cash_refunds, credit_refunds, daily_refunds
     
     for sale in sales:
         # Revenue
@@ -283,13 +335,7 @@ def get_revenue_analytics(
             cash_revenue += sale.total_price
         
         # Get product for naming/sku and fallback prices
-        product = db.scalar(
-            select(Product).where(
-                Product.id == sale.product_id,
-                Product.user_id.in_(tenant_user_ids),
-                Product.branch_id == active_branch_id,
-            )
-        )
+        product = products_by_id.get(int(sale.product_id))
 
         cost = cost_by_sale_id.get(sale.id)
         if cost is None:
@@ -380,47 +426,32 @@ def get_revenue_analytics(
                     del payment_methods["credit"]
 
     # Deduct returns from revenue using product selling_price
-    returns_revenue, returns_cost, returns_profit = compute_returns_totals(start, end)
+    returns_revenue, returns_cost, returns_profit, cash_refunds, credit_refunds, daily_refunds = compute_returns_totals(start, end)
     if returns_revenue != 0:
         total_revenue -= returns_revenue
-        cash_revenue -= returns_revenue
+        cash_revenue -= cash_refunds
+        credit_revenue -= credit_refunds
+        if credit_revenue < 0:
+            credit_revenue = Decimal(0)
         total_profit -= returns_profit
         total_cost -= returns_cost
-        # Reflect on payment breakdown + daily trend (assume cash refund)
-        payment_methods["cash"] = payment_methods.get("cash", Decimal(0)) - returns_revenue
+        # Reflect refund allocation on payment breakdown.
+        if cash_refunds > 0:
+            payment_methods["cash"] = payment_methods.get("cash", Decimal(0)) - cash_refunds
+            if payment_methods["cash"] <= 0:
+                del payment_methods["cash"]
+        if credit_refunds > 0 and "credit" in payment_methods:
+            payment_methods["credit"] = payment_methods.get("credit", Decimal(0)) - credit_refunds
+            if payment_methods["credit"] <= 0:
+                del payment_methods["credit"]
 
-        # Reduce daily revenue trend by day of the return movement
-        returns_movements_for_days = db.scalars(
-            select(StockMovement)
-            .where(
-                StockMovement.created_at >= start,
-                StockMovement.created_at <= end,
-                StockMovement.change > 0,
-                StockMovement.reason.like("Returned%"),
-                StockMovement.user_id.in_(tenant_user_ids),
-                StockMovement.branch_id == active_branch_id,
-            )
-        ).all()
-        for movement in returns_movements_for_days:
-            product = db.scalar(
-                select(Product).where(
-                    Product.id == movement.product_id,
-                    Product.user_id.in_(tenant_user_ids),
-                    Product.branch_id == active_branch_id,
-                )
-            )
-            if not product or product.selling_price is None:
-                continue
-            day_key = movement.created_at.strftime("%Y-%m-%d")
-            daily_revenue[day_key] = daily_revenue.get(day_key, Decimal(0)) - (movement.change * Decimal(product.selling_price))
+        # Reduce daily revenue trend by actual refund day/amount.
+        for day_key, refund_amount in daily_refunds.items():
+            daily_revenue[day_key] = daily_revenue.get(day_key, Decimal(0)) - refund_amount
     
     # Calculate losses from expired/damaged goods
     for loss in losses:
-        product = db.scalar(select(Product).where(
-            Product.id == loss.product_id,
-            Product.user_id.in_(tenant_user_ids),
-            Product.branch_id == active_branch_id,
-        ))
+        product = products_by_id.get(int(loss.product_id))
         unit_cost = (
             Decimal(loss.unit_cost_price)
             if getattr(loss, "unit_cost_price", None) is not None
@@ -442,18 +473,16 @@ def get_revenue_analytics(
     prev_start = start - timedelta(days=period_length)
     prev_end = start
     
-    prev_sales_query = select(Sale).join(Product).where(
+    prev_sales_query = select(Sale).where(
         Sale.created_at >= prev_start,
         Sale.created_at < prev_end,
         Sale.branch_id == active_branch_id,
-        Product.user_id.in_(tenant_user_ids)
-        ,
-        Product.branch_id == active_branch_id,
+        Sale.user_id.in_(tenant_user_ids),
     )
     prev_sales = db.scalars(prev_sales_query).all()
     prev_revenue = sum(s.total_price for s in prev_sales)
 
-    prev_returns_revenue, _, _ = compute_returns_totals(prev_start, prev_end)
+    prev_returns_revenue, _, _, _, _, _ = compute_returns_totals(prev_start, prev_end)
     prev_revenue -= prev_returns_revenue
     
     revenue_growth = ((total_revenue - prev_revenue) / prev_revenue * 100) if prev_revenue > 0 else Decimal(0)
@@ -473,8 +502,18 @@ def get_revenue_analytics(
         product["profit"] = float(product["profit"])
         product["profit_margin"] = float((product["profit"] / product["revenue"] * 100) if product["revenue"] > 0 else 0)
     
-    # Daily trend (last 30 days)
-    trend_days = 30 if period == "30d" or period == "90d" else 7 if period == "7d" else (end - start).days + 1
+    # Daily trend
+    if period == "today":
+        trend_days = 1
+    elif period == "7d":
+        trend_days = 7
+    elif period == "30d":
+        trend_days = 30
+    elif period == "90d":
+        trend_days = 90
+    else:
+        # Keep payload bounded for all-time to protect API and frontend rendering.
+        trend_days = min((end - start).days + 1, 365)
     daily_trend = []
     for i in range(trend_days):
         day = (end - timedelta(days=trend_days - 1 - i)).strftime("%Y-%m-%d")
