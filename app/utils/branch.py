@@ -19,8 +19,7 @@ def get_owner_user_id(current_user: models.User) -> int:
 
 
 def ensure_default_branch(db: Session, owner_user_id: int) -> models.Branch:
-    """Ensure at least one active branch exists for the tenant."""
-    # Check if ANY branch exists for this owner
+    """Return the tenant's first active branch, or raise if none exists."""
     any_branch = (
         db.query(models.Branch)
         .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.is_active.is_(True))
@@ -30,12 +29,10 @@ def ensure_default_branch(db: Session, owner_user_id: int) -> models.Branch:
     if any_branch:
         return any_branch
 
-    # No branches exist, create a generic first branch.
-    branch = models.Branch(owner_user_id=owner_user_id, name="Default Branch", is_active=True)
-    db.add(branch)
-    db.commit()
-    db.refresh(branch)
-    return branch
+    raise HTTPException(
+        status_code=400,
+        detail="No active branch found. Please create a branch in Settings.",
+    )
 
 
 def get_preferred_default_branch(db: Session, owner_user_id: int) -> models.Branch:
@@ -52,7 +49,10 @@ def get_preferred_default_branch(db: Session, owner_user_id: int) -> models.Bran
     if preferred:
         return preferred
 
-    return ensure_default_branch(db, owner_user_id)
+    raise HTTPException(
+        status_code=400,
+        detail="No active branch found. Please create a branch in Settings.",
+    )
 
 
 def resolve_active_branch_id(

@@ -149,27 +149,7 @@ def _run_startup_migrations_sync() -> None:
             # Don't block startup; the API also enforces this rule at write-time.
             print(f"⚠️  Could not create unique index for product names: {e}")
 
-    # Backfill branch IDs for existing rows into each tenant's first active branch.
-    with Session(engine) as db:
-        admin_users = db.query(models.User).filter(models.User.role == "Admin").all()
-        for admin in admin_users:
-            default_branch = (
-                db.query(models.Branch)
-                .filter(
-                    models.Branch.owner_user_id == admin.id,
-                    models.Branch.is_active.is_(True),
-                )
-                .order_by(models.Branch.created_at.asc(), models.Branch.id.asc())
-                .first()
-            )
-            if not default_branch:
-                default_branch = models.Branch(owner_user_id=admin.id, name="Default Branch", is_active=True)
-                db.add(default_branch)
-                db.flush()
-
-        db.commit()
-
-    # Use SQL for bulk backfills (idempotent).
+    # Use SQL for branch-scoped bulk backfills (idempotent).
     with engine.begin() as conn:
                 # Employees without a branch_id get their owner's first active branch.
         conn.execute(

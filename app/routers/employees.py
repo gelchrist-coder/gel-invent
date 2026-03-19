@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User, Branch
 from app.auth import get_current_active_user, get_password_hash
-from app.utils.branch import get_owner_user_id, ensure_default_branch
+from app.utils.branch import get_owner_user_id
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
@@ -70,7 +70,21 @@ def create_employee(
 
     branch_id = employee_data.branch_id
     if branch_id is None:
-        branch_id = ensure_default_branch(db, owner_user_id).id
+        default_branch = (
+            db.query(Branch)
+            .filter(
+                Branch.owner_user_id == owner_user_id,
+                Branch.is_active.is_(True),
+            )
+            .order_by(Branch.created_at.asc(), Branch.id.asc())
+            .first()
+        )
+        if not default_branch:
+            raise HTTPException(
+                status_code=400,
+                detail="No active branch found. Please create a branch in Settings before adding employees.",
+            )
+        branch_id = default_branch.id
     else:
         branch = (
             db.query(Branch)

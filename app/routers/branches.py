@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.deps import get_db
 from app.auth import get_current_active_user
-from app.utils.branch import get_owner_user_id, ensure_default_branch
+from app.utils.branch import get_owner_user_id
 
 router = APIRouter(prefix="/branches", tags=["branches"])
 
@@ -34,15 +34,41 @@ def list_branches(
 ):
     owner_user_id = get_owner_user_id(current_user)
 
-    # Ensure at least one default branch exists for the tenant.
-    ensure_default_branch(db, owner_user_id)
-
-    return (
+    branches = (
         db.query(models.Branch)
         .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.is_active.is_(True))
         .order_by(models.Branch.created_at.asc(), models.Branch.id.asc())
         .all()
     )
+
+    # Clean up legacy placeholder branches only when they are extra and truly unused.
+    placeholder_names = {"main branch", "default branch"}
+    if len(branches) > 1:
+        for branch in list(branches):
+            normalized_name = (branch.name or "").strip().lower()
+            if normalized_name not in placeholder_names:
+                continue
+
+            has_products = db.query(models.Product.id).filter(models.Product.branch_id == branch.id).first() is not None
+            has_sales = db.query(models.Sale.id).filter(models.Sale.branch_id == branch.id).first() is not None
+            has_movements = db.query(models.StockMovement.id).filter(models.StockMovement.branch_id == branch.id).first() is not None
+            has_creditors = db.query(models.Creditor.id).filter(models.Creditor.branch_id == branch.id).first() is not None
+            has_credit_tx = db.query(models.CreditTransaction.id).filter(models.CreditTransaction.branch_id == branch.id).first() is not None
+            has_returns = db.query(models.SaleReturn.id).filter(models.SaleReturn.branch_id == branch.id).first() is not None
+            has_users = db.query(models.User.id).filter(models.User.branch_id == branch.id).first() is not None
+
+            if not any([has_products, has_sales, has_movements, has_creditors, has_credit_tx, has_returns, has_users]):
+                db.delete(branch)
+
+        db.commit()
+        branches = (
+            db.query(models.Branch)
+            .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.is_active.is_(True))
+            .order_by(models.Branch.created_at.asc(), models.Branch.id.asc())
+            .all()
+        )
+
+    return branches
 
 
 @router.post("", response_model=BranchRead, status_code=status.HTTP_201_CREATED)
