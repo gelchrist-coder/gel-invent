@@ -55,7 +55,7 @@ export default function Creditors() {
 
   return (
     <div className="app-shell">
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>
+      <h1 className="page-title" style={{ marginBottom: 24 }}>
         Creditors Management
       </h1>
 

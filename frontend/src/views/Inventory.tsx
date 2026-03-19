@@ -244,7 +244,7 @@ export default function Inventory() {
   if (loading) {
     return (
       <div className="app-shell">
-        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>Inventory Tracking</h1>
+        <h1 className="page-title" style={{ marginBottom: 24 }}>Inventory Tracking</h1>
         <div className="card">
           <p style={{ margin: 0, color: "#6b7280" }}>Loading inventory data...</p>
         </div>
@@ -255,7 +255,7 @@ export default function Inventory() {
   if (error) {
     return (
       <div className="app-shell">
-        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>Inventory Tracking</h1>
+        <h1 className="page-title" style={{ marginBottom: 24 }}>Inventory Tracking</h1>
         <div className="card">
           <p style={{ margin: 0, color: "#ef4444" }}>Error: {error}</p>
           <button
@@ -284,7 +284,7 @@ export default function Inventory() {
   return (
     <div className="app-shell">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Inventory Tracking</h1>
+        <h1 className="page-title" style={{ margin: 0 }}>Inventory Tracking</h1>
         <button
           onClick={loadData}
           style={{

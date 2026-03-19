@@ -371,7 +371,7 @@ export default function Profile() {
       />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Profile & Settings</h1>
+        <h1 className="page-title" style={{ margin: 0 }}>Profile & Settings</h1>
         {editing ? (
           <div style={{ display: "flex", gap: 12 }}>
             <button

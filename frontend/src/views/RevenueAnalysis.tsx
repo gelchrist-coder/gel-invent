@@ -118,7 +118,7 @@ export default function RevenueAnalysis() {
   if (loading) {
     return (
       <div className="app-shell">
-        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>Revenue Analysis</h1>
+        <h1 className="page-title" style={{ marginBottom: 24 }}>Revenue Analysis</h1>
         <div className="card">
           <p style={{ margin: 0, color: "#6b7280" }}>Loading revenue data...</p>
         </div>
@@ -129,7 +129,7 @@ export default function RevenueAnalysis() {
   if (error) {
     return (
       <div className="app-shell">
-        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>Revenue Analysis</h1>
+        <h1 className="page-title" style={{ marginBottom: 24 }}>Revenue Analysis</h1>
         <div className="card">
           <p style={{ margin: 0, color: "#ef4444" }}>Error: {error}</p>
           <button
@@ -158,7 +158,7 @@ export default function RevenueAnalysis() {
   return (
     <div className="app-shell">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Revenue Analysis</h1>
+        <h1 className="page-title" style={{ margin: 0 }}>Revenue Analysis</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <label style={{ fontSize: 14, color: "#6b7280", fontWeight: 500 }}>Period:</label>
           <select

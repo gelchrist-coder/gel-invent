@@ -318,7 +318,7 @@ export default function Reports() {
 
   return (
     <div style={{ padding: 20 }}>
-      <h1 style={{ marginBottom: 24, fontSize: 28, fontWeight: 700 }}>Reports</h1>
+      <h1 className="page-title" style={{ marginBottom: 24 }}>Reports</h1>
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 24, borderBottom: "2px solid #e5e7eb" }}>
         {(["sales", "inventory", "creditors"] as const).map((tab) => (

@@ -271,7 +271,7 @@ export default function Dashboard({ onNavigate }: Props) {
 
   return (
     <div className="app-shell">
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>Dashboard</h1>
+      <h1 className="page-title" style={{ marginBottom: 24 }}>Dashboard</h1>
 
       {/* Quick Actions */}
       <div className="card" style={{ marginBottom: 24 }}>

@@ -197,10 +197,10 @@ export default function UserManagement() {
   }
 
   return (
-    <div style={{ padding: 32 }}>
+    <div className="app-shell">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700 }}>User Management</h1>
+          <h1 className="page-title" style={{ margin: 0 }}>User Management</h1>
           <p style={{ margin: "8px 0 0", color: "#5f6475" }}>Manage your sales personnel</p>
         </div>
         <button
