@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { fetchProductsCached, fetchSalesDashboard, fetchSystemSettings, getCachedProducts } from "../api";
+import { fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSystemSettings, getCachedProducts } from "../api";
 import { Product } from "../types";
 import { useExpiryTracking } from "../settings";
 
@@ -39,12 +39,24 @@ type LowStockItem = {
   minStock: number;
 };
 
+type TrendSale = {
+  created_at: string;
+  total_price?: number | string;
+};
+
+type TrendPoint = {
+  key: string;
+  label: string;
+  revenue: number;
+};
+
 export default function Dashboard({ onNavigate }: Props) {
   // Initialize from cache for instant display
   const cachedProducts = getCachedProducts();
   const [products, setProducts] = useState<Product[]>(cachedProducts || []);
   const [loading, setLoading] = useState(!cachedProducts); // Only show loading if no cache
   const [dashboardData, setDashboardData] = useState<SalesDashboardResponse | null>(null);
+  const [salesForTrend, setSalesForTrend] = useState<TrendSale[]>([]);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
   const [expiryWarningDays, setExpiryWarningDays] = useState<number>(180);
@@ -68,8 +80,14 @@ export default function Dashboard({ onNavigate }: Props) {
     }
 
     try {
-      const data = await fetchProductsCached((fresh) => setProducts(fresh));
-      setProducts(data);
+      const [productData, salesData] = await Promise.all([
+        fetchProductsCached((fresh) => setProducts(fresh)),
+        isAdmin ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])) : Promise.resolve([]),
+      ]);
+      setProducts(productData);
+      if (isAdmin) {
+        setSalesForTrend(salesData as TrendSale[]);
+      }
     } finally {
       setLoading(false);
     }
@@ -99,10 +117,11 @@ export default function Dashboard({ onNavigate }: Props) {
 
     const loadData = async () => {
       try {
-        const [productsData, settingsData, dashboardResponse] = await Promise.all([
+        const [productsData, settingsData, dashboardResponse, salesData] = await Promise.all([
           fetchProductsCached((fresh) => setProducts(fresh)),
           fetchSystemSettings().catch(() => null),
           isAdmin ? fetchSalesDashboard() : Promise.resolve(null),
+          isAdmin ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])).catch(() => []) : Promise.resolve([]),
         ]);
 
         setProducts(productsData);
@@ -114,6 +133,10 @@ export default function Dashboard({ onNavigate }: Props) {
 
         if (isAdmin && dashboardResponse) {
           setDashboardData(dashboardResponse);
+        }
+
+        if (isAdmin) {
+          setSalesForTrend(salesData as TrendSale[]);
         }
       } finally {
         setLoading(false);
@@ -165,6 +188,57 @@ export default function Dashboard({ onNavigate }: Props) {
 
   // Recent sales from dashboard data
   const recentSales = dashboardData?.recent_sales ?? [];
+
+  const salesTrend = useMemo<TrendPoint[]>(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const points: TrendPoint[] = [];
+    const dayMap = new Map<string, number>();
+
+    for (let i = 13; i >= 0; i -= 1) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      points.push({ key, label, revenue: 0 });
+      dayMap.set(key, 0);
+    }
+
+    const source = salesForTrend.length > 0
+      ? salesForTrend
+      : recentSales.map((s) => ({ created_at: s.created_at, total_price: s.total_price }));
+
+    for (const sale of source) {
+      const saleDate = new Date(sale.created_at);
+      if (Number.isNaN(saleDate.getTime())) continue;
+      const key = saleDate.toISOString().slice(0, 10);
+      if (!dayMap.has(key)) continue;
+      const amount = Number(sale.total_price ?? 0);
+      dayMap.set(key, (dayMap.get(key) ?? 0) + (Number.isFinite(amount) ? amount : 0));
+    }
+
+    return points.map((p) => ({ ...p, revenue: dayMap.get(p.key) ?? 0 }));
+  }, [salesForTrend, recentSales]);
+
+  const topProductsBars = useMemo(
+    () => topProducts.slice(0, 6).map((p) => ({
+      name: p.name,
+      revenue: Number(p.revenue),
+      qty: Number(p.quantity_sold),
+    })),
+    [topProducts]
+  );
+
+  const trendMax = Math.max(...salesTrend.map((d) => d.revenue), 1);
+  const trendPoints = salesTrend
+    .map((d, i) => {
+      const x = salesTrend.length > 1 ? (i / (salesTrend.length - 1)) * 100 : 0;
+      const y = 100 - (d.revenue / trendMax) * 100;
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  const topRevenueMax = Math.max(...topProductsBars.map((p) => p.revenue), 1);
 
   // Stock alerts - will be based on real stock movements when implemented
   const lowStockItems: LowStockItem[] = products
@@ -224,6 +298,72 @@ export default function Dashboard({ onNavigate }: Props) {
           ))}
         </div>
       </div>
+
+      {isAdmin && (
+        <div className="grid" style={{ gridTemplateColumns: "1.2fr 1fr", gap: 16, marginBottom: 24 }}>
+          <div className="card">
+            <h2 className="section-title" style={{ marginBottom: 10 }}>Sales Over Time (Last 14 Days)</h2>
+            {dashboardLoading ? (
+              <p style={{ margin: 0, color: "#4a5368" }}>Loading chart...</p>
+            ) : (
+              <>
+                <div style={{ width: "100%", height: 220, background: "#f8fbff", border: "1px solid #e6e9f2", borderRadius: 10, padding: 12 }}>
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }}>
+                    <line x1="0" y1="100" x2="100" y2="100" stroke="#cbd5e1" strokeWidth="0.8" />
+                    <line x1="0" y1="0" x2="0" y2="100" stroke="#cbd5e1" strokeWidth="0.8" />
+                    <polyline
+                      fill="none"
+                      stroke="#2563eb"
+                      strokeWidth="2"
+                      points={trendPoints}
+                    />
+                    {salesTrend.map((d, i) => {
+                      const x = salesTrend.length > 1 ? (i / (salesTrend.length - 1)) * 100 : 0;
+                      const y = 100 - (d.revenue / trendMax) * 100;
+                      return <circle key={d.key} cx={x} cy={y} r="1.5" fill="#1d4ed8" />;
+                    })}
+                  </svg>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 12, color: "#64748b" }}>
+                  <span>{salesTrend[0]?.label}</span>
+                  <span>{salesTrend[salesTrend.length - 1]?.label}</span>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="card">
+            <h2 className="section-title" style={{ marginBottom: 10 }}>Top Products (Revenue)</h2>
+            {dashboardLoading || topProductsLoading ? (
+              <p style={{ margin: 0, color: "#4a5368" }}>Loading chart...</p>
+            ) : topProductsBars.length === 0 ? (
+              <p style={{ margin: 0, color: "#4a5368" }}>No data yet</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {topProductsBars.map((item) => (
+                  <div key={item.name}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                      <span style={{ fontWeight: 600 }}>{item.name}</span>
+                      <span style={{ color: "#0f766e", fontWeight: 700 }}>GHS {item.revenue.toFixed(2)}</span>
+                    </div>
+                    <div style={{ height: 10, width: "100%", background: "#e2e8f0", borderRadius: 999, overflow: "hidden" }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${Math.max((item.revenue / topRevenueMax) * 100, 4)}%`,
+                          borderRadius: 999,
+                          background: "linear-gradient(90deg, #16a34a, #22c55e)",
+                        }}
+                      />
+                    </div>
+                    <div style={{ marginTop: 2, fontSize: 11, color: "#64748b" }}>{item.qty} units sold</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
         {/* Top Products */}
