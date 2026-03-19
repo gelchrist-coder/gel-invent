@@ -152,6 +152,87 @@ interface CreditorsSummary {
   }>;
 }
 
+type BarChartItem = {
+  label: string;
+  value: number;
+  subLabel?: string;
+  color?: string;
+};
+
+function HorizontalBarChart({
+  title,
+  items,
+  formatValue,
+}: {
+  title: string;
+  items: BarChartItem[];
+  formatValue: (value: number) => string;
+}) {
+  if (items.length === 0) {
+    return (
+      <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
+        <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 600 }}>{title}</h3>
+        <p style={{ margin: 0, color: "#6b7280" }}>No chart data available</p>
+      </div>
+    );
+  }
+
+  const maxValue = Math.max(...items.map((item) => item.value), 0);
+
+  return (
+    <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
+      <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 600 }}>{title}</h3>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {items.map((item) => {
+          const ratio = maxValue > 0 ? (item.value / maxValue) * 100 : 0;
+          return (
+            <div key={item.label}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {item.label}
+                  </p>
+                  {item.subLabel && <p style={{ margin: "2px 0 0", fontSize: 12, color: "#6b7280" }}>{item.subLabel}</p>}
+                </div>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "#111827", flexShrink: 0 }}>
+                  {formatValue(item.value)}
+                </p>
+              </div>
+              <div
+                style={{
+                  width: "100%",
+                  height: 10,
+                  borderRadius: 999,
+                  backgroundColor: "#eef2ff",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.max(ratio, item.value > 0 ? 3 : 0)}%`,
+                    height: "100%",
+                    borderRadius: 999,
+                    background: item.color || "linear-gradient(90deg, #2563eb, #60a5fa)",
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function Reports() {
   // Check if current user is Admin
   const currentUser = localStorage.getItem("user");
@@ -317,6 +398,30 @@ export default function Reports() {
             </div>
           </div>
 
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 24 }}>
+            <HorizontalBarChart
+              title="Payment Method Distribution"
+              items={salesData.payment_methods.map((pm, index) => ({
+                label: pm.method,
+                value: pm.total,
+                subLabel: `${pm.count} sales`,
+                color: index % 2 === 0 ? "linear-gradient(90deg, #16a34a, #4ade80)" : "linear-gradient(90deg, #0284c7, #38bdf8)",
+              }))}
+              formatValue={formatCurrency}
+            />
+
+            <HorizontalBarChart
+              title="Top Product Revenue"
+              items={salesData.top_products.slice(0, 6).map((prod, index) => ({
+                label: prod.name,
+                value: prod.revenue,
+                subLabel: `${prod.quantity_sold} units sold`,
+                color: index % 2 === 0 ? "linear-gradient(90deg, #9333ea, #c084fc)" : "linear-gradient(90deg, #f59e0b, #fcd34d)",
+              }))}
+              formatValue={formatCurrency}
+            />
+          </div>
+
           {/* Payment Methods */}
           <div style={{ marginBottom: 24 }}>
             <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Sales by Payment Method</h2>
@@ -470,6 +575,22 @@ export default function Reports() {
             </div>
           </div>
 
+          <div style={{ marginBottom: 24 }}>
+            <HorizontalBarChart
+              title="Stock by Category"
+              items={inventoryData.by_category
+                .sort((a, b) => b.total_stock - a.total_stock)
+                .slice(0, 8)
+                .map((cat, index) => ({
+                  label: cat.category,
+                  value: cat.total_stock,
+                  subLabel: `${cat.product_count} products`,
+                  color: index % 2 === 0 ? "linear-gradient(90deg, #0d9488, #2dd4bf)" : "linear-gradient(90deg, #3b82f6, #93c5fd)",
+                }))}
+              formatValue={(value) => value.toFixed(0)}
+            />
+          </div>
+
           {/* Alerts */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
             {/* Low Stock */}
@@ -575,6 +696,19 @@ export default function Reports() {
                 </div>
               </div>
             </div>
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <HorizontalBarChart
+              title="Debt Distribution by Creditor"
+              items={creditorsData.top_debtors.slice(0, 8).map((debtor, index) => ({
+                label: debtor.name,
+                value: debtor.total_debt,
+                subLabel: debtor.phone || "No phone",
+                color: index % 2 === 0 ? "linear-gradient(90deg, #dc2626, #f87171)" : "linear-gradient(90deg, #ea580c, #fb923c)",
+              }))}
+              formatValue={formatCurrency}
+            />
           </div>
 
           {/* Top Debtors */}
