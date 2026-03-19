@@ -7,6 +7,7 @@ type Props = {
   userRole?: string;
   businessName?: string;
   onLogout?: () => void;
+  onNavigate?: (view: string) => void;
   branches?: Branch[];
   activeBranchId?: number | null;
   onChangeBranch?: (branchId: number) => void;
@@ -19,6 +20,7 @@ export default function TopBar({
   userRole = "Admin",
   businessName = "Gel Invent",
   onLogout,
+  onNavigate,
   branches,
   activeBranchId,
   onChangeBranch,
@@ -36,27 +38,38 @@ export default function TopBar({
       }
     };
 
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowDropdown(false);
+      }
+    };
+
     if (showDropdown) {
       document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("keydown", handleEscape);
     }
 
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
     };
   }, [showDropdown]);
+
+  const businessLabel = String(businessName || "Gel Invent").trim();
+  const initial = userName.charAt(0).toUpperCase();
 
   return (
     <header
       style={{
-        height: 70,
+        height: isMobile ? 72 : 76,
         background: "#ffffff",
-        borderBottom: "1px solid #e6e9f2",
+        borderBottom: "1px solid #dbe4f0",
         display: isMobile ? "flex" : "grid",
         gridTemplateColumns: isMobile ? undefined : "1fr auto 1fr",
         alignItems: "center",
         justifyContent: isMobile ? "space-between" : undefined,
-        padding: isMobile ? "0 16px" : "0 32px",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+        padding: isMobile ? "0 14px" : "0 28px",
+        boxShadow: "0 8px 20px rgba(15, 23, 42, 0.06)",
         position: "sticky",
         top: 0,
         zIndex: 100,
@@ -91,28 +104,62 @@ export default function TopBar({
           minWidth: 0,
           display: "flex",
           alignItems: "center",
-          justifyContent: isMobile ? "flex-start" : "center",
+          justifyContent: isMobile ? "center" : "center",
+          gap: isMobile ? 8 : 12,
         }}
       >
-        <h1
+        <div
           style={{
-            margin: 0,
-            fontSize: isMobile ? 18 : 34,
+            width: isMobile ? 30 : 36,
+            height: isMobile ? 30 : 36,
+            borderRadius: 10,
+            background: "linear-gradient(135deg, #1d4ed8, #3b82f6)",
+            color: "#fff",
+            display: "grid",
+            placeItems: "center",
+            fontSize: isMobile ? 12 : 13,
             fontWeight: 800,
-            background: "linear-gradient(120deg, #1f7aff, #8246ff)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            backgroundClip: "text",
-            letterSpacing: "-0.6px",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            maxWidth: isMobile ? 160 : 720,
+            letterSpacing: 0.3,
+            boxShadow: "0 8px 18px rgba(37, 99, 235, 0.28)",
+            flexShrink: 0,
           }}
-          title={businessName}
         >
-          {businessName}
-        </h1>
+          GI
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: isMobile ? 16 : 20,
+              fontWeight: 800,
+              color: "#1e3a8a",
+              letterSpacing: "0.2px",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              textTransform: "uppercase",
+              maxWidth: isMobile ? 160 : 560,
+              lineHeight: 1.15,
+            }}
+            title={businessLabel}
+          >
+            {businessLabel}
+          </h1>
+          {!isMobile && (
+            <p
+              style={{
+                margin: "3px 0 0",
+                fontSize: 11,
+                color: "#64748b",
+                fontWeight: 600,
+                letterSpacing: "0.3px",
+                textTransform: "uppercase",
+              }}
+            >
+              Inventory Management System
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Right - User Info */}
@@ -124,20 +171,21 @@ export default function TopBar({
               display: "flex",
               alignItems: "center",
               gap: isMobile ? 8 : 12,
-              padding: isMobile ? "6px 10px 6px 6px" : "8px 16px 8px 8px",
-              background: "#f9fbff",
+              padding: isMobile ? "6px 10px 6px 6px" : "8px 14px 8px 8px",
+              background: "#f8fbff",
               borderRadius: 999,
-              border: "1px solid #e6e9f2",
+              border: "1px solid #d6e2f2",
               cursor: "pointer",
               transition: "all 0.2s",
+              boxShadow: "0 6px 14px rgba(15, 23, 42, 0.08)",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#f0f5ff";
-              e.currentTarget.style.borderColor = "#1f7aff";
+              e.currentTarget.style.background = "#eef4ff";
+              e.currentTarget.style.borderColor = "#3b82f6";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#f9fbff";
-              e.currentTarget.style.borderColor = "#e6e9f2";
+              e.currentTarget.style.background = "#f8fbff";
+              e.currentTarget.style.borderColor = "#d6e2f2";
             }}
           >
             <div
@@ -145,25 +193,25 @@ export default function TopBar({
                 width: isMobile ? 36 : 42,
                 height: isMobile ? 36 : 42,
                 borderRadius: "50%",
-                background: "linear-gradient(135deg, #1f7aff, #8246ff)",
+                background: "linear-gradient(135deg, #1d4ed8, #2563eb)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 fontWeight: 700,
                 fontSize: isMobile ? 14 : 16,
                 color: "#fff",
-                boxShadow: "0 4px 12px rgba(31, 122, 255, 0.3)",
+                boxShadow: "0 8px 16px rgba(37, 99, 235, 0.35)",
               }}
             >
-              {userName.charAt(0).toUpperCase()}
+              {initial}
             </div>
             {!isMobile && (
               <div style={{ textAlign: "left" }}>
-                <div style={{ fontWeight: 600, fontSize: 14, color: "#0b1021" }}>{userName}</div>
-                <div style={{ fontSize: 12, color: "#5f6475" }}>{userRole}</div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a" }}>{userName}</div>
+                <div style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>{userRole}</div>
               </div>
             )}
-            <div style={{ marginLeft: isMobile ? 0 : 4, fontSize: 12, color: "#5f6475" }}>
+            <div style={{ marginLeft: isMobile ? 0 : 4, fontSize: 12, color: "#475569", fontWeight: 700 }}>
               {showDropdown ? "▲" : "▼"}
             </div>
           </div>
@@ -184,6 +232,74 @@ export default function TopBar({
                 zIndex: 1000,
               }}
             >
+              <button
+                onClick={() => {
+                  setShowDropdown(false);
+                  onNavigate?.("profile");
+                }}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 10,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "#0f172a",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 6,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#eef2ff";
+                  e.currentTarget.style.borderColor = "#c7d2fe";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "#f8fafc";
+                  e.currentTarget.style.borderColor = "#e2e8f0";
+                }}
+              >
+                <span aria-hidden="true">👤</span>
+                <span style={{ flex: 1 }}>Profile</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowDropdown(false);
+                  onNavigate?.("profile");
+                }}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 10,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "#0f172a",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 6,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#eef2ff";
+                  e.currentTarget.style.borderColor = "#c7d2fe";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "#f8fafc";
+                  e.currentTarget.style.borderColor = "#e2e8f0";
+                }}
+              >
+                <span aria-hidden="true">⚙️</span>
+                <span style={{ flex: 1 }}>Settings</span>
+              </button>
+
               {onLogout && (
                 <button
                   onClick={() => {
@@ -215,6 +331,7 @@ export default function TopBar({
                     e.currentTarget.style.borderColor = "#fee2e2";
                   }}
                 >
+                  <span aria-hidden="true">↪</span>
                   <span style={{ flex: 1 }}>Logout</span>
                 </button>
               )}

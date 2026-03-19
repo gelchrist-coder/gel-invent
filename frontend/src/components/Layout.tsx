@@ -370,6 +370,7 @@ export default function Layout({
           userRole={userRole}
           businessName={businessName}
           onLogout={onLogout}
+          onNavigate={onNavigate}
           branches={branches}
           activeBranchId={activeBranchId}
           onChangeBranch={onChangeBranch}
