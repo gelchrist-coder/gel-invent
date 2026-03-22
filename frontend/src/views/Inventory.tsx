@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentProps } from "react";
-import { createBranchTransfer, createMovement, deleteProduct, fetchAllMovements, fetchBranches, fetchInventoryAnalytics, fetchProducts, exportMovementsPdf } from "../api";
+import { createBranchTransfer, createMovement, deleteProduct, fetchAllMovements, fetchBranchesCached, fetchInventoryAnalytics, fetchProductsCached, exportMovementsPdf } from "../api";
 import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
 import MovementHistory from "../components/MovementHistory";
@@ -34,6 +34,7 @@ export default function Inventory() {
   const [submittingAction, setSubmittingAction] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedOnce = useRef(false);
 
   const toISODate = (d: Date) => {
     const yyyy = d.getFullYear();
@@ -57,15 +58,17 @@ export default function Inventory() {
   const [exportType, setExportType] = useState<string>("all");
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedOnce.current) {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const [analyticsData, movementsData, productsData] = await Promise.all([
+      const [analyticsData, movementsData, productsData, branchData] = await Promise.all([
         fetchInventoryAnalytics(),
         fetchAllMovements({ startDate: movementFrom, endDate: movementTo }),
-        fetchProducts(),
+        fetchProductsCached((fresh) => setProducts(fresh)),
+        fetchBranchesCached((fresh) => setBranches(fresh)),
       ]);
-      const branchData = await fetchBranches();
       setAnalytics(analyticsData as InventoryAnalytics);
       setMovements(movementsData as MovementHistoryRow[]);
       setBranches(branchData);
@@ -84,6 +87,7 @@ export default function Inventory() {
       setError(err instanceof Error ? err.message : "Failed to load inventory data");
     } finally {
       setLoading(false);
+      hasLoadedOnce.current = true;
     }
   }, [movementFrom, movementTo]);
 

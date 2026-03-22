@@ -31,6 +31,7 @@ type CacheEntry<T> = {
 
 const dataCache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 30000; // 30 seconds - data is considered fresh
+const inflightGetRequests = new Map<string, Promise<unknown>>();
 
 function getCacheKey(key: string): string {
   const branchId = localStorage.getItem("activeBranchId");
@@ -130,6 +131,17 @@ export function buildAuthHeaders(extra?: Record<string, string>): Record<string,
 async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const token = localStorage.getItem("token");
   const activeBranchId = localStorage.getItem("activeBranchId");
+  const method = (options?.method || "GET").toUpperCase();
+  const inflightKey = `${method}:${path}:${activeBranchId || "default"}`;
+
+  if (method === "GET") {
+    const pending = inflightGetRequests.get(inflightKey);
+    if (pending) {
+      return pending as Promise<T>;
+    }
+  }
+
+  const execute = async (): Promise<T> => {
   const headers: Record<string, string> = { 
     "Content-Type": "application/json", 
     ...(options?.headers as Record<string, string> ?? {}) 
@@ -146,6 +158,7 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
   
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
+    method,
     headers,
   });
 
@@ -179,6 +192,17 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
     return undefined as T;
   }
   return JSON.parse(text) as T;
+  };
+
+  if (method !== "GET") {
+    return execute();
+  }
+
+  const requestPromise = execute().finally(() => {
+    inflightGetRequests.delete(inflightKey);
+  });
+  inflightGetRequests.set(inflightKey, requestPromise as Promise<unknown>);
+  return requestPromise;
 }
 
 // Data Export/Import (Admin only)
@@ -293,7 +317,31 @@ export async function importData(payload: unknown, force: boolean = false): Prom
 // Branches API
 
 export async function fetchBranches(): Promise<Branch[]> {
-  return jsonRequest<Branch[]>("/branches");
+  const cached = getCached<Branch[]>("branches");
+  if (cached && isCacheFresh("branches")) {
+    return cached;
+  }
+
+  const data = await jsonRequest<Branch[]>("/branches");
+  setCache("branches", data);
+  return data;
+}
+
+export async function fetchBranchesCached(onUpdate?: (branches: Branch[]) => void): Promise<Branch[]> {
+  const cached = getCached<Branch[]>("branches");
+  if (cached) {
+    jsonRequest<Branch[]>("/branches")
+      .then((fresh) => {
+        setCache("branches", fresh);
+        if (onUpdate) onUpdate(fresh);
+      })
+      .catch(() => {});
+    return cached;
+  }
+
+  const data = await jsonRequest<Branch[]>("/branches");
+  setCache("branches", data);
+  return data;
 }
 
 export async function createBranch(payload: { name: string }): Promise<Branch> {
@@ -579,6 +627,23 @@ export async function createBranchTransfer(payload: {
 export async function fetchSystemSettings(): Promise<SystemSettings> {
   const cached = getCached<SystemSettings>("systemSettings");
   if (cached && isCacheFresh("systemSettings")) {
+    return cached;
+  }
+
+  const data = await jsonRequest<SystemSettings>("/settings/system");
+  setCache("systemSettings", data);
+  return data;
+}
+
+export async function fetchSystemSettingsCached(onUpdate?: (settings: SystemSettings) => void): Promise<SystemSettings> {
+  const cached = getCached<SystemSettings>("systemSettings");
+  if (cached) {
+    jsonRequest<SystemSettings>("/settings/system")
+      .then((fresh) => {
+        setCache("systemSettings", fresh);
+        if (onUpdate) onUpdate(fresh);
+      })
+      .catch(() => {});
     return cached;
   }
 

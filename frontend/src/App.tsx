@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { createMovement, createProduct, deleteProduct, fetchBranches, fetchMe, fetchProducts, updateProduct, getCachedProducts } from "./api";
+import { createMovement, createProduct, deleteProduct, fetchBranchesCached, fetchMe, fetchProductsCached, updateProduct, getCachedProducts } from "./api";
 import Layout from "./components/Layout";
 import ProductForm from "./components/ProductForm";
 import ProductList from "./components/ProductList";
@@ -21,6 +21,7 @@ import { useExpiryTracking } from "./settings";
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeView, setActiveView] = useState("dashboard");
+  const [visitedViews, setVisitedViews] = useState<string[]>(["dashboard"]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -121,7 +122,7 @@ export default function App() {
 
     const run = async () => {
       try {
-        const data = await fetchBranches();
+        const data = await fetchBranchesCached((fresh) => setBranches(fresh));
         setBranches(data);
 
         const existing = activeBranchId;
@@ -155,7 +156,7 @@ export default function App() {
     if (!isAuthenticated) return;
 
     const handler = () => {
-      fetchBranches()
+      fetchBranchesCached((fresh) => setBranches(fresh))
         .then((data) => {
           setBranches(data);
           const existing = activeBranchId;
@@ -235,12 +236,18 @@ export default function App() {
       }
       
       // Fetch fresh data in background
-      const data = await fetchProducts();
+      const data = await fetchProductsCached((fresh) => setProducts(fresh));
       setProducts(data);
       setSelectedId((prev) => prev ?? (data[0]?.id ?? null));
     };
     run();
   }, [isAuthenticated, activeBranchId]);
+
+  useEffect(() => {
+    if (!visitedViews.includes(activeView)) {
+      setVisitedViews((prev) => [...prev, activeView]);
+    }
+  }, [activeView, visitedViews]);
 
 
 
@@ -314,8 +321,8 @@ export default function App() {
     });
   };
 
-  const renderView = () => {
-    switch (activeView) {
+  const renderView = (view: string) => {
+    switch (view) {
       case "dashboard":
         return <Dashboard onNavigate={setActiveView} />;
       case "products":
@@ -578,7 +585,11 @@ export default function App() {
       activeBranchId={activeBranchId}
       onChangeBranch={userRole === "Admin" ? handleChangeBranch : undefined}
     >
-      <div key={`${activeView}:${activeBranchId ?? "none"}`}>{renderView()}</div>
+      {visitedViews.map((view) => (
+        <div key={view} style={{ display: view === activeView ? "block" : "none" }}>
+          {renderView(view)}
+        </div>
+      ))}
     </Layout>
   );
 }

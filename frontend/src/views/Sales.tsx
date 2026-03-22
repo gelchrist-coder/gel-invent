@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
-import { fetchSales, createSaleForBranch, createSalesBulk, deleteSale, fetchProducts, getCachedProducts, getCachedSales } from "../api";
+import { fetchSalesCached, createSaleForBranch, createSalesBulk, deleteSale, fetchProductsCached, getCachedProducts, getCachedSales } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
@@ -29,6 +29,7 @@ export default function Sales() {
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [outboxCount, setOutboxCount] = useState<number>(() => getSalesOutboxCount());
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const hasLoadedOnce = useRef(false);
 
   // Get user and business info for receipt
   const currentUser = localStorage.getItem("user");
@@ -37,18 +38,23 @@ export default function Sales() {
   const salesPerson = userData?.name || "Sales Person";
 
   const loadData = async () => {
-    setLoading(true);
+    if (!hasLoadedOnce.current) {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const productsData = await fetchProducts();
+      const [productsData, salesData] = await Promise.all([
+        fetchProductsCached((fresh) => {
+          setProducts(fresh);
+          cacheProducts(fresh);
+        }),
+        fetchSalesCached((fresh) => setSales(fresh)).catch(() => []),
+      ]);
+
       setProducts(productsData);
       cacheProducts(productsData);
-
-      try {
-        const salesData = await fetchSales();
+      if (Array.isArray(salesData)) {
         setSales(salesData);
-      } catch {
-        // Sales list is optional for offline selling.
       }
     } catch (err) {
       // If products can't be fetched, fall back to cached products so POS can still work.
@@ -61,6 +67,7 @@ export default function Sales() {
       }
     } finally {
       setLoading(false);
+      hasLoadedOnce.current = true;
     }
   };
 

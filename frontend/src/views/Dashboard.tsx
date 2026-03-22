@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSystemSettings, getCachedProducts } from "../api";
+import { fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSystemSettingsCached, getCachedProducts } from "../api";
 import { Product } from "../types";
 import { useExpiryTracking } from "../settings";
 
@@ -119,7 +119,10 @@ export default function Dashboard({ onNavigate }: Props) {
       try {
         const [productsData, settingsData, dashboardResponse, salesData] = await Promise.all([
           fetchProductsCached((fresh) => setProducts(fresh)),
-          fetchSystemSettings().catch(() => null),
+          fetchSystemSettingsCached((fresh) => {
+            setLowStockThreshold(fresh.low_stock_threshold);
+            setExpiryWarningDays(fresh.expiry_warning_days);
+          }).catch(() => null),
           isAdmin ? fetchSalesDashboard() : Promise.resolve(null),
           isAdmin ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])).catch(() => []) : Promise.resolve([]),
         ]);
