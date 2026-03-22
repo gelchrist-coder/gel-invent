@@ -50,6 +50,13 @@ def _run_startup_migrations_sync() -> None:
 
     # Lightweight schema patch for existing DBs (create_all won't add columns).
     with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id_unique "
+                "ON users (supabase_user_id) WHERE supabase_user_id IS NOT NULL"
+            )
+        )
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
 
         # Product columns added over time

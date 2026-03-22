@@ -18,6 +18,8 @@ FastAPI-based inventory management service with a React (Vite) frontend.
      cp .env.example .env
      # Edit .env with your Supabase connection string (includes sslmode=require)
      ```
+3. To have users appear in Supabase Dashboard -> Authentication -> Users,
+   also set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env`.
 
 ### Backend setup
 1. Create a virtual environment: `python -m venv .venv` then activate it (`source .venv/bin/activate` on macOS/Linux).
@@ -50,6 +52,27 @@ FastAPI-based inventory management service with a React (Vite) frontend.
 - `GET /products/{id}` – fetch one product.
 - `POST /products/{id}/movements` – record stock movement `{ "change": 5, "reason": "initial stock" }`.
 - `GET /products/{id}/movements` – list movements for a product.
+
+## Authentication behavior
+- The app keeps business profile data in `public.users` (application table).
+- New signups and new employees can also be provisioned in Supabase Auth (`auth.users`) when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are configured.
+- Supabase Dashboard -> Authentication -> Users only displays `auth.users`, not `public.users`.
+
+### Verify where users are stored
+Run in Supabase SQL editor:
+
+```sql
+select 'public.users' as table_name, count(*) from public.users
+union all
+select 'auth.users' as table_name, count(*) from auth.users;
+```
+
+Inspect recent rows:
+
+```sql
+select id, email, created_at from public.users order by created_at desc limit 20;
+select id, email, created_at from auth.users order by created_at desc limit 20;
+```
 
 ## Data export/import (Admin)
 - `GET /data/export` – downloads a JSON backup (best for restoring/import later).

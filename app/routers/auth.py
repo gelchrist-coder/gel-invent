@@ -18,6 +18,12 @@ from app.auth import (
     get_current_active_user,
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
+from app.utils.supabase_auth import (
+    SupabaseAuthError,
+    create_auth_user,
+    delete_auth_user,
+    is_supabase_auth_sync_enabled,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -145,7 +151,20 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     if rule_error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rule_error)
 
+    supabase_user_id: str | None = None
+    if is_supabase_auth_sync_enabled():
+        try:
+            auth_user = create_auth_user(email=email, password=user_data.password, name=user_data.name)
+            supabase_user_id = auth_user.user_id
+        except SupabaseAuthError as exc:
+            # Surface duplicate-email and provisioning failures from Auth.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST if exc.status_code in {400, 409, 422} else status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+
     new_user = User(
+        supabase_user_id=supabase_user_id,
         email=email,
         name=user_data.name,
         hashed_password=get_password_hash(user_data.password),
@@ -156,7 +175,17 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     )
 
     db.add(new_user)
-    db.commit()
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if supabase_user_id:
+            try:
+                delete_auth_user(supabase_user_id)
+            except Exception:
+                pass
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create user") from exc
+
     db.refresh(new_user)
 
     # Create branches based on signup input

@@ -8,6 +8,12 @@ from app.database import get_db
 from app.models import User, Branch
 from app.auth import get_current_active_user, get_password_hash
 from app.utils.branch import get_owner_user_id
+from app.utils.supabase_auth import (
+    SupabaseAuthError,
+    create_auth_user,
+    delete_auth_user,
+    is_supabase_auth_sync_enabled,
+)
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
@@ -98,8 +104,20 @@ def create_employee(
         if not branch:
             raise HTTPException(status_code=400, detail="Invalid branch")
 
+    supabase_user_id: str | None = None
+    if is_supabase_auth_sync_enabled():
+        try:
+            auth_user = create_auth_user(email=email, password=employee_data.password, name=employee_data.name)
+            supabase_user_id = auth_user.user_id
+        except SupabaseAuthError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST if exc.status_code in {400, 409, 422} else status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+
     hashed_password = get_password_hash(employee_data.password)
     new_employee = User(
+        supabase_user_id=supabase_user_id,
         email=email,
         name=employee_data.name.strip(),
         hashed_password=hashed_password,
@@ -111,7 +129,17 @@ def create_employee(
     )
     
     db.add(new_employee)
-    db.commit()
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if supabase_user_id:
+            try:
+                delete_auth_user(supabase_user_id)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail="Failed to create employee") from exc
+
     db.refresh(new_employee)
     
     return new_employee
