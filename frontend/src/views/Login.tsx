@@ -66,6 +66,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
+    phone: "",
     password: "",
     confirmPassword: "",
     businessName: "",
@@ -135,9 +136,9 @@ export default function Login({ onLogin }: LoginProps) {
     return null;
   };
 
-  const performLogin = async (email: string, password: string) => {
+  const performLogin = async (identifier: string, password: string) => {
     const loginFormData = new FormData();
-    loginFormData.append("username", email);
+    loginFormData.append("username", identifier);
     loginFormData.append("password", password);
 
     const loginResponse = await fetch(`${API_BASE}/auth/login`, {
@@ -148,7 +149,7 @@ export default function Login({ onLogin }: LoginProps) {
     if (!loginResponse.ok) {
       const errorData = await safeJson(loginResponse);
       const detail = isRecord(errorData) && typeof errorData.detail === "string" ? errorData.detail : null;
-      setError(detail || "Invalid email or password");
+      setError(detail || "Invalid email/phone or password");
       return;
     }
 
@@ -182,7 +183,7 @@ export default function Login({ onLogin }: LoginProps) {
       window.dispatchEvent(new CustomEvent("userChanged", { detail: userData }));
     }
 
-    onLogin(email, password);
+    onLogin(identifier, password);
   };
 
   const COMMON_CATEGORIES = [
@@ -396,6 +397,7 @@ export default function Login({ onLogin }: LoginProps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             email: formData.email,
+            phone: formData.phone,
             name: formData.name,
             password: formData.password,
             business_name: formData.businessName,
@@ -416,7 +418,7 @@ export default function Login({ onLogin }: LoginProps) {
       } else {
         // Sign in validation
         if (!formData.email.trim() || !formData.password.trim()) {
-          setError("Please enter both email and password");
+          setError("Please enter email/phone and password");
           setLoading(false);
           return;
         }
@@ -620,6 +622,20 @@ export default function Login({ onLogin }: LoginProps) {
                     onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
                     placeholder="My Business Ltd"
                     required={isSignUp}
+                    className="input"
+                    style={{ padding: 12 }}
+                  />
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    Phone Number
+                  </span>
+                  <input
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    placeholder="e.g., 0241234567"
                     className="input"
                     style={{ padding: 12 }}
                   />
@@ -877,13 +893,13 @@ export default function Login({ onLogin }: LoginProps) {
             {!showReset && (
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                Email Address *
+                {isSignUp ? "Email Address *" : "Email or Phone Number *"}
               </span>
               <input
-                type="email"
+                type={isSignUp ? "email" : "text"}
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                placeholder="you@example.com"
+                placeholder={isSignUp ? "you@example.com" : "you@example.com or 0241234567"}
                 required
                 className="input"
                 style={{ padding: 12 }}

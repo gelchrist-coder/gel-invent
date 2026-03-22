@@ -83,6 +83,7 @@ window.addEventListener("activeBranchChanged", () => {
 export type AuthUser = {
   id: number;
   email: string;
+  phone?: string | null;
   name: string;
   role: string;
   business_name?: string | null;

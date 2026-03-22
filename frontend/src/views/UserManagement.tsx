@@ -5,6 +5,7 @@ import { Branch } from "../types";
 type Employee = {
   id: number;
   email: string;
+  phone?: string | null;
   name: string;
   role: string;
   branch_id?: number | null;
@@ -27,6 +28,7 @@ export default function UserManagement() {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
+    phone: "",
     password: "",
     role: "Sales",
     branch_id: "" as "" | number,
@@ -92,6 +94,9 @@ export default function UserManagement() {
         password: formData.password,
         role: formData.role,
       };
+      if (formData.phone.trim()) {
+        payload.phone = formData.phone.trim();
+      }
       if (typeof formData.branch_id === "number") {
         payload.branch_id = formData.branch_id;
       }
@@ -106,7 +111,7 @@ export default function UserManagement() {
 
       if (response.ok) {
         setSuccess("Employee added successfully!");
-        setFormData((prev) => ({ name: "", email: "", password: "", role: "Sales", branch_id: prev.branch_id }));
+        setFormData((prev) => ({ name: "", email: "", phone: "", password: "", role: "Sales", branch_id: prev.branch_id }));
         setShowAddForm(false);
         loadEmployees();
       } else {
@@ -351,6 +356,24 @@ export default function UserManagement() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
               <div>
                 <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600 }}>
+                  Phone Number
+                </label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  style={{
+                    width: "100%",
+                    padding: 10,
+                    border: "1px solid #d8dce8",
+                    borderRadius: 6,
+                    fontSize: 14,
+                  }}
+                  placeholder="e.g., 0241234567"
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600 }}>
                   Password
                 </label>
                 <input
@@ -467,6 +490,9 @@ export default function UserManagement() {
                   Email
                 </th>
                 <th style={{ padding: 16, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#5f6475" }}>
+                  Phone
+                </th>
+                <th style={{ padding: 16, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#5f6475" }}>
                   Role
                 </th>
                 <th style={{ padding: 16, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#5f6475" }}>
@@ -485,6 +511,7 @@ export default function UserManagement() {
                 <tr key={employee.id} style={{ borderBottom: "1px solid #e6e9f2" }}>
                   <td style={{ padding: 16, fontSize: 14 }}>{employee.name}</td>
                   <td style={{ padding: 16, fontSize: 14, color: "#5f6475" }}>{employee.email}</td>
+                  <td style={{ padding: 16, fontSize: 14, color: "#5f6475" }}>{employee.phone || "-"}</td>
                   <td style={{ padding: 16, fontSize: 14 }}>
                     <span
                       style={{

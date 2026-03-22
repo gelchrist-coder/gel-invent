@@ -7,6 +7,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -24,6 +25,7 @@ from app.utils.supabase_auth import (
     delete_auth_user,
     is_supabase_auth_sync_enabled,
 )
+from app.utils.phone import is_valid_phone, normalize_phone
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -45,6 +47,7 @@ def _password_rule_error(password: str) -> Optional[str]:
 # Schemas
 class UserCreate(BaseModel):
     email: EmailStr
+    phone: Optional[str] = None
     name: str
     password: str
     business_name: Optional[str] = None
@@ -55,6 +58,7 @@ class UserCreate(BaseModel):
 class UserResponse(BaseModel):
     id: int
     email: str
+    phone: Optional[str] = None
     name: str
     role: str
     business_name: Optional[str] = None
@@ -89,6 +93,7 @@ def _serialize_user(user: User) -> UserResponse:
     return UserResponse(
         id=user.id,
         email=user.email,
+        phone=getattr(user, "phone", None),
         name=user.name,
         role=user.role,
         business_name=user.business_name,
@@ -146,6 +151,14 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
+
+    phone = normalize_phone(user_data.phone)
+    if user_data.phone and not is_valid_phone(user_data.phone):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number is invalid")
+    if phone:
+        existing_phone_user = db.query(User).filter(User.phone == phone).first()
+        if existing_phone_user:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already registered")
     
     rule_error = _password_rule_error(user_data.password)
     if rule_error:
@@ -166,6 +179,7 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     new_user = User(
         supabase_user_id=supabase_user_id,
         email=email,
+        phone=phone,
         name=user_data.name,
         hashed_password=get_password_hash(user_data.password),
         business_name=user_data.business_name,
@@ -218,15 +232,29 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
-    """Login and get access token"""
-    # Find user by email (username field in OAuth2PasswordRequestForm)
-    email = _normalize_email(form_data.username)
-    user = db.query(User).filter(User.email == email).first()
+    """Login and get access token."""
+    # username field accepts either email or phone number.
+    identifier = (form_data.username or "").strip()
+    if not identifier:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email/phone or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    email = _normalize_email(identifier)
+    phone = normalize_phone(identifier)
+    if "@" in identifier:
+        user = db.query(User).filter(User.email == email).first()
+    elif phone:
+        user = db.query(User).filter(or_(User.phone == phone, User.email == email)).first()
+    else:
+        user = db.query(User).filter(User.email == email).first()
     
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect email/phone or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
@@ -263,6 +291,7 @@ def get_current_user_info(
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
+        phone=getattr(current_user, "phone", None),
         name=current_user.name,
         role=current_user.role,
         business_name=current_user.business_name,

@@ -14,6 +14,7 @@ from app.utils.supabase_auth import (
     delete_auth_user,
     is_supabase_auth_sync_enabled,
 )
+from app.utils.phone import is_valid_phone, normalize_phone
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
@@ -21,6 +22,7 @@ router = APIRouter(prefix="/employees", tags=["employees"])
 # Schemas
 class EmployeeCreate(BaseModel):
     email: EmailStr
+    phone: Optional[str] = None
     name: str
     password: str
     role: str = "Sales"  # Default role for employees
@@ -30,6 +32,7 @@ class EmployeeCreate(BaseModel):
 class EmployeeResponse(BaseModel):
     id: int
     email: str
+    phone: Optional[str] = None
     name: str
     role: str
     branch_id: Optional[int] = None
@@ -45,6 +48,7 @@ class EmployeeUpdate(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     branch_id: Optional[int] = None
+    phone: Optional[str] = None
 
 
 @router.post("/", response_model=EmployeeResponse, status_code=status.HTTP_201_CREATED)
@@ -62,6 +66,9 @@ def create_employee(
         )
     
     email = str(employee_data.email).strip().lower()
+    phone = normalize_phone(employee_data.phone)
+    if employee_data.phone and not is_valid_phone(employee_data.phone):
+        raise HTTPException(status_code=400, detail="Phone number is invalid")
 
     # Check if email already exists
     existing_user = db.query(User).filter(User.email == email).first()
@@ -70,6 +77,10 @@ def create_employee(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
+    if phone:
+        existing_phone_user = db.query(User).filter(User.phone == phone).first()
+        if existing_phone_user:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already registered")
     
     # Create new employee
     owner_user_id = get_owner_user_id(current_user)
@@ -119,6 +130,7 @@ def create_employee(
     new_employee = User(
         supabase_user_id=supabase_user_id,
         email=email,
+        phone=phone,
         name=employee_data.name.strip(),
         hashed_password=hashed_password,
         role=employee_data.role,
@@ -236,6 +248,20 @@ def update_employee(
         if not branch:
             raise HTTPException(status_code=400, detail="Invalid branch")
         employee.branch_id = branch.id
+    if employee_data.phone is not None:
+        if employee_data.phone.strip() == "":
+            employee.phone = None
+        else:
+            if not is_valid_phone(employee_data.phone):
+                raise HTTPException(status_code=400, detail="Phone number is invalid")
+            normalized_phone = normalize_phone(employee_data.phone)
+            existing_phone_user = db.query(User).filter(
+                User.phone == normalized_phone,
+                User.id != employee.id,
+            ).first()
+            if existing_phone_user:
+                raise HTTPException(status_code=400, detail="Phone number already registered")
+            employee.phone = normalized_phone
     
     db.commit()
     db.refresh(employee)
