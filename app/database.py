@@ -1,7 +1,8 @@
 import os
+import threading
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -62,9 +63,60 @@ else:
 engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
+_critical_schema_ready = False
+_critical_schema_lock = threading.Lock()
+
+
+def ensure_critical_schema() -> None:
+    """Best-effort runtime schema guard for columns queried on every request.
+
+    In serverless environments, startup hooks may be skipped or race with first
+    requests. This guard runs once per process before sessions are served.
+    """
+    global _critical_schema_ready
+    if _critical_schema_ready:
+        return
+
+    with _critical_schema_lock:
+        if _critical_schema_ready:
+            return
+
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
+                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
+
+                # Index creation is optional at runtime; do not block requests if
+                # legacy duplicate data prevents creating a unique index.
+                try:
+                    conn.execute(
+                        text(
+                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id_unique "
+                            "ON users (supabase_user_id) WHERE supabase_user_id IS NOT NULL"
+                        )
+                    )
+                except Exception as exc:
+                    print(f"⚠️ Could not ensure idx_users_supabase_user_id_unique: {exc}")
+
+                try:
+                    conn.execute(
+                        text(
+                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique "
+                            "ON users (phone) WHERE phone IS NOT NULL"
+                        )
+                    )
+                except Exception as exc:
+                    print(f"⚠️ Could not ensure idx_users_phone_unique: {exc}")
+
+            _critical_schema_ready = True
+        except Exception as exc:
+            # Keep requests flowing; retry on next request.
+            print(f"⚠️ Critical schema guard failed: {type(exc).__name__}: {exc}")
+
 
 def get_db():
     """Dependency that yields a database session."""
+    ensure_critical_schema()
     db = SessionLocal()
     try:
         yield db
