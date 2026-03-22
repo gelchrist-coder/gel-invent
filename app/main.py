@@ -19,6 +19,22 @@ _startup_migrations_done: bool = False
 _startup_migrations_error: str | None = None
 
 
+def _ensure_critical_auth_schema_sync() -> None:
+    """Apply tiny, idempotent auth schema changes required for request safety.
+
+    This runs on every startup (including serverless) and is intentionally
+    minimal so endpoints that query User do not fail due to missing columns.
+    """
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id_unique "
+                "ON users (supabase_user_id) WHERE supabase_user_id IS NOT NULL"
+            )
+        )
+
+
 def _should_run_startup_migrations() -> bool:
     """Control runtime schema patches/backfills.
 
@@ -344,6 +360,14 @@ async def on_startup() -> None:
     print("🚀 Starting Gel Invent API...")
     print(f"Railway Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'Not set')}")
     print(f"Database URL set: {'Yes' if os.getenv('DATABASE_URL') else 'No'}")
+
+    # Always apply critical auth schema changes first to avoid request-time
+    # failures when background/full migrations are disabled or still running.
+    try:
+        await asyncio.to_thread(_ensure_critical_auth_schema_sync)
+        print("✅ Critical auth schema verified")
+    except Exception as e:
+        print(f"⚠️ Could not verify critical auth schema: {type(e).__name__}: {e}")
 
     if not _should_run_startup_migrations():
         print("ℹ️ Startup migrations skipped (RUN_STARTUP_MIGRATIONS disabled)")
