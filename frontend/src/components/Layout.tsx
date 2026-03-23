@@ -80,7 +80,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "sales", label: "Sales", icon: <SalesIcon /> },
   { id: "inventory", label: "Inventory", icon: <InventoryIcon /> },
   { id: "reports", label: "Reports", icon: <ReportsIcon />, adminOnly: true },
-  { id: "creditors", label: "Creditors", icon: <CreditorsIcon /> },
+  { id: "creditors", label: "Customers", icon: <CreditorsIcon /> },
   { id: "profile", label: "Settings", icon: <ProfileIcon /> },
   { id: "users", label: "Users", icon: <UsersIcon />, adminOnly: true },
 ];
