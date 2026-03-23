@@ -27,7 +27,7 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
     e.preventDefault();
     
     if (!formData.name.trim()) {
-      setError("Creditor name is required");
+      setError("Customer name is required");
       return;
     }
 
@@ -51,7 +51,7 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
       });
 
       if (!response.ok) {
-        throw new Error("Failed to save creditor");
+        throw new Error("Failed to save customer");
       }
 
       onSuccess();
@@ -90,7 +90,7 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
         onClick={(e) => e.stopPropagation()}
       >
         <h2 style={{ margin: "0 0 20px", fontSize: 20, fontWeight: 700 }}>
-          {creditor ? "Edit Creditor" : "Add New Creditor"}
+          {creditor ? "Edit Customer" : "Add New Customer"}
         </h2>
 
         <form onSubmit={handleSubmit}>
@@ -110,7 +110,7 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
                 borderRadius: 6,
                 fontSize: 14,
               }}
-              placeholder="Enter creditor name"
+              placeholder="Enter customer name"
             />
           </div>
 
@@ -172,7 +172,7 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
                 fontFamily: "inherit",
                 resize: "vertical",
               }}
-              placeholder="Additional notes about this creditor"
+              placeholder="Additional notes about this customer"
             />
           </div>
 
@@ -223,7 +223,7 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
                 cursor: loading ? "not-allowed" : "pointer",
               }}
             >
-              {loading ? "Saving..." : creditor ? "Update Creditor" : "Add Creditor"}
+              {loading ? "Saving..." : creditor ? "Update Customer" : "Add Customer"}
             </button>
           </div>
         </form>

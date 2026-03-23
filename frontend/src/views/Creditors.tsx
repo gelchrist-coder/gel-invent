@@ -55,9 +55,14 @@ export default function Creditors() {
 
   return (
     <div className="app-shell">
-      <h1 className="page-title" style={{ marginBottom: 24 }}>
-        Creditors Management
-      </h1>
+      <div style={{ marginBottom: 20 }}>
+        <h1 className="page-title" style={{ marginBottom: 8 }}>
+          Customer Management
+        </h1>
+        <p style={{ margin: 0, color: "#5f6475", fontSize: 14 }}>
+          Manage all customers and track who currently owes the business.
+        </p>
+      </div>
 
       <CreditorList
         onSelectCreditor={handleSelectCreditor}
@@ -65,7 +70,7 @@ export default function Creditors() {
         refreshTrigger={refreshTrigger}
       />
 
-      {/* Add Creditor Modal */}
+      {/* Add Customer Modal */}
       {showAddModal && (
         <CreditorForm
           onClose={() => setShowAddModal(false)}
@@ -73,7 +78,7 @@ export default function Creditors() {
         />
       )}
 
-      {/* Edit Creditor Modal */}
+      {/* Edit Customer Modal */}
       {showEditModal && selectedCreditor && (
         <CreditorForm
           creditor={selectedCreditor}
@@ -86,7 +91,7 @@ export default function Creditors() {
         />
       )}
 
-      {/* Creditor Details Modal */}
+      {/* Customer Details Modal */}
       {selectedCreditor && !showEditModal && (
         <CreditorDetails
           creditor={selectedCreditor}

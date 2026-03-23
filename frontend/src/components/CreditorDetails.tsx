@@ -149,13 +149,13 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
         {/* Summary Cards */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
           <div style={{ backgroundColor: "#fee2e2", borderRadius: 8, padding: 16 }}>
-            <p style={{ margin: 0, fontSize: 13, color: "#991b1b" }}>Total Debt</p>
+            <p style={{ margin: 0, fontSize: 13, color: "#991b1b" }}>Total Purchases on Credit</p>
             <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: "#dc2626" }}>
               {formatCurrency(totalDebt)}
             </p>
           </div>
           <div style={{ backgroundColor: "#d1fae5", borderRadius: 8, padding: 16 }}>
-            <p style={{ margin: 0, fontSize: 13, color: "#065f46" }}>Total Paid</p>
+            <p style={{ margin: 0, fontSize: 13, color: "#065f46" }}>Total Paid by Customer</p>
             <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: "#059669" }}>
               {formatCurrency(totalPayments)}
             </p>
@@ -200,7 +200,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
               cursor: "pointer",
             }}
           >
-            Add Debt
+            Add Credit Sale
           </button>
           <button
             onClick={onEdit}
@@ -221,13 +221,13 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
 
         {/* Transactions History */}
         <div>
-          <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 700 }}>Transaction History</h3>
+          <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 700 }}>Customer Ledger</h3>
           
           {loading ? (
             <p style={{ textAlign: "center", color: "#6b7280", padding: 40 }}>Loading transactions...</p>
           ) : transactions.length === 0 ? (
             <div style={{ backgroundColor: "#f9fafb", borderRadius: 8, padding: 40, textAlign: "center" }}>
-              <p style={{ margin: 0, color: "#6b7280" }}>No transactions yet.</p>
+              <p style={{ margin: 0, color: "#6b7280" }}>No customer transactions yet.</p>
             </div>
           ) : (
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
@@ -482,10 +482,10 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
         onClick={(e) => e.stopPropagation()}
       >
         <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 700 }}>
-          Add Debt
+          Add Credit Sale
         </h3>
         <p style={{ margin: "0 0 20px", fontSize: 14, color: "#6b7280" }}>
-          Record a credit sale for <strong>{creditorName}</strong>
+          Record a new credit purchase for <strong>{creditorName}</strong>
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -646,7 +646,7 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
                 cursor: loading || loadingProducts ? "not-allowed" : "pointer",
               }}
             >
-              {loading ? "Recording Sale..." : "Add Debt"}
+              {loading ? "Recording Sale..." : "Add Credit Sale"}
             </button>
           </div>
         </form>
@@ -733,10 +733,10 @@ function TransactionModal({ creditorId, creditorName, transactionType, onClose, 
         onClick={(e) => e.stopPropagation()}
       >
         <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 700 }}>
-          {transactionType === "payment" ? "Record Payment" : "Add Debt"}
+          {transactionType === "payment" ? "Record Payment" : "Add Credit Sale"}
         </h3>
         <p style={{ margin: "0 0 20px", fontSize: 14, color: "#6b7280" }}>
-          {transactionType === "payment" ? "Record a payment from" : "Add debt for"} <strong>{creditorName}</strong>
+          {transactionType === "payment" ? "Record a payment from" : "Add a credit entry for"} <strong>{creditorName}</strong>
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -828,7 +828,7 @@ function TransactionModal({ creditorId, creditorName, transactionType, onClose, 
                 cursor: loading ? "not-allowed" : "pointer",
               }}
             >
-              {loading ? "Saving..." : transactionType === "payment" ? "Record Payment" : "Add Debt"}
+              {loading ? "Saving..." : transactionType === "payment" ? "Record Payment" : "Add Credit Sale"}
             </button>
           </div>
         </form>

@@ -23,6 +23,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
   const [creditors, setCreditors] = useState<Creditor[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [showOwingOnly, setShowOwingOnly] = useState(false);
 
   useEffect(() => {
     fetchCreditors();
@@ -40,7 +41,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
       const data = await response.json();
       setCreditors(Array.isArray(data) ? data : []);
     } catch (error) {
-      console.error("Error fetching creditors:", error);
+      console.error("Error fetching customers:", error);
       setCreditors([]);
     } finally {
       setLoading(false);
@@ -60,7 +61,11 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
       creditor.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const sortedCreditors = [...filteredCreditors].sort((a, b) => {
+  const visibleCreditors = showOwingOnly
+    ? filteredCreditors.filter((c) => outstandingFor(c.actual_debt) > 0)
+    : filteredCreditors;
+
+  const sortedCreditors = [...visibleCreditors].sort((a, b) => {
     const aDebt = outstandingFor(a.actual_debt);
     const bDebt = outstandingFor(b.actual_debt);
     const aOwes = aDebt > 0;
@@ -81,7 +86,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
   if (loading) {
     return (
       <div style={{ padding: 40, textAlign: "center" }}>
-        <p style={{ color: "#6b7280" }}>Loading creditors...</p>
+        <p style={{ color: "#6b7280" }}>Loading customers...</p>
       </div>
     );
   }
@@ -93,7 +98,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
         <div style={{ flex: 1, maxWidth: 400 }}>
           <input
             type="text"
-            placeholder="Search creditors..."
+            placeholder="Search customers..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{
@@ -118,18 +123,34 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
             cursor: "pointer",
           }}
         >
-          + Add Creditor
+          + Add Customer
+        </button>
+        <button
+          onClick={() => setShowOwingOnly((prev) => !prev)}
+          style={{
+            marginLeft: 10,
+            padding: "10px 14px",
+            backgroundColor: showOwingOnly ? "#fee2e2" : "#f3f4f6",
+            color: showOwingOnly ? "#b91c1c" : "#374151",
+            border: "none",
+            borderRadius: 6,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          {showOwingOnly ? "Showing Owing Only" : "Show Owing Only"}
         </button>
       </div>
 
       {/* Summary Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16, marginBottom: 20 }}>
         <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
-          <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Total Creditors</p>
+          <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Total Customers</p>
           <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700 }}>{creditors.length}</p>
         </div>
         <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
-          <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Active Debts</p>
+          <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Customers Owing</p>
           <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: "#ef4444" }}>
             {creditors.filter(c => c.actual_debt > 0).length}
           </p>
@@ -142,7 +163,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
         </div>
       </div>
 
-      {/* Creditors Table */}
+      {/* Customers Table */}
       <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
@@ -154,7 +175,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
                 Contact
               </th>
               <th style={{ padding: "12px 16px", textAlign: "right", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
-                Outstanding Debt
+                Outstanding Balance
               </th>
               <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
                 Transactions
@@ -171,7 +192,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
             {sortedCreditors.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>
-                  {searchTerm ? "No creditors found matching your search." : "No creditors yet. Click 'Add Creditor' to get started."}
+                  {searchTerm ? "No customers found matching your search." : "No customers yet. Click 'Add Customer' to get started."}
                 </td>
               </tr>
             ) : (
@@ -242,7 +263,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
                         fontWeight: 600,
                       }}
                     >
-                      {creditor.actual_debt > 0 ? "Owes" : "Clear"}
+                      {creditor.actual_debt > 0 ? "Owes Business" : "Clear"}
                     </span>
                   </td>
                   <td style={{ padding: "12px 16px", textAlign: "center" }}>
