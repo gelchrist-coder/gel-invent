@@ -265,7 +265,7 @@ export default function Reports() {
   const isAdmin = userRole === "Admin";
   const usesExpiryTracking = useExpiryTracking();
 
-  const [activeTab, setActiveTab] = useState<"sales" | "inventory" | "creditors" | "revenue">("sales");
+  const [activeTab, setActiveTab] = useState<"sales" | "inventory" | "creditors">("sales");
   const [salesData, setSalesData] = useState<SalesDashboard | null>(null);
   const [inventoryData, setInventoryData] = useState<InventoryStatus | null>(null);
   const [creditorsData, setCreditorsData] = useState<CreditorsSummary | null>(null);
@@ -278,10 +278,16 @@ export default function Reports() {
     try {
       const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
-      if (activeTab === "sales" && !salesData) {
-        const res = await fetch(`${API_BASE}/reports/sales-dashboard`, { headers });
-        if (res.ok) {
-          setSalesData(await res.json());
+      if (activeTab === "sales") {
+        if (!salesData) {
+          const res = await fetch(`${API_BASE}/reports/sales-dashboard`, { headers });
+          if (res.ok) {
+            setSalesData(await res.json());
+          }
+        }
+        if (!revenueData) {
+          const data = await fetchRevenueAnalytics(revenuePeriod);
+          setRevenueData(data as RevenueAnalytics);
         }
       } else if (activeTab === "inventory" && !inventoryData) {
         const res = await fetch(`${API_BASE}/reports/inventory-status`, { headers });
@@ -293,9 +299,6 @@ export default function Reports() {
         if (res.ok) {
           setCreditorsData(await res.json());
         }
-      } else if (activeTab === "revenue" && !revenueData) {
-        const data = await fetchRevenueAnalytics(revenuePeriod);
-        setRevenueData(data as RevenueAnalytics);
       }
     } catch (error) {
       console.error("Failed to load report data:", error);
@@ -352,7 +355,7 @@ export default function Reports() {
       <h1 className="page-title" style={{ marginBottom: 24 }}>Reports</h1>
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 24, borderBottom: "2px solid #e5e7eb" }}>
-        {(["sales", "inventory", "creditors", "revenue"] as const).map((tab) => (
+        {(["sales", "inventory", "creditors"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -378,10 +381,10 @@ export default function Reports() {
         <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>Loading...</div>
       )}
 
-      {activeTab === "revenue" && (
+      {activeTab === "sales" && (
         <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#4b5563" }}>
-            Period
+            Revenue Period
             <select
               value={revenuePeriod}
               onChange={(e) => {
@@ -542,6 +545,130 @@ export default function Reports() {
               )}
             </div>
           </div>
+
+          {/* Revenue Summary (merged into Sales) */}
+          {revenueData && (
+            <div style={{ marginTop: 24 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Revenue & Profitability</h2>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+                <div style={{ padding: 20, backgroundColor: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", color: "#2563eb", flexShrink: 0 }}>
+                      <DollarIcon />
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 13, color: "#1e40af", marginBottom: 4 }}>Total Revenue</h3>
+                      <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#1e3a8a" }}>
+                        {formatCurrency(revenueData.metrics.total_revenue)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ padding: 20, backgroundColor: "#f0fdf4", borderRadius: 8, border: "1px solid #bbf7d0" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", color: "#16a34a", flexShrink: 0 }}>
+                      <DollarIcon />
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 13, color: "#15803d", marginBottom: 4 }}>Actual Profit</h3>
+                      <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#166534" }}>
+                        {formatCurrency(revenueData.metrics.actual_profit)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ padding: 20, backgroundColor: "#fff7ed", borderRadius: 8, border: "1px solid #fed7aa" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#ffedd5", display: "flex", alignItems: "center", justifyContent: "center", color: "#ea580c", flexShrink: 0 }}>
+                      <CalendarWeekIcon />
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 13, color: "#9a3412", marginBottom: 4 }}>Sales Count</h3>
+                      <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#c2410c" }}>
+                        {revenueData.metrics.sales_count}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ padding: 20, backgroundColor: "#fef2f2", borderRadius: 8, border: "1px solid #fecaca" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#fee2e2", display: "flex", alignItems: "center", justifyContent: "center", color: "#dc2626", flexShrink: 0 }}>
+                      <AlertCircleIcon />
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 13, color: "#991b1b", marginBottom: 4 }}>Losses</h3>
+                      <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#b91c1c" }}>
+                        {formatCurrency(revenueData.metrics.total_losses)}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 24 }}>
+                <HorizontalBarChart
+                  title="Revenue by Payment Method"
+                  items={revenueData.payment_methods.map((pm, idx) => ({
+                    label: pm.method,
+                    value: pm.revenue,
+                    color: idx % 2 === 0 ? "linear-gradient(90deg, #0284c7, #38bdf8)" : "linear-gradient(90deg, #16a34a, #4ade80)",
+                  }))}
+                  formatValue={formatCurrency}
+                />
+
+                <HorizontalBarChart
+                  title="Top Product Revenue"
+                  items={revenueData.top_products.slice(0, 6).map((prod, idx) => ({
+                    label: prod.product_name,
+                    value: prod.revenue,
+                    subLabel: `${prod.quantity_sold} sold`,
+                    color: idx % 2 === 0 ? "linear-gradient(90deg, #9333ea, #c084fc)" : "linear-gradient(90deg, #f59e0b, #fcd34d)",
+                  }))}
+                  formatValue={formatCurrency}
+                />
+              </div>
+
+              <div style={{ marginBottom: 24 }}>
+                <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Daily Revenue Trend</h2>
+                <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, maxHeight: 360, overflowY: "auto" }}>
+                  {revenueData.daily_trend.length > 0 ? (
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
+                          <th style={{ textAlign: "left", padding: "8px 0", fontSize: 13, color: "#6b7280" }}>Date</th>
+                          <th style={{ textAlign: "right", padding: "8px 0", fontSize: 13, color: "#6b7280" }}>Revenue</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {revenueData.daily_trend.map((point) => (
+                          <tr key={point.date} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                            <td style={{ padding: "10px 0" }}>{formatDate(point.date)}</td>
+                            <td style={{ textAlign: "right", padding: "10px 0", fontWeight: 600 }}>{formatCurrency(point.revenue)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p style={{ textAlign: "center", color: "#6b7280", padding: 20 }}>No revenue trend data</p>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ padding: 16, backgroundColor: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+                <p style={{ margin: 0, fontSize: 14, color: "#374151" }}>
+                  Profit margin: <strong>{revenueData.metrics.actual_profit_margin.toFixed(2)}%</strong>
+                  {"  •  "}
+                  Average transaction: <strong>{formatCurrency(revenueData.metrics.avg_transaction)}</strong>
+                  {"  •  "}
+                  Revenue growth: <strong>{revenueData.metrics.revenue_growth.toFixed(2)}%</strong>
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -837,127 +964,6 @@ export default function Reports() {
         </div>
       )}
 
-      {/* Revenue Summary */}
-      {activeTab === "revenue" && revenueData && (
-        <div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
-            <div style={{ padding: 20, backgroundColor: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", color: "#2563eb", flexShrink: 0 }}>
-                  <DollarIcon />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: 13, color: "#1e40af", marginBottom: 4 }}>Total Revenue</h3>
-                  <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#1e3a8a" }}>
-                    {formatCurrency(revenueData.metrics.total_revenue)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ padding: 20, backgroundColor: "#f0fdf4", borderRadius: 8, border: "1px solid #bbf7d0" }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", color: "#16a34a", flexShrink: 0 }}>
-                  <DollarIcon />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: 13, color: "#15803d", marginBottom: 4 }}>Actual Profit</h3>
-                  <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#166534" }}>
-                    {formatCurrency(revenueData.metrics.actual_profit)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ padding: 20, backgroundColor: "#fff7ed", borderRadius: 8, border: "1px solid #fed7aa" }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#ffedd5", display: "flex", alignItems: "center", justifyContent: "center", color: "#ea580c", flexShrink: 0 }}>
-                  <CalendarWeekIcon />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: 13, color: "#9a3412", marginBottom: 4 }}>Sales Count</h3>
-                  <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#c2410c" }}>
-                    {revenueData.metrics.sales_count}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ padding: 20, backgroundColor: "#fef2f2", borderRadius: 8, border: "1px solid #fecaca" }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#fee2e2", display: "flex", alignItems: "center", justifyContent: "center", color: "#dc2626", flexShrink: 0 }}>
-                  <AlertCircleIcon />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: 13, color: "#991b1b", marginBottom: 4 }}>Losses</h3>
-                  <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#b91c1c" }}>
-                    {formatCurrency(revenueData.metrics.total_losses)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 24 }}>
-            <HorizontalBarChart
-              title="Revenue by Payment Method"
-              items={revenueData.payment_methods.map((pm, idx) => ({
-                label: pm.method,
-                value: pm.revenue,
-                color: idx % 2 === 0 ? "linear-gradient(90deg, #0284c7, #38bdf8)" : "linear-gradient(90deg, #16a34a, #4ade80)",
-              }))}
-              formatValue={formatCurrency}
-            />
-
-            <HorizontalBarChart
-              title="Top Product Revenue"
-              items={revenueData.top_products.slice(0, 6).map((prod, idx) => ({
-                label: prod.product_name,
-                value: prod.revenue,
-                subLabel: `${prod.quantity_sold} sold`,
-                color: idx % 2 === 0 ? "linear-gradient(90deg, #9333ea, #c084fc)" : "linear-gradient(90deg, #f59e0b, #fcd34d)",
-              }))}
-              formatValue={formatCurrency}
-            />
-          </div>
-
-          <div style={{ marginBottom: 24 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Daily Revenue Trend</h2>
-            <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, maxHeight: 360, overflowY: "auto" }}>
-              {revenueData.daily_trend.length > 0 ? (
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                      <th style={{ textAlign: "left", padding: "8px 0", fontSize: 13, color: "#6b7280" }}>Date</th>
-                      <th style={{ textAlign: "right", padding: "8px 0", fontSize: 13, color: "#6b7280" }}>Revenue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {revenueData.daily_trend.map((point) => (
-                      <tr key={point.date} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                        <td style={{ padding: "10px 0" }}>{formatDate(point.date)}</td>
-                        <td style={{ textAlign: "right", padding: "10px 0", fontWeight: 600 }}>{formatCurrency(point.revenue)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <p style={{ textAlign: "center", color: "#6b7280", padding: 20 }}>No revenue trend data</p>
-              )}
-            </div>
-          </div>
-
-          <div style={{ padding: 16, backgroundColor: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8 }}>
-            <p style={{ margin: 0, fontSize: 14, color: "#374151" }}>
-              Profit margin: <strong>{revenueData.metrics.actual_profit_margin.toFixed(2)}%</strong>
-              {"  •  "}
-              Average transaction: <strong>{formatCurrency(revenueData.metrics.avg_transaction)}</strong>
-              {"  •  "}
-              Revenue growth: <strong>{revenueData.metrics.revenue_growth.toFixed(2)}%</strong>
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
