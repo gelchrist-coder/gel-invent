@@ -502,18 +502,45 @@ export default function Inventory() {
           ) : null}
 
           {isNewStockAction ? (
-            <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Reason</span>
-              <select
-                value={stockReason}
-                onChange={(e) => setStockReason(e.target.value)}
-                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
-                disabled={submittingAction}
-              >
-                <option value="New Stock">New Stock</option>
-                <option value="Restock">Restock</option>
-              </select>
-            </label>
+            <div>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Stock Action</span>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => setStockReason("New Stock")}
+                  disabled={submittingAction}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: stockReason === "New Stock" ? "#dcfce7" : "white",
+                    color: stockReason === "New Stock" ? "#166534" : "#334155",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: submittingAction ? "not-allowed" : "pointer",
+                  }}
+                >
+                  New Stock
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStockReason("Restock")}
+                  disabled={submittingAction}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: stockReason === "Restock" ? "#dbeafe" : "white",
+                    color: stockReason === "Restock" ? "#1d4ed8" : "#334155",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: submittingAction ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Restock
+                </button>
+              </div>
+            </div>
           ) : null}
 
           {isDamageAction ? (
