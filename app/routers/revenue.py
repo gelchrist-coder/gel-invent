@@ -14,6 +14,14 @@ from app.utils.branch import get_active_branch_id
 router = APIRouter(prefix="/revenue", tags=["revenue"])
 
 
+def _to_naive_datetime(value: datetime | None, fallback: datetime) -> datetime:
+    if value is None:
+        return fallback
+    if value.tzinfo is not None:
+        return value.replace(tzinfo=None)
+    return value
+
+
 @router.get("/analytics")
 def get_revenue_analytics(
     db: Session = Depends(get_db),
@@ -46,6 +54,8 @@ def get_revenue_analytics(
     # Determine date range
     now = datetime.now()
     
+    account_created_at = _to_naive_datetime(getattr(current_user, "created_at", None), now)
+
     if start_date and end_date:
         start = datetime.fromisoformat(start_date)
         end = datetime.fromisoformat(end_date)
@@ -63,7 +73,7 @@ def get_revenue_analytics(
             start = now - timedelta(days=90)
             end = now
         else:  # all
-            start = datetime(2000, 1, 1)
+            start = account_created_at.replace(hour=0, minute=0, second=0, microsecond=0)
             end = now
     
     # Get sales in period (filtered by tenant + active branch)
@@ -512,8 +522,7 @@ def get_revenue_analytics(
     elif period == "90d":
         trend_days = 90
     else:
-        # Keep payload bounded for all-time to protect API and frontend rendering.
-        trend_days = min((end - start).days + 1, 365)
+        trend_days = max((end - start).days + 1, 1)
     daily_trend = []
     for i in range(trend_days):
         day = (end - timedelta(days=trend_days - 1 - i)).strftime("%Y-%m-%d")

@@ -258,6 +258,52 @@ function HorizontalBarChart({
   );
 }
 
+function DailyTrendBarChart({
+  points,
+  formatCurrency,
+  formatDate,
+}: {
+  points: Array<{ date: string; revenue: number }>;
+  formatCurrency: (value: number) => string;
+  formatDate: (value: string) => string;
+}) {
+  if (points.length === 0) {
+    return <p style={{ textAlign: "center", color: "#6b7280", padding: 20 }}>No revenue trend data</p>;
+  }
+
+  const maxRevenue = Math.max(...points.map((p) => p.revenue), 0);
+
+  return (
+    <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, backgroundColor: "white", padding: 16 }}>
+      <div style={{ overflowX: "auto", overflowY: "hidden", paddingBottom: 10 }}>
+        <div style={{ minWidth: Math.max(points.length * 18, 560), height: 240, display: "flex", alignItems: "flex-end", gap: 6 }}>
+          {points.map((point, index) => {
+            const ratio = maxRevenue > 0 ? point.revenue / maxRevenue : 0;
+            const barHeight = Math.max(4, Math.round(ratio * 190));
+            const showTick = index === 0 || index === points.length - 1 || points.length <= 14 || index % 7 === 0;
+            return (
+              <div key={point.date} style={{ width: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                <div
+                  title={`${formatDate(point.date)}: ${formatCurrency(point.revenue)}`}
+                  style={{
+                    width: "100%",
+                    height: barHeight,
+                    borderRadius: 4,
+                    background: "linear-gradient(180deg, #34d399 0%, #059669 100%)",
+                  }}
+                />
+                <span style={{ fontSize: 10, color: "#6b7280", whiteSpace: "nowrap", transform: "rotate(-35deg)", transformOrigin: "top left", height: showTick ? 28 : 0, opacity: showTick ? 1 : 0 }}>
+                  {showTick ? formatDate(point.date) : ""}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Reports() {
   // Check if current user is Admin
   const currentUser = localStorage.getItem("user");
@@ -610,29 +656,15 @@ export default function Reports() {
               </div>
 
               <div style={{ marginBottom: 24 }}>
-                <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Daily Revenue Trend</h2>
-                <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, maxHeight: 360, overflowY: "auto" }}>
-                  {revenueData.daily_trend.length > 0 ? (
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                          <th style={{ textAlign: "left", padding: "8px 0", fontSize: 13, color: "#6b7280" }}>Date</th>
-                          <th style={{ textAlign: "right", padding: "8px 0", fontSize: 13, color: "#6b7280" }}>Revenue</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {revenueData.daily_trend.map((point) => (
-                          <tr key={point.date} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                            <td style={{ padding: "10px 0" }}>{formatDate(point.date)}</td>
-                            <td style={{ textAlign: "right", padding: "10px 0", fontWeight: 600 }}>{formatCurrency(point.revenue)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p style={{ textAlign: "center", color: "#6b7280", padding: 20 }}>No revenue trend data</p>
-                  )}
-                </div>
+                <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Daily Revenue Trend</h2>
+                <p style={{ margin: "0 0 12px", fontSize: 12, color: "#6b7280" }}>
+                  Showing trend from {formatDate(revenueData.period.start)} to {formatDate(revenueData.period.end)}.
+                </p>
+                <DailyTrendBarChart
+                  points={revenueData.daily_trend}
+                  formatCurrency={formatCurrency}
+                  formatDate={formatDate}
+                />
               </div>
 
               <div style={{ padding: 16, backgroundColor: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8 }}>
