@@ -609,29 +609,6 @@ export default function Reports() {
                 </div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 24 }}>
-                <HorizontalBarChart
-                  title="Revenue by Payment Method"
-                  items={revenueData.payment_methods.map((pm, idx) => ({
-                    label: pm.method,
-                    value: pm.revenue,
-                    color: idx % 2 === 0 ? "linear-gradient(90deg, #0284c7, #38bdf8)" : "linear-gradient(90deg, #16a34a, #4ade80)",
-                  }))}
-                  formatValue={formatCurrency}
-                />
-
-                <HorizontalBarChart
-                  title="Top Product Revenue"
-                  items={revenueData.top_products.slice(0, 6).map((prod, idx) => ({
-                    label: prod.product_name,
-                    value: prod.revenue,
-                    subLabel: `${prod.quantity_sold} sold`,
-                    color: idx % 2 === 0 ? "linear-gradient(90deg, #9333ea, #c084fc)" : "linear-gradient(90deg, #f59e0b, #fcd34d)",
-                  }))}
-                  formatValue={formatCurrency}
-                />
-              </div>
-
               <div style={{ marginBottom: 24 }}>
                 <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Daily Revenue Trend</h2>
                 <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, maxHeight: 360, overflowY: "auto" }}>
