@@ -544,7 +544,7 @@ export default function Sales() {
             left: 0,
             right: 0,
             bottom: 0,
-            background: "rgba(0, 0, 0, 0.5)",
+            background: "rgba(15, 23, 42, 0.5)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -559,43 +559,65 @@ export default function Sales() {
         >
           <div
             style={{
-              background: "white",
-              borderRadius: 16,
-              maxWidth: 480,
+              background: "#f1f5f9",
+              borderRadius: 18,
+              maxWidth: 380,
               width: "100%",
               maxHeight: "90vh",
               overflow: "hidden",
-              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+              boxShadow: "0 24px 56px rgba(15, 23, 42, 0.32)",
               display: "flex",
               flexDirection: "column",
             }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div style={{ 
-              background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-              padding: "24px 24px 28px",
-              color: "white",
+            <div style={{
+              background: "white",
+              borderTop: "4px solid #6366f1",
+              borderBottom: "1px solid #e2e8f0",
+              padding: "18px 20px 16px",
               position: "relative",
+              textAlign: "center",
             }}>
-              <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0, textAlign: "center" }}>
-                Order Confirmation
-              </h2>
-              <div style={{ fontSize: 11, textAlign: "center", opacity: 0.9, marginTop: 4 }}>
-                v2.0 • New Design
-              </div>
               <div style={{
-                position: "absolute",
-                top: 16,
-                right: 16,
-                background: "rgba(255,255,255,0.2)",
+                width: 54,
+                height: 54,
                 borderRadius: "50%",
-                width: 32,
-                height: 32,
+                border: "2px solid #ddd6fe",
+                color: "#6366f1",
+                margin: "0 auto 10px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: 18,
+                fontWeight: 700,
+                fontSize: 22,
+                lineHeight: 1,
+              }}>
+                POS
+              </div>
+              <h2 style={{ fontSize: 28, fontWeight: 800, margin: 0, color: "#0f172a", lineHeight: 1.05 }}>
+                {businessName.toUpperCase()}
+              </h2>
+              <div style={{ marginTop: 4, fontSize: 11, fontWeight: 700, letterSpacing: "1px", color: "#94a3b8" }}>
+                OFFICIAL RECEIPT
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: "#64748b" }}>
+                {new Date().toLocaleString()}
+              </div>
+              <div style={{
+                position: "absolute",
+                top: 12,
+                right: 12,
+                background: "#f1f5f9",
+                borderRadius: "50%",
+                width: 28,
+                height: 28,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 16,
+                color: "#475569",
                 cursor: "pointer",
               }}
               onClick={() => {
@@ -607,138 +629,118 @@ export default function Sales() {
             </div>
 
             {/* Scrollable Content */}
-            <div style={{ flex: 1, overflow: "auto", padding: 24 }}>
-              {/* Items List */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ 
-                  fontSize: 11, 
-                  fontWeight: 700, 
-                  letterSpacing: "0.5px",
-                  color: "#9ca3af", 
-                  marginBottom: 12,
-                  textTransform: "uppercase",
-                }}>
-                  Order Items • {pendingSales.length}
+            <div style={{ flex: 1, overflow: "auto", padding: "14px 18px 18px" }}>
+              <div style={{
+                borderTop: "1px dashed #cbd5e1",
+                borderBottom: "1px dashed #cbd5e1",
+                padding: "10px 0",
+                marginBottom: 12,
+                fontSize: 12,
+                color: "#334155",
+                display: "grid",
+                gap: 6,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <strong>RECEIPT NO:</strong>
+                  <span>#{(pendingSales[0]?.client_sale_id ?? "10").split(":")[0].slice(-8).toUpperCase()}</span>
                 </div>
-                <div style={{ 
-                  background: "#f9fafb", 
-                  borderRadius: 12, 
-                  padding: "16px",
-                  border: "1px solid #f3f4f6",
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <strong>SERVED BY:</strong>
+                  <span>{salesPerson.toUpperCase()}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <strong>CUSTOMER:</strong>
+                  <span>{(pendingSales[0]?.customer_name || "WALK-IN CUSTOMER").toUpperCase()}</span>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto",
+                  gap: 8,
+                  paddingBottom: 8,
+                  borderBottom: "1px solid #e2e8f0",
+                  color: "#94a3b8",
+                  fontSize: 11,
+                  letterSpacing: "0.9px",
+                  fontWeight: 700,
                 }}>
-                  {pendingSales.map((sale, index) => {
-                    const product = products.find(p => p.id === sale.product_id);
-                    return (
-                      <div 
-                        key={index} 
-                        style={{ 
-                          paddingBottom: index < pendingSales.length - 1 ? 16 : 0,
-                          marginBottom: index < pendingSales.length - 1 ? 16 : 0,
-                          borderBottom: index < pendingSales.length - 1 ? "1px solid #e5e7eb" : "none",
-                        }}
-                      >
-                        <div style={{ display: "flex", gap: 12, alignItems: "start" }}>
-                          <div style={{
-                            background: "white",
-                            width: 40,
-                            height: 40,
-                            borderRadius: 8,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: 18,
-                            flexShrink: 0,
-                            border: "1px solid #e5e7eb",
-                          }}></div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ 
-                              fontSize: 15, 
-                              fontWeight: 600, 
-                              color: "#111827",
-                              marginBottom: 4,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}>
-                              {product?.name}
-                            </div>
-                            <div style={{ fontSize: 13, color: "#6b7280" }}>
-                              {sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number"
-                                ? `${sale.pack_quantity} pack`
-                                : sale.quantity} × GHS {Number(sale.unit_price).toFixed(2)}
-                            </div>
-                          </div>
-                          <div style={{ 
-                            fontSize: 16, 
-                            fontWeight: 700, 
-                            color: "#059669",
-                            flexShrink: 0,
-                          }}>
-                            GHS {sale.total_price.toFixed(2)}
-                          </div>
+                  <span>DESCRIPTION</span>
+                  <span>AMOUNT</span>
+                </div>
+
+                {pendingSales.map((sale, index) => {
+                  const product = products.find((p) => p.id === sale.product_id);
+                  return (
+                    <div
+                      key={index}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr auto",
+                        gap: 8,
+                        padding: "10px 0",
+                        borderBottom: index < pendingSales.length - 1 ? "1px solid #f1f5f9" : "none",
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", lineHeight: 1.1 }}>
+                          {(product?.name || "ITEM").toUpperCase()}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
+                          {sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number"
+                            ? `${sale.pack_quantity} pack`
+                            : sale.quantity} units @ {Number(sale.unit_price).toFixed(2)}
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Customer & Payment Info */}
-              <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-                {pendingSales[0].customer_name && (
-                  <div style={{ 
-                    flex: 1,
-                    background: "#eff6ff",
-                    border: "1px solid #dbeafe",
-                    borderRadius: 10,
-                    padding: 12,
-                  }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.5px", color: "#3b82f6", marginBottom: 4, textTransform: "uppercase" }}>Customer</div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "#1e40af" }}>
-                      {pendingSales[0].customer_name}
+                      <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", whiteSpace: "nowrap" }}>
+                        {Number(sale.total_price).toFixed(2)}
+                      </div>
                     </div>
-                  </div>
-                )}
-                
-                <div style={{ 
-                  flex: 1,
-                  background: "#fef3c7",
-                  border: "1px solid #fde68a",
-                  borderRadius: 10,
-                  padding: 12,
-                }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.5px", color: "#d97706", marginBottom: 4, textTransform: "uppercase" }}>Payment</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#92400e", textTransform: "capitalize" }}>
-                    {pendingSales[0].payment_method}
-                  </div>
+                  );
+                })}
+              </div>
+
+              <div style={{
+                borderTop: "1px dashed #cbd5e1",
+                marginTop: 8,
+                paddingTop: 10,
+                display: "grid",
+                gap: 6,
+                fontSize: 13,
+                color: "#334155",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>Payment</span>
+                  <strong style={{ textTransform: "uppercase" }}>{pendingSales[0].payment_method}</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4 }}>
+                  <span style={{ fontSize: 13, letterSpacing: "0.5px", color: "#475569" }}>TOTAL</span>
+                  <strong style={{ fontSize: 28, color: "#0f172a", lineHeight: 1 }}>
+                    GHS {pendingSales.reduce((sum, sale) => sum + sale.total_price, 0).toFixed(2)}
+                  </strong>
                 </div>
               </div>
 
-              {/* Total */}
-              <div style={{ 
-                background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
-                borderRadius: 12,
-                padding: 20,
-                border: "2px solid #10b981",
+              <div style={{
+                textAlign: "center",
+                marginTop: 14,
+                fontSize: 11,
+                color: "#94a3b8",
+                letterSpacing: "0.7px",
               }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#065f46", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Amount</span>
-                  <span style={{ fontSize: 32, fontWeight: 800, color: "#059669" }}>
-                    GHS {pendingSales.reduce((sum, sale) => sum + sale.total_price, 0).toFixed(2)}
-                  </span>
-                </div>
+                THANK YOU FOR YOUR PURCHASE
               </div>
             </div>
 
             {/* Action Buttons */}
-            <div style={{ 
-              padding: "16px 24px 24px",
-              background: "white",
-              borderTop: "1px solid #f3f4f6",
+            <div style={{
+              padding: "12px 18px 16px",
+              background: "#f8fafc",
+              borderTop: "1px solid #e2e8f0",
             }}>
               {!saleConfirmed ? (
-                // Before confirmation: Back and Confirm buttons
-                <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ display: "flex", gap: 10 }}>
                   <button
                     type="button"
                     onClick={() => {
@@ -749,83 +751,75 @@ export default function Sales() {
                     disabled={confirming}
                     style={{
                       flex: "0 0 auto",
-                      padding: "14px 20px",
-                      border: "2px solid #e5e7eb",
+                      padding: "12px 16px",
+                      border: "1px solid #cbd5e1",
                       background: "white",
-                      borderRadius: 10,
+                      borderRadius: 9,
                       fontSize: 15,
                       fontWeight: 600,
-                      color: "#6b7280",
+                      color: "#64748b",
                       cursor: confirming ? "not-allowed" : "pointer",
-                      opacity: confirming ? 0.5 : 1,
-                      transition: "all 0.2s",
+                      opacity: confirming ? 0.6 : 1,
                     }}
                   >
                     ← Back
                   </button>
-                  
+
                   <button
                     type="button"
                     onClick={confirmSale}
                     disabled={confirming}
                     style={{
                       flex: 1,
-                      padding: "14px 24px",
+                      padding: "12px 18px",
                       border: "none",
-                      background: confirming 
-                        ? "#9ca3af" 
-                        : "linear-gradient(135deg, #10b981, #059669)",
-                      borderRadius: 10,
+                      background: confirming ? "#94a3b8" : "#0f172a",
+                      borderRadius: 9,
                       fontSize: 16,
                       fontWeight: 700,
                       color: "white",
                       cursor: confirming ? "not-allowed" : "pointer",
-                      boxShadow: confirming ? "none" : "0 4px 14px rgba(16, 185, 129, 0.4)",
-                      transition: "all 0.2s",
                     }}
                   >
-                    {confirming ? "⏳ Processing..." : "✓ Confirm Sale"}
+                    {confirming ? "Processing..." : "Confirm Sale"}
                   </button>
                 </div>
               ) : (
-                // After confirmation: Print and Done buttons
-                <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ display: "flex", gap: 10 }}>
                   <button
                     type="button"
                     onClick={printReceipt}
                     style={{
                       flex: 1,
-                      padding: "14px 24px",
-                      border: "2px solid #3b82f6",
+                      padding: "12px 18px",
+                      border: "1px solid #cbd5e1",
                       background: "white",
-                      borderRadius: 10,
+                      borderRadius: 9,
                       fontSize: 15,
                       fontWeight: 600,
-                      color: "#3b82f6",
+                      color: "#334155",
                       cursor: "pointer",
-                      transition: "all 0.2s",
                     }}
                   >
                     Print
                   </button>
-                  
+
                   <button
                     type="button"
                     onClick={handleDone}
                     style={{
                       flex: 1,
-                      padding: "14px 24px",
+                      padding: "12px 18px",
                       border: "none",
-                      background: "linear-gradient(135deg, #10b981, #059669)",
-                      borderRadius: 10,
+                      background: "#0f172a",
+                      borderRadius: 9,
                       fontSize: 16,
                       fontWeight: 700,
                       color: "white",
                       cursor: "pointer",
-                      boxShadow: "0 4px 12px rgba(16, 185, 129, 0.3)",
                     }}
                   >
-                    ✓ Done
+                    Done
                   </button>
                 </div>
               )}
