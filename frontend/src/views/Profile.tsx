@@ -58,7 +58,7 @@ export default function Profile() {
   const [businessInfo, setBusinessInfo] = useState({
     name: currentUserData?.business_name || "Gel Invent Business",
     owner: currentUserData?.name || "Gel Christ Boateng",
-    phone: "",
+    phone: currentUserData?.phone || "",
     email: currentUserData?.email || "",
     address: "",
     taxId: "",
@@ -69,7 +69,7 @@ export default function Profile() {
   const [userInfo, setUserInfo] = useState({
     name: currentUserData?.name || "Admin User",
     email: currentUserData?.email || "",
-    phone: "",
+    phone: currentUserData?.phone || "",
     role: currentUserData?.role || "Admin",
   });
 
@@ -126,13 +126,14 @@ export default function Profile() {
         setUserInfo({
           name: String(parsedUser.name ?? ""),
           email: String(parsedUser.email ?? ""),
-          phone: "",
+          phone: String(parsedUser.phone ?? ""),
           role: String(parsedUser.role ?? "Admin"),
         });
         setBusinessInfo((prev) => ({
           ...prev,
           name: String(parsedUser.business_name ?? prev.name),
           owner: String(parsedUser.name ?? prev.owner),
+          phone: prev.phone || String(parsedUser.phone ?? ""),
           email: String(parsedUser.email ?? prev.email),
         }));
       }
