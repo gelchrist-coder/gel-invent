@@ -34,6 +34,7 @@ To actually send reset codes by email, configure SMTP env vars:
 - `SMTP_USER`
 - `SMTP_PASSWORD` (or `SMTP_PASS`)
 - `SMTP_FROM` (optional sender address)
+- `SMTP_FROM_NAME` (optional sender display name, default `Gel Invent`)
 - `SMTP_USE_TLS=1` (recommended)
 
 For local testing without SMTP delivery, set:

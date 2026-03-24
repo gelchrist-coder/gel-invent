@@ -5,6 +5,7 @@ import socket
 import smtplib
 import time
 from email.message import EmailMessage
+from email.utils import formataddr
 
 
 def smtp_configured() -> bool:
@@ -56,6 +57,7 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
     - SMTP_USER
     - SMTP_PASSWORD (or SMTP_PASS)
     - SMTP_FROM (default SMTP_USER or no-reply@localhost)
+    - SMTP_FROM_NAME (default "Gel Invent")
     - SMTP_USE_TLS (default 1)
     - SMTP_USE_SSL (default 0; auto-enabled when port is 465 if unset)
     - SMTP_FORCE_IPV4 (default 1 on Railway, else 0)
@@ -93,13 +95,14 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
     user = os.getenv("SMTP_USER")
     password = os.getenv("SMTP_PASSWORD") or os.getenv("SMTP_PASS")
     from_email = os.getenv("SMTP_FROM") or user or "no-reply@localhost"
+    from_name = (os.getenv("SMTP_FROM_NAME") or "Gel Invent").strip()
 
     use_tls_default = os.getenv("SMTP_USE_TLS", "1") == "1"
     use_ssl_env = os.getenv("SMTP_USE_SSL")
     force_ipv4 = os.getenv("SMTP_FORCE_IPV4", "1" if os.getenv("RAILWAY_ENVIRONMENT") else "0") == "1"
 
     msg = EmailMessage()
-    msg["From"] = from_email
+    msg["From"] = formataddr((from_name, from_email))
     msg["To"] = to_email
     msg["Subject"] = subject
     msg.set_content(body_text)
