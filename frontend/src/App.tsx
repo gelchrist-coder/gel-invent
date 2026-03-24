@@ -18,8 +18,26 @@ import Sales from "./views/Sales";
 import UserManagement from "./views/UserManagement";
 import { useExpiryTracking } from "./settings";
 
+type StoredUser = {
+  id?: number;
+  name?: string;
+  business_name?: string;
+  role?: string;
+  branch_id?: number | null;
+};
+
+function readStoredUser(): StoredUser | null {
+  const raw = localStorage.getItem("user");
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as StoredUser;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("token"));
   const [activeView, setActiveView] = useState("dashboard");
   const [visitedViews, setVisitedViews] = useState<string[]>(["dashboard"]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -28,10 +46,10 @@ export default function App() {
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterExpiry, setFilterExpiry] = useState("all");
   const [showAddProduct, setShowAddProduct] = useState(false);
-  const [userName, setUserName] = useState("User");
-  const [businessName, setBusinessName] = useState("Business");
-  const [userRole, setUserRole] = useState("Admin");
-  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [userName, setUserName] = useState(() => readStoredUser()?.name || "User");
+  const [businessName, setBusinessName] = useState(() => readStoredUser()?.business_name || "Business");
+  const [userRole, setUserRole] = useState(() => readStoredUser()?.role || "Admin");
+  const [currentUserId, setCurrentUserId] = useState<number | null>(() => readStoredUser()?.id ?? null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<number | null>(() => {
     const raw = localStorage.getItem("activeBranchId");
@@ -252,8 +270,23 @@ export default function App() {
 
 
   const handleLogin = (_email: string, _password: string) => {
-    // In production, this would validate against a backend API
-    // For now, we just set authentication to true
+    const user = readStoredUser();
+    if (user) {
+      setUserName(user.name || "User");
+      setBusinessName(user.business_name || "Business");
+      setUserRole(user.role || "Admin");
+      setCurrentUserId(user.id ?? null);
+
+      if (user.role && user.role !== "Admin") {
+        const bid = typeof user.branch_id === "number" ? user.branch_id : null;
+        setActiveBranchId(bid);
+        if (bid != null) localStorage.setItem("activeBranchId", String(bid));
+      }
+    }
+
+    // Always start authenticated users on dashboard.
+    setActiveView("dashboard");
+    setVisitedViews(["dashboard"]);
     setIsAuthenticated(true);
   };
 
