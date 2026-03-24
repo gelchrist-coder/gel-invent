@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
+import { changePassword, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
 import { Branch } from "../types";
 
 type PasswordInputProps = {
@@ -76,6 +76,7 @@ export default function Profile() {
   const [systemSettings, setSystemSettings] = useState({
     lowStockThreshold: "10",
     expiryWarningDays: "180",
+    currencyCode: "GHS",
     autoBackup: true,
     emailNotifications: false,
   });
@@ -148,9 +149,14 @@ export default function Profile() {
         setSystemSettings({
           lowStockThreshold: String(settings.low_stock_threshold),
           expiryWarningDays: String(settings.expiry_warning_days),
+          currencyCode: String(settings.currency_code || "GHS"),
           autoBackup: settings.auto_backup,
           emailNotifications: settings.email_notifications,
         });
+        setBusinessInfo((prev) => ({
+          ...prev,
+          currency: String(settings.currency_code || prev.currency || "GHS"),
+        }));
       } catch {
         // If unauthenticated or API unavailable, keep defaults.
       }
@@ -173,22 +179,51 @@ export default function Profile() {
 
     // Persist system settings (Admin only)
     if (isAdmin) {
+      const selectedCurrency = (businessInfo.currency || "GHS").toUpperCase();
+      const previousCurrency = (systemSettings.currencyCode || "GHS").toUpperCase();
+
       const payload = {
         low_stock_threshold: Number(systemSettings.lowStockThreshold) || 0,
         expiry_warning_days: Number(systemSettings.expiryWarningDays) || 0,
         uses_expiry_tracking: true,
+        currency_code: selectedCurrency,
         auto_backup: systemSettings.autoBackup,
         email_notifications: systemSettings.emailNotifications,
       };
       const updated = await updateSystemSettings(payload);
+
+      let conversionMessage = "";
+      if (selectedCurrency !== previousCurrency) {
+        const convertExisting = confirm(
+          `Convert existing prices and amounts from ${previousCurrency} to ${selectedCurrency} using live exchange rate?\n\nChoose OK to convert all existing records. Choose Cancel if you are just starting the business in ${selectedCurrency}.`
+        );
+
+        const result = await convertBusinessCurrency({
+          target_currency: selectedCurrency,
+          convert_existing: convertExisting,
+        });
+
+        conversionMessage = convertExisting
+          ? ` Currency converted using live rate ${result.previous_currency}->${result.currency_code} (${result.conversion_rate.toFixed(4)}).`
+          : ` Currency switched to ${result.currency_code} without converting existing records.`;
+      }
+
       setSystemSettings({
         lowStockThreshold: String(updated.low_stock_threshold),
         expiryWarningDays: String(updated.expiry_warning_days),
+        currencyCode: String(updated.currency_code || selectedCurrency),
         autoBackup: updated.auto_backup,
         emailNotifications: updated.email_notifications,
       });
+
+      setBusinessInfo((prev) => ({ ...prev, currency: selectedCurrency }));
+      localStorage.setItem("businessInfo", JSON.stringify({ ...businessInfo, currency: selectedCurrency }));
+
       // Notify other components that settings have changed
       window.dispatchEvent(new CustomEvent("systemSettingsChanged", { detail: updated }));
+      if (conversionMessage) {
+        setDataMessage(`Settings saved.${conversionMessage}`);
+      }
     }
 
     setEditing(false);

@@ -107,6 +107,7 @@ export type SystemSettings = {
   low_stock_threshold: number;
   expiry_warning_days: number;
   uses_expiry_tracking: boolean;
+  currency_code: string;
   auto_backup: boolean;
   email_notifications: boolean;
 };
@@ -668,6 +669,36 @@ export async function updateSystemSettings(payload: SystemSettings): Promise<Sys
   });
   setCache("systemSettings", updated);
   return updated;
+}
+
+export async function convertBusinessCurrency(payload: {
+  target_currency: string;
+  convert_existing: boolean;
+}): Promise<{
+  currency_code: string;
+  previous_currency: string;
+  conversion_rate: number;
+  converted_existing: boolean;
+}> {
+  const result = await jsonRequest<{
+    currency_code: string;
+    previous_currency: string;
+    conversion_rate: number;
+    converted_existing: boolean;
+  }>("/settings/system/currency/convert", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  // Refresh cached settings after conversion.
+  try {
+    const fresh = await jsonRequest<SystemSettings>("/settings/system");
+    setCache("systemSettings", fresh);
+  } catch {
+    // non-blocking
+  }
+
+  return result;
 }
 
 export type MovementsQuery = {

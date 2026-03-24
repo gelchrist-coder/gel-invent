@@ -5,6 +5,7 @@ const DEFAULT_SETTINGS: SystemSettings = {
   low_stock_threshold: 10,
   expiry_warning_days: 180,
   uses_expiry_tracking: true,
+  currency_code: "GHS",
   auto_backup: true,
   email_notifications: false,
 };
