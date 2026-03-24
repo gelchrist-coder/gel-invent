@@ -81,6 +81,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [loading, setLoading] = useState(false);
 
   const [showReset, setShowReset] = useState(false);
+  const [resetStep, setResetStep] = useState<"request" | "confirm">("request");
   const [resetEmail, setResetEmail] = useState("");
   const [resetCode, setResetCode] = useState("");
   const [resetPassword, setResetPassword] = useState("");
@@ -262,6 +263,40 @@ export default function Login({ onLogin }: LoginProps) {
     setBranchInput("");
   };
 
+  const requestResetCode = async (emailRaw: string): Promise<boolean> => {
+    const email = emailRaw.trim();
+    if (!email) {
+      setError("Please enter your email");
+      return false;
+    }
+
+    const res = await fetch(`${API_BASE}/auth/password-reset/request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+
+    const data = await safeJson(res);
+    if (!res.ok) {
+      const detail = isRecord(data) && typeof data.detail === "string" ? data.detail : null;
+      setError(detail || "Could not request reset code");
+      return false;
+    }
+
+    const message =
+      isRecord(data) && typeof data.message === "string"
+        ? data.message
+        : "Check your email for the reset code.";
+
+    setInfo(message);
+    if (isRecord(data) && typeof data.reset_code === "string" && data.reset_code.trim()) {
+      setResetCode(data.reset_code.trim());
+      setInfo(`${message} (Debug code auto-filled)`);
+    }
+    setResetStep("confirm");
+    return true;
+  };
+
   const removeBranch = (value: string) => {
     setFormData({
       ...formData,
@@ -278,41 +313,19 @@ export default function Login({ onLogin }: LoginProps) {
     try {
       if (showReset) {
         const email = (resetEmail || formData.email).trim();
-        if (!email) {
-          setError("Please enter your email");
+
+        if (resetStep === "request") {
+          await requestResetCode(email);
           setLoading(false);
           return;
         }
 
-        if (!resetCode) {
-          // Request reset code
-          const res = await fetch(`${API_BASE}/auth/password-reset/request`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email }),
-          });
-
-          const data = await safeJson(res);
-          if (!res.ok) {
-            const detail = isRecord(data) && typeof data.detail === "string" ? data.detail : null;
-            setError(detail || "Could not request reset code");
-            setLoading(false);
-            return;
-          }
-
-          const message =
-            isRecord(data) && typeof data.message === "string"
-              ? data.message
-              : "Check your email for the reset code.";
-          setInfo(message);
-          if (isRecord(data) && typeof data.reset_code === "string" && data.reset_code.trim()) {
-            setResetCode(data.reset_code);
-          }
+        if (!resetCode.trim()) {
+          setError("Enter the reset code sent to your email");
           setLoading(false);
           return;
         }
 
-        // Confirm reset
         if (resetPassword !== resetConfirmPassword) {
           setError("Passwords do not match");
           setLoading(false);
@@ -346,6 +359,7 @@ export default function Login({ onLogin }: LoginProps) {
 
         setInfo("Password updated. Please sign in with your new password.");
         setShowReset(false);
+        setResetStep("request");
         setResetEmail("");
         setResetCode("");
         setResetPassword("");
@@ -831,6 +845,22 @@ export default function Login({ onLogin }: LoginProps) {
 
             {!isSignUp && showReset && (
               <>
+                <div
+                  style={{
+                    padding: 12,
+                    borderRadius: 8,
+                    border: "1px solid #dbeafe",
+                    background: "#eff6ff",
+                    color: "#1e3a8a",
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                >
+                  {resetStep === "request"
+                    ? "Step 1 of 2: Request a reset code"
+                    : "Step 2 of 2: Enter code and create a new password"}
+                </div>
+
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                     Email Address *
@@ -843,50 +873,108 @@ export default function Login({ onLogin }: LoginProps) {
                     required
                     className="input"
                     style={{ padding: 12 }}
+                    readOnly={resetStep === "confirm"}
                   />
                 </label>
 
-                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    Reset Code
-                  </span>
-                  <input
-                    type="text"
-                    value={resetCode}
-                    onChange={(e) => setResetCode(e.target.value)}
-                    placeholder="Enter the 6-digit code"
-                    className="input"
-                    style={{ padding: 12 }}
-                  />
-                </label>
+                {resetStep === "confirm" && (
+                  <>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                        Reset Code
+                      </span>
+                      <input
+                        type="text"
+                        value={resetCode}
+                        onChange={(e) => setResetCode(e.target.value)}
+                        placeholder="Enter the 6-digit code"
+                        className="input"
+                        style={{ padding: 12 }}
+                      />
+                    </label>
 
-                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    New Password
-                  </span>
-                  <PasswordInput
-                    value={resetPassword}
-                    onChange={setResetPassword}
-                    placeholder="••••••••"
-                    show={showResetPassword}
-                    onToggle={() => setShowResetPassword(!showResetPassword)}
-                    autoComplete="new-password"
-                  />
-                </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                        New Password
+                      </span>
+                      <PasswordInput
+                        value={resetPassword}
+                        onChange={setResetPassword}
+                        placeholder="••••••••"
+                        show={showResetPassword}
+                        onToggle={() => setShowResetPassword(!showResetPassword)}
+                        autoComplete="new-password"
+                      />
+                    </label>
 
-                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    Confirm New Password
-                  </span>
-                  <PasswordInput
-                    value={resetConfirmPassword}
-                    onChange={setResetConfirmPassword}
-                    placeholder="••••••••"
-                    show={showResetConfirmPassword}
-                    onToggle={() => setShowResetConfirmPassword(!showResetConfirmPassword)}
-                    autoComplete="new-password"
-                  />
-                </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                        Confirm New Password
+                      </span>
+                      <PasswordInput
+                        value={resetConfirmPassword}
+                        onChange={setResetConfirmPassword}
+                        placeholder="••••••••"
+                        show={showResetConfirmPassword}
+                        onToggle={() => setShowResetConfirmPassword(!showResetConfirmPassword)}
+                        autoComplete="new-password"
+                      />
+                    </label>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setResetStep("request");
+                          setResetCode("");
+                          setResetPassword("");
+                          setResetConfirmPassword("");
+                          setError("");
+                          setInfo("");
+                        }}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "#1f7aff",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                          padding: 0,
+                        }}
+                      >
+                        Use another email
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setError("");
+                          setInfo("");
+                          setLoading(true);
+                          try {
+                            await requestResetCode((resetEmail || formData.email).trim());
+                          } finally {
+                            setLoading(false);
+                          }
+                        }}
+                        disabled={loading}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "#1f7aff",
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: loading ? "not-allowed" : "pointer",
+                          textDecoration: "underline",
+                          padding: 0,
+                          opacity: loading ? 0.6 : 1,
+                        }}
+                      >
+                        Resend code
+                      </button>
+                    </div>
+                  </>
+                )}
               </>
             )}
 
@@ -989,7 +1077,7 @@ export default function Login({ onLogin }: LoginProps) {
             {loading
               ? "Processing..."
               : showReset
-                ? (resetCode ? "Reset Password" : "Send Reset Code")
+                ? (resetStep === "request" ? "Send Reset Code" : "Reset Password")
                 : isSignUp
                   ? "Sign Up"
                   : "Sign In"}
@@ -1001,6 +1089,7 @@ export default function Login({ onLogin }: LoginProps) {
                 type="button"
                 onClick={() => {
                   setShowReset(false);
+                  setResetStep("request");
                   setError("");
                   setInfo("");
                 }}
