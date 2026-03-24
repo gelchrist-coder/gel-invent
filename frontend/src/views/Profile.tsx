@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, deleteBranch, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
+import { changePassword, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
 import { Branch } from "../types";
 
 type PasswordInputProps = {
@@ -89,6 +89,8 @@ export default function Profile() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
 
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const [exportingData, setExportingData] = useState(false);
@@ -230,6 +232,41 @@ export default function Profile() {
       setChangePasswordError(error instanceof Error ? error.message : "Failed to change password");
     } finally {
       setChangingPassword(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deletingAccount) return;
+    setDeleteAccountError(null);
+
+    const confirmed = confirm(
+      "Delete your account permanently? This will remove your account and all related data. This action cannot be undone."
+    );
+    if (!confirmed) return;
+
+    const typed = prompt('Type DELETE to confirm account deletion:');
+    if (typed !== "DELETE") {
+      setDeleteAccountError("Account deletion cancelled. Confirmation text did not match.");
+      return;
+    }
+
+    const password = prompt("Enter your current password to continue:");
+    if (!password) {
+      setDeleteAccountError("Account deletion cancelled. Password is required.");
+      return;
+    }
+
+    setDeletingAccount(true);
+    try {
+      await deleteMyAccount({ current_password: password });
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      localStorage.removeItem("activeBranchId");
+      window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
+    } catch (error) {
+      setDeleteAccountError(error instanceof Error ? error.message : "Failed to delete account");
+    } finally {
+      setDeletingAccount(false);
     }
   };
 
@@ -691,6 +728,41 @@ export default function Profile() {
               >
                 Change Password
               </button>
+            </div>
+
+            <div
+              style={{
+                padding: 16,
+                background: "#fef2f2",
+                borderRadius: 8,
+                border: "1px solid #fecaca",
+                marginTop: 12,
+              }}
+            >
+              <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 8px", color: "#991b1b" }}>
+                Danger Zone
+              </h3>
+              <p style={{ margin: "0 0 12px", fontSize: 13, color: "#b91c1c" }}>
+                Permanently delete this account and all associated business data.
+              </p>
+              <button
+                className="button"
+                style={{
+                  background: deletingAccount ? "#fca5a5" : "#ef4444",
+                  fontSize: 14,
+                  padding: "8px 16px",
+                  cursor: deletingAccount ? "not-allowed" : "pointer",
+                }}
+                onClick={handleDeleteAccount}
+                disabled={deletingAccount}
+              >
+                {deletingAccount ? "Deleting..." : "Delete Account"}
+              </button>
+              {deleteAccountError ? (
+                <p style={{ margin: "10px 0 0", fontSize: 12, color: "#991b1b", fontWeight: 600 }}>
+                  {deleteAccountError}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>

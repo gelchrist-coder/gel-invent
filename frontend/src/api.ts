@@ -378,6 +378,15 @@ export async function changePassword(payload: {
   });
 }
 
+export async function deleteMyAccount(payload: {
+  current_password: string;
+}): Promise<{ message: string }> {
+  return jsonRequest<{ message: string }>("/auth/me", {
+    method: "DELETE",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchProducts(): Promise<Product[]> {
   // Return cached data immediately if available
   const cached = getCached<Product[]>("products");

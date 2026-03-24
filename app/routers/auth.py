@@ -136,6 +136,10 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class DeleteAccountRequest(BaseModel):
+    current_password: str
+
+
 class UpdateMeRequest(BaseModel):
     categories: Optional[list[str]] = None
 
@@ -420,3 +424,32 @@ def change_password(
     db.add(current_user)
     db.commit()
     return {"message": "Password changed successfully"}
+
+
+@router.delete("/me")
+def delete_current_user_account(
+    payload: DeleteAccountRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Delete the currently authenticated user's account and tenant data."""
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+
+    supabase_user_id = getattr(current_user, "supabase_user_id", None)
+
+    try:
+        db.delete(current_user)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete account") from exc
+
+    if supabase_user_id:
+        try:
+            delete_auth_user(supabase_user_id)
+        except Exception:
+            # Local account is already removed; ignore external cleanup failures.
+            pass
+
+    return {"message": "Account deleted successfully"}
