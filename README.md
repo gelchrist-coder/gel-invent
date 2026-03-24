@@ -27,6 +27,20 @@ FastAPI-based inventory management service with a React (Vite) frontend.
 3. Run the dev server: `uvicorn app.main:app --reload`.
 4. Visit `http://127.0.0.1:8000/health` to verify the API is running.
 
+### Forgot password email setup
+To actually send reset codes by email, configure SMTP env vars:
+- `SMTP_HOST` (required)
+- `SMTP_PORT` (default `587`)
+- `SMTP_USER`
+- `SMTP_PASSWORD` (or `SMTP_PASS`)
+- `SMTP_FROM` (optional sender address)
+- `SMTP_USE_TLS=1` (recommended)
+
+For local testing without SMTP delivery, set:
+- `PASSWORD_RESET_DEBUG=1`
+
+Then `/auth/password-reset/request` also returns `reset_code` in the JSON response.
+
 ### Frontend (Vite + React)
 1. `cd frontend && npm install`
 2. Start dev server: `npm run dev` (defaults to http://127.0.0.1:5173).

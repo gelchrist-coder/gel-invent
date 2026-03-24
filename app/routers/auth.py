@@ -25,6 +25,7 @@ from app.utils.supabase_auth import (
     delete_auth_user,
     is_supabase_auth_sync_enabled,
 )
+from app.utils.email import send_email, smtp_configured
 from app.utils.phone import is_valid_phone, normalize_phone
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -349,7 +350,8 @@ def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(
     Note: For production, you typically send this code via email/SMS.
     This API can optionally return the code when PASSWORD_RESET_DEBUG=1.
     """
-    user = db.query(User).filter(User.email == payload.email).first()
+    email = _normalize_email(str(payload.email))
+    user = db.query(User).filter(User.email == email).first()
 
     # Always respond 200 to avoid leaking whether email exists.
     message = "If an account exists for this email, a reset code has been generated."
@@ -368,6 +370,22 @@ def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(
     )
     db.add(token)
     db.commit()
+
+    if smtp_configured():
+        try:
+            send_email(
+                to_email=email,
+                subject="Your Gel Invent Password Reset Code",
+                body_text=(
+                    f"Hello {user.name},\n\n"
+                    f"Your password reset code is: {code}\n"
+                    "This code expires in 15 minutes.\n\n"
+                    "If you did not request a password reset, you can ignore this email."
+                ),
+            )
+        except Exception as exc:
+            # Do not leak account existence or internals to caller.
+            print(f"⚠️ Password reset email failed for {email}: {type(exc).__name__}: {exc}")
 
     debug = os.getenv("PASSWORD_RESET_DEBUG") == "1"
     return PasswordResetRequestResponse(message=message, reset_code=code if debug else None)
