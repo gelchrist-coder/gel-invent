@@ -116,6 +116,7 @@ export default function Layout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const mobileSidebarWidth = "min(86vw, 320px)";
 
   // Check for mobile viewport
   useEffect(() => {
@@ -130,6 +131,16 @@ export default function Layout({
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
+
+  // Prevent background scroll while the mobile drawer is open.
+  useEffect(() => {
+    if (!isMobile) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = sidebarOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMobile, sidebarOpen]);
 
   // Close sidebar when navigating on mobile
   const handleNavigate = (view: string) => {
@@ -166,8 +177,10 @@ export default function Layout({
             left: 0,
             right: 0,
             bottom: 0,
-            background: "rgba(0,0,0,0.5)",
+            background: "rgba(2, 6, 23, 0.5)",
+            backdropFilter: "blur(2px)",
             zIndex: 998,
+            touchAction: "none",
           }}
         />
       )}
@@ -177,22 +190,22 @@ export default function Layout({
         onMouseEnter={() => !isMobile && setSidebarHovered(true)}
         onMouseLeave={() => !isMobile && setSidebarHovered(false)}
         style={{
-          width: sidebarWidth,
-          minWidth: sidebarWidth,
-          maxWidth: sidebarWidth,
+          width: isMobile ? mobileSidebarWidth : sidebarWidth,
+          minWidth: isMobile ? mobileSidebarWidth : sidebarWidth,
+          maxWidth: isMobile ? mobileSidebarWidth : sidebarWidth,
           background: "linear-gradient(180deg, #0b1021 0%, #1a2235 100%)",
           color: "#fff",
           padding: "16px 0",
           boxShadow: isExpanded && !isMobile ? "4px 0 24px rgba(0,0,0,0.2)" : "2px 0 8px rgba(0,0,0,0.1)",
           position: isMobile ? "fixed" : "sticky",
           top: 0,
-          left: isMobile ? (sidebarOpen ? 0 : -260) : 0,
+          left: isMobile ? (sidebarOpen ? 0 : "calc(-1 * min(86vw, 320px))") : 0,
           height: "100vh",
           overflowY: "auto",
           overflowX: "hidden",
           flexShrink: 0,
           zIndex: 999,
-          transition: "all 0.25s ease",
+          transition: "left 0.26s ease, box-shadow 0.2s ease",
         }}
       >
         {/* Header */}

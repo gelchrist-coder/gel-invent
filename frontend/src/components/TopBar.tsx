@@ -29,6 +29,7 @@ export default function TopBar({
 }: Props) {
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const visibleBranches = branches ?? [];
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -82,12 +83,14 @@ export default function TopBar({
             onClick={onMenuClick}
             style={{
               background: "transparent",
-              border: "none",
-              padding: 8,
+              border: "1px solid #d6e2f2",
+              borderRadius: 10,
+              padding: 9,
               cursor: "pointer",
               display: "flex",
               flexDirection: "column",
               gap: 4,
+              boxShadow: "0 4px 12px rgba(15, 23, 42, 0.08)",
             }}
             aria-label="Open menu"
           >
@@ -220,18 +223,58 @@ export default function TopBar({
           {showDropdown && (
             <div
               style={{
-                position: "absolute",
-                top: "calc(100% + 8px)",
-                right: 0,
+                position: isMobile ? "fixed" : "absolute",
+                top: isMobile ? 82 : "calc(100% + 8px)",
+                right: isMobile ? 10 : 0,
+                left: isMobile ? 10 : "auto",
                 background: "#ffffff",
                 borderRadius: 12,
                 border: "1px solid #e6e9f2",
                 boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                minWidth: 240,
+                minWidth: isMobile ? 0 : 240,
                 padding: 8,
                 zIndex: 1000,
               }}
             >
+              {visibleBranches.length > 1 && onChangeBranch ? (
+                <div
+                  style={{
+                    marginBottom: 8,
+                    padding: 10,
+                    borderRadius: 10,
+                    border: "1px solid #e2e8f0",
+                    background: "#f8fafc",
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, letterSpacing: "0.4px" }}>BRANCH</div>
+                  <select
+                    value={activeBranchId ?? visibleBranches[0]?.id}
+                    onChange={(e) => {
+                      const nextId = Number(e.target.value);
+                      if (Number.isFinite(nextId)) onChangeBranch(nextId);
+                      setShowDropdown(false);
+                    }}
+                    style={{
+                      width: "100%",
+                      height: 38,
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: "#fff",
+                      color: "#0f172a",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      padding: "0 10px",
+                    }}
+                  >
+                    {visibleBranches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+
               <button
                 onClick={() => {
                   setShowDropdown(false);
