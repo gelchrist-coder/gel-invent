@@ -191,9 +191,9 @@ export default function Layout({
         onMouseEnter={() => !isMobile && setSidebarHovered(true)}
         onMouseLeave={() => !isMobile && setSidebarHovered(false)}
         style={{
-          width: isMobile ? 0 : sidebarWidth,
-          minWidth: isMobile ? 0 : sidebarWidth,
-          maxWidth: isMobile ? 0 : sidebarWidth,
+          width: isMobile ? (sidebarOpen ? mobileSidebarWidth : 0) : sidebarWidth,
+          minWidth: isMobile ? (sidebarOpen ? mobileSidebarWidth : 0) : sidebarWidth,
+          maxWidth: isMobile ? (sidebarOpen ? mobileSidebarWidth : 0) : sidebarWidth,
           background: "linear-gradient(180deg, #0b1021 0%, #1a2235 100%)",
           color: "#fff",
           padding: "16px 0",
