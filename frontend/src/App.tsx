@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { createMovement, createProduct, deleteProduct, fetchBranchesCached, fetchMe, fetchProductsCached, updateProduct, getCachedProducts } from "./api";
+import { createMovement, createProduct, deleteProduct, fetchBranchesCached, fetchMe, fetchProductsCached, updateProduct, getCachedProducts, clearDataCache } from "./api";
 import Layout from "./components/Layout";
 import ProductForm from "./components/ProductForm";
 import ProductList from "./components/ProductList";
@@ -298,13 +298,14 @@ export default function App() {
     if (branchId === activeBranchId) return;
     setActiveBranchId(branchId);
     localStorage.setItem("activeBranchId", String(branchId));
+
+    // Clear cached branch-scoped responses and reset product selection immediately.
+    clearDataCache();
+    setProducts([]);
+    setSelectedId(null);
+
     // Notify other components that the active branch changed
     window.dispatchEvent(new CustomEvent("activeBranchChanged", { detail: branchId }));
-
-    // Force a full refresh so all mounted views and caches rehydrate for this branch.
-    window.setTimeout(() => {
-      window.location.reload();
-    }, 0);
   };
 
   // Show login page if not authenticated
