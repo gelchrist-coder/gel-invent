@@ -321,8 +321,11 @@ label {
   --scroll-progress: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at 10% 10%, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0) 45%),
-    linear-gradient(155deg, #fdf3ee 0%, #f4ebe5 35%, #efeff4 100%);
+    linear-gradient(rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.74)),
+    url("./asset/back.png");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   color: #10131f;
   padding: 18px;
 }
