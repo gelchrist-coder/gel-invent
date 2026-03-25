@@ -368,7 +368,7 @@ export default function App() {
       case "products":
         return (
           <div className="app-shell">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
               <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Products</h1>
               <button
                 className="button"
@@ -446,7 +446,7 @@ export default function App() {
             
             {/* Search and Filter Bar */}
             <div className="card" style={{ marginBottom: 16, padding: 16 }}>
-              <div className="grid" style={{ gridTemplateColumns: "2fr 1fr 1fr", gap: 12, alignItems: "end" }}>
+              <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, alignItems: "end" }}>
                 <label style={{ margin: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Search Products

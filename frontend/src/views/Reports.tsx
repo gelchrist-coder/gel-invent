@@ -459,7 +459,7 @@ export default function Reports() {
       {activeTab === "sales" && salesData && salesData.today && (
         <div>
           {/* Summary Cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16, marginBottom: 24 }}>
             <div style={{ padding: 20, backgroundColor: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", color: "#2563eb", flexShrink: 0 }}>
@@ -533,7 +533,7 @@ export default function Reports() {
           {/* Payment Methods */}
           <div style={{ marginBottom: 24 }}>
             <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Sales by Payment Method</h2>
-            <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
+            <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, overflowX: "auto" }}>
               {salesData.payment_methods.length > 0 ? (
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
@@ -564,7 +564,7 @@ export default function Reports() {
           {/* Top Products */}
           <div>
             <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Top Selling Products</h2>
-            <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
+            <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, overflowX: "auto" }}>
               {salesData.top_products.length > 0 ? (
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
@@ -597,7 +597,7 @@ export default function Reports() {
             <div style={{ marginTop: 24 }}>
               <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Revenue & Profitability</h2>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 16, marginBottom: 24 }}>
                 <div style={{ padding: 20, backgroundColor: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                     <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", color: "#2563eb", flexShrink: 0 }}>
@@ -685,7 +685,7 @@ export default function Reports() {
       {activeTab === "inventory" && inventoryData && (
         <div>
           {/* Summary Cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 16, marginBottom: 24 }}>
             <div style={{ padding: 20, backgroundColor: "#f3f4f6", borderRadius: 8, border: "1px solid #d1d5db" }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", color: "#4b5563", flexShrink: 0 }}>
@@ -748,7 +748,7 @@ export default function Reports() {
           {/* Stock Value */}
           <div style={{ marginBottom: 24, padding: 20, backgroundColor: "#f0fdf4", borderRadius: 8, border: "1px solid #bbf7d0" }}>
             <h3 style={{ margin: "0 0 12px", fontSize: 16, color: "#15803d" }}>Stock Valuation</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 16 }}>
               <div>
                 <p style={{ margin: 0, fontSize: 12, color: "#166534" }}>Cost Value</p>
                 <p style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 600, color: "#15803d" }}>
@@ -787,7 +787,7 @@ export default function Reports() {
           </div>
 
           {/* Alerts */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
             {/* Low Stock */}
             <div>
               <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Low Stock Items</h2>
@@ -835,7 +835,7 @@ export default function Reports() {
       {activeTab === "creditors" && creditorsData && (
         <div>
           {/* Summary Cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 16, marginBottom: 24 }}>
             <div style={{ padding: 20, backgroundColor: "#f3f4f6", borderRadius: 8, border: "1px solid #d1d5db" }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", color: "#4b5563", flexShrink: 0 }}>
@@ -909,7 +909,7 @@ export default function Reports() {
           {/* Top Debtors */}
           <div style={{ marginBottom: 24 }}>
             <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Top Debtors</h2>
-            <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
+            <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16, overflowX: "auto" }}>
               {creditorsData.top_debtors.length > 0 ? (
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>

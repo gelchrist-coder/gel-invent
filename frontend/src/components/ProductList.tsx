@@ -57,6 +57,13 @@ export default function ProductList({
   const [busy, setBusy] = useState(false);
   const [damageId, setDamageId] = useState<number | null>(null);
   const [damageForm, setDamageForm] = useState({ quantity: "", reason: "Damaged", details: "" });
+  const [isCompactLayout, setIsCompactLayout] = useState(() => window.innerWidth < 980);
+
+  useEffect(() => {
+    const onResize = () => setIsCompactLayout(window.innerWidth < 980);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   // Fetch initial stock data for all products
   useEffect(() => {
@@ -860,7 +867,7 @@ export default function ProductList({
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         <h2 className="section-title" style={{ margin: 0 }}>Products</h2>
         <span style={{ fontSize: 14, color: "#6b7280" }}>
           Showing {filteredProducts.length} of {products.length}
@@ -873,6 +880,107 @@ export default function ProductList({
             ? "No products match your filters" 
             : "No products yet. Create one to get started."}
         </p>
+      ) : isCompactLayout ? (
+        <div style={{ display: "grid", gap: 12 }}>
+          {filteredProducts.map((p) => {
+            const stock = stockData[p.id];
+            const stockLoaded = stock !== undefined;
+            const profitMargin = calculateProfitMargin(p.cost_price, p.selling_price);
+
+            return (
+              <div
+                key={p.id}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 12,
+                  padding: 14,
+                  background: "#ffffff",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 2 }}>{p.name}</div>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>SKU: {p.sku}</div>
+                  </div>
+                  <span
+                    style={{
+                      color: !stockLoaded ? "#6b7280" : stock > 0 ? "#059669" : "#dc2626",
+                      background: !stockLoaded ? "#f3f4f6" : stock > 0 ? "#d1fae5" : "#fee2e2",
+                      padding: "4px 8px",
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {stockLoaded ? `${stock} in stock` : "Loading..."}
+                  </span>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                  <div style={{ background: "#f8fafc", borderRadius: 8, padding: 8 }}>
+                    <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>Cost Price</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1f2937" }}>{p.cost_price ? `₵${Number(p.cost_price).toFixed(2)}` : "-"}</div>
+                  </div>
+                  <div style={{ background: "#f8fafc", borderRadius: 8, padding: 8 }}>
+                    <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>Selling Price</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1f2937" }}>{p.selling_price ? `₵${Number(p.selling_price).toFixed(2)}` : "-"}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 12 }}>
+                  <span style={{ background: "#f3f4f6", color: "#374151", padding: "4px 8px", borderRadius: 6, fontSize: 12, fontWeight: 600 }}>
+                    {p.category || "General"}
+                  </span>
+                  <span style={{ fontSize: 12, color: profitMargin !== "-" && parseFloat(profitMargin) > 0 ? "#059669" : "#6b7280", fontWeight: 700 }}>
+                    Margin: {profitMargin}
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  {isAdmin && (
+                    <button
+                      onClick={() => startEdit(p)}
+                      disabled={busy}
+                      style={{
+                        flex: 1,
+                        padding: "8px 12px",
+                        fontSize: 13,
+                        background: "#3b82f6",
+                        color: "white",
+                        border: "none",
+                        borderRadius: 8,
+                        cursor: busy ? "not-allowed" : "pointer",
+                        fontWeight: 600,
+                      }}
+                      title="Edit product"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  <button
+                    onClick={onOpenInventory}
+                    disabled={busy}
+                    style={{
+                      flex: 1,
+                      padding: "8px 12px",
+                      fontSize: 13,
+                      background: "#10b981",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 8,
+                      cursor: busy ? "not-allowed" : "pointer",
+                      fontWeight: 600,
+                    }}
+                    title="Open Inventory actions"
+                  >
+                    Inventory Actions
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table style={{ 
