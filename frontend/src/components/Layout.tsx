@@ -191,9 +191,9 @@ export default function Layout({
         onMouseEnter={() => !isMobile && setSidebarHovered(true)}
         onMouseLeave={() => !isMobile && setSidebarHovered(false)}
         style={{
-          width: isMobile ? mobileSidebarWidth : sidebarWidth,
-          minWidth: isMobile ? mobileSidebarWidth : sidebarWidth,
-          maxWidth: isMobile ? mobileSidebarWidth : sidebarWidth,
+          width: isMobile ? 0 : sidebarWidth,
+          minWidth: isMobile ? 0 : sidebarWidth,
+          maxWidth: isMobile ? 0 : sidebarWidth,
           background: "linear-gradient(180deg, #0b1021 0%, #1a2235 100%)",
           color: "#fff",
           padding: "16px 0",
@@ -207,8 +207,15 @@ export default function Layout({
           flexShrink: 0,
           zIndex: 999,
           transition: "left 0.26s ease, box-shadow 0.2s ease",
+          pointerEvents: isMobile && !sidebarOpen ? "none" : "auto",
         }}
       >
+        <div
+          style={{
+            width: isMobile ? mobileSidebarWidth : "100%",
+            height: "100%",
+          }}
+        >
         {/* Header */}
         <div style={{ 
           padding: !isExpanded ? "0 8px" : "0 16px", 
@@ -365,6 +372,7 @@ export default function Layout({
             </button>
           ))}
         </nav>
+        </div>
       </aside>
 
       {/* Main Content */}
