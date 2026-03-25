@@ -205,8 +205,8 @@ function HorizontalBarChart({
   const maxValue = Math.max(...items.map((item) => item.value), 0);
 
   return (
-    <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
-      <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 600 }}>{title}</h3>
+    <div style={{ backgroundColor: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+      <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>{title}</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {items.map((item) => {
           const ratio = maxValue > 0 ? (item.value / maxValue) * 100 : 0;
@@ -217,9 +217,9 @@ function HorizontalBarChart({
                   <p
                     style={{
                       margin: 0,
-                      fontSize: 14,
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "#0f172a",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                     }}
@@ -237,7 +237,7 @@ function HorizontalBarChart({
                   width: "100%",
                   height: 10,
                   borderRadius: 999,
-                  backgroundColor: "#eef2ff",
+                  backgroundColor: "#ecf2ff",
                   overflow: "hidden",
                 }}
               >
@@ -274,7 +274,7 @@ function DailyTrendBarChart({
   const maxRevenue = Math.max(...points.map((p) => p.revenue), 0);
 
   return (
-    <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, backgroundColor: "white", padding: 16 }}>
+    <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, backgroundColor: "white", padding: 16, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
       <div style={{ overflowX: "auto", overflowY: "hidden", paddingBottom: 10 }}>
         <div style={{ minWidth: Math.max(points.length * 18, 560), height: 240, display: "flex", alignItems: "flex-end", gap: 6 }}>
           {points.map((point, index) => {
@@ -289,7 +289,7 @@ function DailyTrendBarChart({
                     width: "100%",
                     height: barHeight,
                     borderRadius: 4,
-                    background: "linear-gradient(180deg, #34d399 0%, #059669 100%)",
+                    background: "linear-gradient(180deg, #22d3ee 0%, #0ea5e9 60%, #2563eb 100%)",
                   }}
                 />
                 <span style={{ fontSize: 10, color: "#6b7280", whiteSpace: "nowrap", transform: "rotate(-35deg)", transformOrigin: "top left", height: showTick ? 28 : 0, opacity: showTick ? 1 : 0 }}>
@@ -397,25 +397,28 @@ export default function Reports() {
   }
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1 className="page-title" style={{ marginBottom: 24 }}>Reports</h1>
+    <div style={{ padding: "20px 16px 28px", maxWidth: 1200, margin: "0 auto" }}>
+      <div style={{ marginBottom: 20 }}>
+        <h1 className="page-title" style={{ marginBottom: 6 }}>Reports</h1>
+        <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>Track sales, inventory health, and creditor performance in one view.</p>
+      </div>
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 24, borderBottom: "2px solid #e5e7eb" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 20, padding: 6, border: "1px solid #dbe5f2", borderRadius: 14, background: "linear-gradient(180deg, #f8fbff, #f1f5fb)" }}>
         {(["sales", "inventory", "creditors"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             style={{
-              padding: "12px 24px",
-              border: "none",
-              background: "none",
+              padding: "10px 16px",
+              border: activeTab === tab ? "1px solid #2f66d0" : "1px solid transparent",
+              borderRadius: 10,
+              background: activeTab === tab ? "linear-gradient(120deg, #2f66d0, #4a82e8)" : "transparent",
               cursor: "pointer",
-              fontWeight: 600,
-              fontSize: 15,
-              color: activeTab === tab ? "#2563eb" : "#6b7280",
-              borderBottom: activeTab === tab ? "2px solid #2563eb" : "none",
-              marginBottom: -2,
+              fontWeight: 700,
+              fontSize: 14,
+              color: activeTab === tab ? "#ffffff" : "#475569",
               textTransform: "capitalize",
+              boxShadow: activeTab === tab ? "0 8px 18px rgba(47, 102, 208, 0.28)" : "none",
             }}
           >
             {tab}
@@ -424,12 +427,12 @@ export default function Reports() {
       </div>
 
       {loading && (
-        <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>Loading...</div>
+        <div style={{ textAlign: "center", padding: 36, color: "#6b7280", background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 14 }}>Loading...</div>
       )}
 
       {activeTab === "sales" && (
-        <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#4b5563" }}>
+        <div style={{ marginBottom: 18, display: "flex", justifyContent: "flex-end" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155", background: "#ffffff", border: "1px solid #dbe5f2", borderRadius: 10, padding: "8px 10px" }}>
             Revenue Period
             <select
               value={revenuePeriod}
@@ -440,9 +443,9 @@ export default function Reports() {
               }}
               style={{
                 padding: "8px 10px",
-                border: "1px solid #d1d5db",
+                border: "1px solid #cfd8e5",
                 borderRadius: 8,
-                background: "#fff",
+                background: "#f8fafc",
               }}
             >
               <option value="today">Today</option>

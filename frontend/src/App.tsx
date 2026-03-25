@@ -445,7 +445,16 @@ export default function App() {
             )}
             
             {/* Search and Filter Bar */}
-            <div className="card" style={{ marginBottom: 16, padding: 16 }}>
+            <div
+              className="card"
+              style={{
+                marginBottom: 16,
+                padding: 16,
+                border: "1px solid #dbe5f2",
+                background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+                boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)",
+              }}
+            >
               <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, alignItems: "end" }}>
                 <label style={{ margin: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>

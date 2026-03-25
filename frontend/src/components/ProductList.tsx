@@ -891,10 +891,11 @@ export default function ProductList({
               <div
                 key={p.id}
                 style={{
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 12,
+                  border: "1px solid #dbe5f2",
+                  borderRadius: 14,
                   padding: 14,
-                  background: "#ffffff",
+                  background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+                  boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)",
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 8 }}>
@@ -918,18 +919,18 @@ export default function ProductList({
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-                  <div style={{ background: "#f8fafc", borderRadius: 8, padding: 8 }}>
+                  <div style={{ background: "#eef4ff", borderRadius: 8, padding: 8 }}>
                     <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>Cost Price</div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: "#1f2937" }}>{p.cost_price ? `₵${Number(p.cost_price).toFixed(2)}` : "-"}</div>
                   </div>
-                  <div style={{ background: "#f8fafc", borderRadius: 8, padding: 8 }}>
+                  <div style={{ background: "#f0fdf4", borderRadius: 8, padding: 8 }}>
                     <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>Selling Price</div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: "#1f2937" }}>{p.selling_price ? `₵${Number(p.selling_price).toFixed(2)}` : "-"}</div>
                   </div>
                 </div>
 
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 12 }}>
-                  <span style={{ background: "#f3f4f6", color: "#374151", padding: "4px 8px", borderRadius: 6, fontSize: 12, fontWeight: 600 }}>
+                  <span style={{ background: "#f1f5f9", color: "#334155", padding: "4px 8px", borderRadius: 6, fontSize: 12, fontWeight: 600 }}>
                     {p.category || "General"}
                   </span>
                   <span style={{ fontSize: 12, color: profitMargin !== "-" && parseFloat(profitMargin) > 0 ? "#059669" : "#6b7280", fontWeight: 700 }}>
@@ -982,7 +983,7 @@ export default function ProductList({
           })}
         </div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
+        <div style={{ overflowX: "auto", border: "1px solid #dbe5f2", borderRadius: 14, background: "#ffffff", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
           <table style={{ 
             width: "100%", 
             borderCollapse: "collapse",
@@ -990,7 +991,7 @@ export default function ProductList({
           }}>
             <thead>
               <tr style={{ 
-                background: "#f8f9fc", 
+                background: "linear-gradient(180deg, #f8fbff, #edf3ff)", 
                 borderBottom: "2px solid #e5e7eb",
               }}>
                 <th style={{ padding: "12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>Name</th>
