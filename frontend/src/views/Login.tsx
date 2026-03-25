@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { API_BASE } from "../api";
 import appLogo from "../asset/logo.png";
+import wareImage from "../asset/Ware.png";
 
 type LoginProps = {
   onLogin: (email: string, password: string) => void;
@@ -497,19 +498,7 @@ export default function Login({ onLogin }: LoginProps) {
           </div>
         </div>
         <div className="auth-hero-visual" aria-hidden>
-          <div className="auth-hero-card auth-hero-card-large">
-            <p>Stock Value</p>
-            <strong>GHS 124,580</strong>
-            <span>+8.4% this month</span>
-          </div>
-          <div className="auth-hero-card auth-hero-card-float-1">
-            <p>Low Stock Alerts</p>
-            <strong>12 Items</strong>
-          </div>
-          <div className="auth-hero-card auth-hero-card-float-2">
-            <p>Orders Fulfilled</p>
-            <strong>2,340</strong>
-          </div>
+          <img className="auth-hero-photo" src={wareImage} alt="Warehouse operations" />
         </div>
       </section>
 

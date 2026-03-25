@@ -458,9 +458,19 @@ label {
   position: relative;
   min-height: 340px;
   border-radius: 18px;
-  background: linear-gradient(180deg, #d6b6ad 0%, #f0dbd4 65%);
+  background: #e8ddd7;
+  border: 1px solid #dccfc9;
+  overflow: hidden;
   transform: translateY(calc(var(--scroll-progress) * -12px));
   transition: transform 140ms linear;
+}
+
+.auth-hero-photo {
+  width: 100%;
+  height: 100%;
+  min-height: 340px;
+  object-fit: cover;
+  display: block;
 }
 
 .auth-hero-card {
