@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { API_BASE } from "../api";
+import appLogo from "../asset/logo.png";
 
 type LoginProps = {
   onLogin: (email: string, password: string) => void;
@@ -450,7 +451,12 @@ export default function Login({ onLogin }: LoginProps) {
     <div className="auth-page" style={{ ["--scroll-progress" as string]: scrollProgress } as React.CSSProperties}>
       <header className="auth-top-nav">
         <div className="auth-brand-wrap">
-          <div className="auth-brand-mark">GI</div>
+          <img
+            src={appLogo}
+            alt="Gel Invent"
+            className="auth-brand-mark"
+            style={{ objectFit: "cover", background: "#fff" }}
+          />
           <div>
             <p className="auth-brand-title">Gel Invent</p>
             <p className="auth-brand-subtitle">Inventory Management System</p>
@@ -541,7 +547,12 @@ export default function Login({ onLogin }: LoginProps) {
         <div className="auth-signin-card">
           <div className="auth-signin-left">
             <div className="auth-signin-header">
-              <div className="auth-mini-brand">GI</div>
+              <img
+                src={appLogo}
+                alt="Gel Invent"
+                className="auth-mini-brand"
+                style={{ objectFit: "cover", background: "#fff" }}
+              />
               <button type="button" className="auth-magic-btn">Smart Sign-in</button>
             </div>
 

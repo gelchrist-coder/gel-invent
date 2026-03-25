@@ -2,6 +2,7 @@ import { ReactNode, useState, useEffect } from "react";
 
 import TopBar from "./TopBar";
 import { Branch } from "../types";
+import appLogo from "../asset/logo.png";
 
 type NavItem = {
   id: string;
@@ -225,20 +226,18 @@ export default function Layout({
               <p style={{ margin: "2px 0 0", opacity: 0.6, fontSize: 11, whiteSpace: "nowrap" }}>Inventory System</p>
             </div>
           ) : (
-            <div style={{ 
-              width: 36, 
-              height: 36, 
-              borderRadius: 8, 
-              background: "linear-gradient(135deg, #1f7aff, #8246ff)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 700,
-              fontSize: 14,
-              margin: "0 auto",
-            }}>
-              GI
-            </div>
+            <img
+              src={appLogo}
+              alt="Gel Invent"
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 8,
+                objectFit: "cover",
+                margin: "0 auto",
+                background: "#fff",
+              }}
+            />
           )}
           {isMobile && (
             <button

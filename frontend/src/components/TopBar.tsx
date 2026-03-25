@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 
 import { Branch } from "../types";
+import appLogo from "../asset/logo.png";
 
 type Props = {
   userName?: string;
@@ -111,24 +112,19 @@ export default function TopBar({
           gap: isMobile ? 8 : 12,
         }}
       >
-        <div
+        <img
+          src={appLogo}
+          alt="Gel Invent"
           style={{
             width: isMobile ? 30 : 36,
             height: isMobile ? 30 : 36,
             borderRadius: 10,
-            background: "linear-gradient(135deg, #1d4ed8, #3b82f6)",
-            color: "#fff",
-            display: "grid",
-            placeItems: "center",
-            fontSize: isMobile ? 12 : 13,
-            fontWeight: 800,
-            letterSpacing: 0.3,
-            boxShadow: "0 8px 18px rgba(37, 99, 235, 0.28)",
+            objectFit: "cover",
+            background: "#fff",
+            boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
             flexShrink: 0,
           }}
-        >
-          GI
-        </div>
+        />
         <div style={{ minWidth: 0 }}>
           <h1
             style={{
