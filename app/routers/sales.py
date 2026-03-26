@@ -451,25 +451,25 @@ def send_sale_receipt_email(
         "Sent from Gel Invent",
     ])
 
-        outstanding_balance = total_amount - amount_paid if amount_paid > 0 else total_amount
-        summary_extra_text = ""
-        summary_extra_html = ""
+    outstanding_balance = total_amount - amount_paid if amount_paid > 0 else total_amount
+    summary_extra_text = ""
+    summary_extra_html = ""
 
-        if amount_paid > 0:
-                summary_extra_html += (
-                        f"<tr><td style='padding:6px 0;color:#475569'>Amount Paid</td>"
-                        f"<td style='padding:6px 0;text-align:right;font-weight:600'>GHS {amount_paid:.2f}</td></tr>"
-                )
-                if payment_method in {"CREDIT", "PARTIAL"}:
-                        summary_extra_html += (
-                                f"<tr><td style='padding:6px 0;color:#475569'>Balance</td>"
-                                f"<td style='padding:6px 0;text-align:right;font-weight:700;color:#b45309'>GHS {outstanding_balance:.2f}</td></tr>"
-                        )
-
+    if amount_paid > 0:
+        summary_extra_html += (
+            f"<tr><td style='padding:6px 0;color:#475569'>Amount Paid</td>"
+            f"<td style='padding:6px 0;text-align:right;font-weight:600'>GHS {amount_paid:.2f}</td></tr>"
+        )
         if payment_method in {"CREDIT", "PARTIAL"}:
-                summary_extra_text = f"Outstanding: GHS {outstanding_balance:.2f}"
+            summary_extra_html += (
+                f"<tr><td style='padding:6px 0;color:#475569'>Balance</td>"
+                f"<td style='padding:6px 0;text-align:right;font-weight:700;color:#b45309'>GHS {outstanding_balance:.2f}</td></tr>"
+            )
 
-        receipt_html = f"""
+    if payment_method in {"CREDIT", "PARTIAL"}:
+        summary_extra_text = f"Outstanding: GHS {outstanding_balance:.2f}"
+
+    receipt_html = f"""
 <!DOCTYPE html>
 <html lang=\"en\">
     <body style=\"margin:0;padding:20px;background:#f4f7fb;font-family:Arial,sans-serif;color:#0f172a\">
@@ -531,8 +531,8 @@ def send_sale_receipt_email(
 </html>
 """
 
-        if summary_extra_text:
-                body_lines.insert(-3, summary_extra_text)
+    if summary_extra_text:
+    body_lines.insert(-3, summary_extra_text)
 
     try:
         send_email(
