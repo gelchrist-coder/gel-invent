@@ -59,26 +59,50 @@ async def get_creditors(
         )
     ).all()
     
+    creditor_ids = [int(c.id) for c in creditors]
+    transactions = db.scalars(
+        select(CreditTransaction).where(
+            CreditTransaction.creditor_id.in_(creditor_ids),
+            CreditTransaction.user_id.in_(tenant_user_ids),
+            CreditTransaction.branch_id == active_branch_id,
+        )
+    ).all() if creditor_ids else []
+
+    aggregate: dict[int, dict[str, object]] = {
+        cid: {
+            "total_debt_amount": Decimal(0),
+            "total_payments": Decimal(0),
+            "transaction_count": 0,
+            "last_transaction": None,
+        }
+        for cid in creditor_ids
+    }
+
+    for t in transactions:
+        cid = int(t.creditor_id)
+        item = aggregate.get(cid)
+        if not item:
+            continue
+        amount = Decimal(t.amount)
+        if t.transaction_type == "debt":
+            item["total_debt_amount"] = Decimal(item["total_debt_amount"]) + amount
+        elif t.transaction_type == "payment":
+            item["total_payments"] = Decimal(item["total_payments"]) + amount
+        item["transaction_count"] = int(item["transaction_count"]) + 1
+        last_tx = item["last_transaction"]
+        if last_tx is None or t.created_at > last_tx:
+            item["last_transaction"] = t.created_at
+
     result = []
     for creditor in creditors:
-        # Calculate transaction metrics
-        transactions = db.scalars(
-            select(CreditTransaction).where(
-                CreditTransaction.creditor_id == creditor.id,
-                CreditTransaction.user_id.in_(tenant_user_ids),
-                CreditTransaction.branch_id == active_branch_id,
-            )
-        ).all()
-        
-        total_debt_amount = sum(
-            t.amount for t in transactions if t.transaction_type == "debt"
-        )
-        total_payments = sum(
-            t.amount for t in transactions if t.transaction_type == "payment"
-        )
+        agg = aggregate.get(int(creditor.id), None)
+        total_debt_amount = Decimal(agg["total_debt_amount"]) if agg else Decimal(0)
+        total_payments = Decimal(agg["total_payments"]) if agg else Decimal(0)
+        tx_count = int(agg["transaction_count"]) if agg else 0
+        last_transaction = agg["last_transaction"] if agg else None
+
         actual_debt = total_debt_amount - total_payments
-        last_transaction = max((t.created_at for t in transactions), default=None)
-        loyalty_level = _loyalty_level(total_debt_amount, len(transactions), actual_debt)
+        loyalty_level = _loyalty_level(total_debt_amount, tx_count, actual_debt)
         
         result.append({
             "id": creditor.id,
@@ -89,7 +113,7 @@ async def get_creditors(
             "actual_debt": float(actual_debt),
             "total_purchases": float(total_debt_amount),
             "total_payments": float(total_payments),
-            "transaction_count": len(transactions),
+            "transaction_count": tx_count,
             "last_transaction_at": last_transaction.isoformat() if last_transaction else None,
             "loyalty_level": loyalty_level,
             "notes": creditor.notes,
