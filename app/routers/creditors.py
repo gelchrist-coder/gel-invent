@@ -14,6 +14,16 @@ from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/creditors", tags=["creditors"])
 
+
+def _loyalty_level(total_purchases: Decimal, transaction_count: int, outstanding: Decimal) -> str:
+    if (total_purchases >= Decimal("5000") or transaction_count >= 20) and outstanding <= 0:
+        return "VIP"
+    if total_purchases >= Decimal("2000") or transaction_count >= 12:
+        return "Gold"
+    if total_purchases >= Decimal("800") or transaction_count >= 6:
+        return "Silver"
+    return "Bronze"
+
 # Pydantic models
 class CreditorCreate(BaseModel):
     name: str
@@ -67,6 +77,8 @@ async def get_creditors(
             t.amount for t in transactions if t.transaction_type == "payment"
         )
         actual_debt = total_debt_amount - total_payments
+        last_transaction = max((t.created_at for t in transactions), default=None)
+        loyalty_level = _loyalty_level(total_debt_amount, len(transactions), actual_debt)
         
         result.append({
             "id": creditor.id,
@@ -75,7 +87,11 @@ async def get_creditors(
             "email": creditor.email,
             "total_debt": float(creditor.total_debt),
             "actual_debt": float(actual_debt),
+            "total_purchases": float(total_debt_amount),
+            "total_payments": float(total_payments),
             "transaction_count": len(transactions),
+            "last_transaction_at": last_transaction.isoformat() if last_transaction else None,
+            "loyalty_level": loyalty_level,
             "notes": creditor.notes,
             "created_at": creditor.created_at.isoformat(),
         })
@@ -112,12 +128,22 @@ async def get_creditor(
         .order_by(CreditTransaction.created_at.desc())
     ).all()
     
+    total_debt_amount = sum((t.amount for t in transactions if t.transaction_type == "debt"), Decimal(0))
+    total_payments = sum((t.amount for t in transactions if t.transaction_type == "payment"), Decimal(0))
+    actual_debt = total_debt_amount - total_payments
+    loyalty_level = _loyalty_level(total_debt_amount, len(transactions), actual_debt)
+
     return {
         "id": creditor.id,
         "name": creditor.name,
         "phone": creditor.phone,
         "email": creditor.email,
         "total_debt": float(creditor.total_debt),
+        "actual_debt": float(actual_debt),
+        "total_purchases": float(total_debt_amount),
+        "total_payments": float(total_payments),
+        "transaction_count": len(transactions),
+        "loyalty_level": loyalty_level,
         "notes": creditor.notes,
         "created_at": creditor.created_at.isoformat(),
         "transactions": [
@@ -284,21 +310,113 @@ async def get_creditor_transactions(
             CreditTransaction.user_id.in_(tenant_user_ids),
             CreditTransaction.branch_id == active_branch_id,
         )
-        .order_by(CreditTransaction.created_at.desc())
+        .order_by(CreditTransaction.created_at.asc(), CreditTransaction.id.asc())
     ).all()
-    
-    return [
-        {
-            "id": t.id,
-            "creditor_id": t.creditor_id,
-            "sale_id": t.sale_id,
-            "amount": float(t.amount),
-            "transaction_type": t.transaction_type,
-            "notes": t.notes,
-            "created_at": t.created_at.isoformat(),
-        }
-        for t in transactions
-    ]
+
+    sale_ids = sorted({int(t.sale_id) for t in transactions if t.sale_id is not None})
+    sales = db.scalars(
+        select(Sale).where(
+            Sale.id.in_(sale_ids),
+            Sale.user_id.in_(tenant_user_ids),
+            Sale.branch_id == active_branch_id,
+        )
+    ).all() if sale_ids else []
+    sale_by_id = {int(s.id): s for s in sales}
+
+    running_balance = Decimal(0)
+    result = []
+    for t in transactions:
+        amount = Decimal(t.amount)
+        if t.transaction_type == "debt":
+            running_balance += amount
+        else:
+            running_balance -= amount
+
+        sale = sale_by_id.get(int(t.sale_id)) if t.sale_id is not None else None
+        entry_type = "purchase" if t.transaction_type == "debt" and t.sale_id is not None else t.transaction_type
+
+        result.append(
+            {
+                "id": t.id,
+                "creditor_id": t.creditor_id,
+                "sale_id": t.sale_id,
+                "amount": float(t.amount),
+                "transaction_type": t.transaction_type,
+                "entry_type": entry_type,
+                "notes": t.notes,
+                "created_at": t.created_at.isoformat(),
+                "running_balance": float(running_balance),
+                "sale_total": float(sale.total_price) if sale else None,
+                "sale_quantity": float(sale.quantity) if sale else None,
+            }
+        )
+
+    # Return newest first for UI while preserving running balance from chronological ledger.
+    result.reverse()
+    return result
+
+
+@router.get("/{creditor_id}/statement")
+async def get_creditor_statement(
+    creditor_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    creditor = db.scalar(
+        select(Creditor).where(
+            Creditor.id == creditor_id,
+            Creditor.user_id.in_(tenant_user_ids),
+            Creditor.branch_id == active_branch_id,
+        )
+    )
+    if not creditor:
+        raise HTTPException(status_code=404, detail="Creditor not found")
+
+    transactions = db.scalars(
+        select(CreditTransaction)
+        .where(
+            CreditTransaction.creditor_id == creditor_id,
+            CreditTransaction.user_id.in_(tenant_user_ids),
+            CreditTransaction.branch_id == active_branch_id,
+        )
+        .order_by(CreditTransaction.created_at.asc(), CreditTransaction.id.asc())
+    ).all()
+
+    total_purchases = sum((t.amount for t in transactions if t.transaction_type == "debt"), Decimal(0))
+    total_payments = sum((t.amount for t in transactions if t.transaction_type == "payment"), Decimal(0))
+    outstanding = total_purchases - total_payments
+
+    return {
+        "customer": {
+            "id": creditor.id,
+            "name": creditor.name,
+            "phone": creditor.phone,
+            "email": creditor.email,
+            "notes": creditor.notes,
+            "created_at": creditor.created_at.isoformat(),
+        },
+        "summary": {
+            "total_purchases": float(total_purchases),
+            "total_payments": float(total_payments),
+            "outstanding": float(outstanding),
+            "transaction_count": len(transactions),
+            "loyalty_level": _loyalty_level(total_purchases, len(transactions), outstanding),
+            "generated_at": datetime.utcnow().isoformat(),
+        },
+        "transactions": [
+            {
+                "id": t.id,
+                "sale_id": t.sale_id,
+                "amount": float(t.amount),
+                "transaction_type": t.transaction_type,
+                "notes": t.notes,
+                "created_at": t.created_at.isoformat(),
+            }
+            for t in transactions
+        ],
+    }
 
 # Get creditors summary/analytics
 @router.get("/analytics/summary")

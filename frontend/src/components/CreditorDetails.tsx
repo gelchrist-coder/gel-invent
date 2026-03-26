@@ -7,9 +7,13 @@ interface Transaction {
   sale_id: number | null;
   amount: number;
   transaction_type: "debt" | "payment";
+  entry_type?: "purchase" | "debt" | "payment";
   notes: string | null;
   created_at: string;
   sale_amount?: number;
+  sale_total?: number | null;
+  sale_quantity?: number | null;
+  running_balance?: number;
 }
 
 interface Creditor {
@@ -18,6 +22,12 @@ interface Creditor {
   phone: string | null;
   email: string | null;
   total_debt: number;
+  actual_debt?: number;
+  total_purchases?: number;
+  total_payments?: number;
+  transaction_count?: number;
+  loyalty_level?: "Bronze" | "Silver" | "Gold" | "VIP";
+  created_at?: string;
   notes: string | null;
 }
 
@@ -33,6 +43,8 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
   const [loading, setLoading] = useState(true);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showDebtModal, setShowDebtModal] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<"all" | "purchase" | "payment">("all");
+  const [searchTerm, setSearchTerm] = useState("");
 
   const fetchTransactions = useCallback(async () => {
     try {
@@ -87,6 +99,116 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
 
   const outstanding = Math.max(0, actualDebt);
   const creditBalance = Math.max(0, -actualDebt);
+  const loyaltyLevel =
+    (creditor.loyalty_level as "Bronze" | "Silver" | "Gold" | "VIP" | undefined) ||
+    ((totalDebt >= 5000 || transactions.length >= 20) && outstanding <= 0
+      ? "VIP"
+      : totalDebt >= 2000 || transactions.length >= 12
+        ? "Gold"
+        : totalDebt >= 800 || transactions.length >= 6
+          ? "Silver"
+          : "Bronze");
+
+  const filteredTransactions = transactions.filter((t) => {
+    const typeMatch =
+      typeFilter === "all" ||
+      (typeFilter === "payment" && t.transaction_type === "payment") ||
+      (typeFilter === "purchase" && t.transaction_type === "debt");
+    if (!typeMatch) return false;
+
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      (t.notes || "").toLowerCase().includes(q) ||
+      String(t.id).includes(q) ||
+      (t.sale_id ? String(t.sale_id).includes(q) : false)
+    );
+  });
+
+  const buildStatementHtml = () => {
+    const rows = transactions
+      .slice()
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .map((t) => {
+        const date = formatDate(t.created_at);
+        const entry = t.transaction_type === "payment" ? "Payment" : "Purchase";
+        const amount = formatCurrency(t.amount);
+        const balance = t.running_balance != null ? formatCurrency(t.running_balance) : "-";
+        const meta = t.sale_id ? `Sale #${t.sale_id}` : "Manual";
+        return `
+          <tr>
+            <td>${date}</td>
+            <td>${entry}</td>
+            <td>${meta}</td>
+            <td style="text-align:right">${amount}</td>
+            <td style="text-align:right">${balance}</td>
+            <td>${(t.notes || "-").replace(/</g, "&lt;")}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Customer Statement - ${creditor.name}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; color: #1f2937; }
+            h1 { margin: 0 0 4px; font-size: 20px; }
+            .muted { color: #6b7280; font-size: 13px; }
+            .summary { margin: 16px 0; padding: 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+            th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 12px; }
+            th { background: #f9fafb; text-transform: uppercase; color: #6b7280; font-size: 11px; }
+            @media print { body { padding: 0; } }
+          </style>
+        </head>
+        <body>
+          <h1>Customer Statement</h1>
+          <p class="muted">Customer: ${creditor.name}</p>
+          <p class="muted">Generated: ${new Date().toLocaleString()}</p>
+          <div class="summary">
+            <strong>Total Purchases:</strong> ${formatCurrency(totalDebt)}<br />
+            <strong>Total Payments:</strong> ${formatCurrency(totalPayments)}<br />
+            <strong>${actualDebt >= 0 ? "Outstanding" : "Credit Balance"}:</strong> ${formatCurrency(actualDebt >= 0 ? outstanding : creditBalance)}<br />
+            <strong>Loyalty Level:</strong> ${loyaltyLevel}
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th><th>Type</th><th>Reference</th><th style="text-align:right">Amount</th><th style="text-align:right">Balance</th><th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+  };
+
+  const printStatement = () => {
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(buildStatementHtml());
+    w.document.close();
+    w.focus();
+    w.print();
+  };
+
+  const downloadStatement = () => {
+    const blob = new Blob([buildStatementHtml()], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${creditor.name.replace(/\s+/g, "_").toLowerCase()}_statement.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div
@@ -147,7 +269,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
         </div>
 
         {/* Summary Cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, marginBottom: 24 }}>
           <div style={{ backgroundColor: "#fee2e2", borderRadius: 8, padding: 16 }}>
             <p style={{ margin: 0, fontSize: 13, color: "#991b1b" }}>Total Purchases on Credit</p>
             <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: "#dc2626" }}>
@@ -166,6 +288,12 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
             </p>
             <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: actualDebt >= 0 ? "#f59e0b" : "#6366f1" }}>
               {formatCurrency(actualDebt >= 0 ? outstanding : creditBalance)}
+            </p>
+          </div>
+          <div style={{ backgroundColor: "#ecfeff", borderRadius: 8, padding: 16 }}>
+            <p style={{ margin: 0, fontSize: 13, color: "#155e75" }}>Loyalty Level</p>
+            <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: "#0f766e" }}>
+              {loyaltyLevel}
             </p>
           </div>
         </div>
@@ -200,7 +328,37 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
               cursor: "pointer",
             }}
           >
-            Add Credit Sale
+            Record Sale
+          </button>
+          <button
+            onClick={printStatement}
+            style={{
+              padding: "10px 20px",
+              backgroundColor: "#111827",
+              color: "white",
+              border: "none",
+              borderRadius: 6,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Print Statement
+          </button>
+          <button
+            onClick={downloadStatement}
+            style={{
+              padding: "10px 20px",
+              backgroundColor: "#374151",
+              color: "white",
+              border: "none",
+              borderRadius: 6,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Download Statement
           </button>
           <button
             onClick={onEdit}
@@ -222,10 +380,28 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
         {/* Transactions History */}
         <div>
           <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 700 }}>Customer Ledger</h3>
+          <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search notes, sale ID, reference"
+              style={{ padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: 6, minWidth: 220, fontSize: 13 }}
+            />
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as "all" | "purchase" | "payment")}
+              style={{ padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13 }}
+            >
+              <option value="all">All Entries</option>
+              <option value="purchase">Purchases</option>
+              <option value="payment">Payments</option>
+            </select>
+          </div>
           
           {loading ? (
             <p style={{ textAlign: "center", color: "#6b7280", padding: 40 }}>Loading transactions...</p>
-          ) : transactions.length === 0 ? (
+          ) : filteredTransactions.length === 0 ? (
             <div style={{ backgroundColor: "#f9fafb", borderRadius: 8, padding: 40, textAlign: "center" }}>
               <p style={{ margin: 0, color: "#6b7280" }}>No customer transactions yet.</p>
             </div>
@@ -240,8 +416,14 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
                     <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
                       Type
                     </th>
+                    <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
+                      Reference
+                    </th>
                     <th style={{ padding: "12px 16px", textAlign: "right", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
                       Amount
+                    </th>
+                    <th style={{ padding: "12px 16px", textAlign: "right", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
+                      Balance
                     </th>
                     <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
                       Notes
@@ -249,7 +431,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
                   </tr>
                 </thead>
                 <tbody>
-                  {transactions.map((transaction) => (
+                  {filteredTransactions.map((transaction) => (
                     <tr key={transaction.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
                       <td style={{ padding: "12px 16px", fontSize: 13 }}>
                         {formatDate(transaction.created_at)}
@@ -266,8 +448,11 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
                             fontWeight: 600,
                           }}
                         >
-                          {transaction.transaction_type === "debt" ? "Debt" : "Payment"}
+                          {transaction.transaction_type === "debt" ? "Purchase" : "Payment"}
                         </span>
+                      </td>
+                      <td style={{ padding: "12px 16px", fontSize: 13, color: "#6b7280" }}>
+                        {transaction.sale_id ? `Sale #${transaction.sale_id}` : "Manual"}
                       </td>
                       <td
                         style={{
@@ -281,13 +466,11 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
                         {transaction.transaction_type === "debt" ? "+" : "-"}
                         {formatCurrency(transaction.amount)}
                       </td>
+                      <td style={{ padding: "12px 16px", textAlign: "right", fontSize: 13, fontWeight: 600, color: "#334155" }}>
+                        {transaction.running_balance != null ? formatCurrency(transaction.running_balance) : "-"}
+                      </td>
                       <td style={{ padding: "12px 16px", fontSize: 13, color: "#6b7280" }}>
                         {transaction.notes || "—"}
-                        {transaction.sale_id && (
-                          <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: 8 }}>
-                            (Sale #{transaction.sale_id})
-                          </span>
-                        )}
                       </td>
                     </tr>
                   ))}

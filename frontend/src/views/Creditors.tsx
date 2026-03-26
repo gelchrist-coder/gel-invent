@@ -10,7 +10,11 @@ interface Creditor {
   email: string | null;
   total_debt: number;
   actual_debt: number;
+  total_purchases: number;
+  total_payments: number;
   transaction_count: number;
+  last_transaction_at: string | null;
+  loyalty_level: "Bronze" | "Silver" | "Gold" | "VIP";
   notes: string | null;
   created_at: string;
 }
