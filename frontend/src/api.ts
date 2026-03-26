@@ -526,6 +526,17 @@ export async function createSalesBulk(payloads: NewSale[]): Promise<Sale[]> {
   return result;
 }
 
+export async function sendSalesReceiptEmail(payload: {
+  sale_ids: number[];
+  to_email: string;
+  customer_name?: string;
+}): Promise<{ message: string }> {
+  return jsonRequest<{ message: string }>("/sales/send-receipt", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function createSaleForBranch(payload: NewSale, branchIdOverride: string | number | null): Promise<Sale> {
   const headers: Record<string, string> = {};
   if (branchIdOverride != null) {

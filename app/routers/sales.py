@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -12,8 +13,19 @@ from ..schemas import SaleCreate, SaleRead
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.expiry import get_batch_balances, writeoff_expired_batches
+from app.utils.email import send_email, smtp_configured
 
 router = APIRouter(prefix="/sales", tags=["sales"])
+
+
+class SendReceiptEmailRequest(BaseModel):
+    sale_ids: list[int] = Field(..., min_length=1)
+    to_email: EmailStr
+    customer_name: str | None = None
+
+
+class SendReceiptEmailResponse(BaseModel):
+    message: str
 
 
 @router.post("", response_model=SaleRead, status_code=201)
@@ -335,6 +347,110 @@ def create_sales_bulk(
             )
         )
     return created
+
+
+@router.post("/send-receipt", response_model=SendReceiptEmailResponse)
+def send_sale_receipt_email(
+    payload: SendReceiptEmailRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    """Email a receipt for one or more sales.
+
+    Owner-only action to avoid staff sending customer emails without approval.
+    """
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Only business owners can email receipts")
+
+    if not smtp_configured():
+        raise HTTPException(status_code=400, detail="Email service is not configured")
+
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    unique_sale_ids = sorted(set(payload.sale_ids))
+
+    sales = db.scalars(
+        select(models.Sale).where(
+            models.Sale.id.in_(unique_sale_ids),
+            models.Sale.user_id.in_(tenant_user_ids),
+            models.Sale.branch_id == active_branch_id,
+        )
+    ).all()
+
+    if len(sales) != len(unique_sale_ids):
+        raise HTTPException(status_code=404, detail="One or more sales were not found")
+
+    product_ids = sorted({int(s.product_id) for s in sales})
+    products = db.scalars(select(models.Product).where(models.Product.id.in_(product_ids))).all() if product_ids else []
+    product_name_by_id = {int(p.id): p.name for p in products}
+
+    sales_sorted = sorted(sales, key=lambda s: (s.created_at, s.id))
+    total_amount = sum(Decimal(s.total_price or 0) for s in sales_sorted)
+    amount_paid = sum(Decimal(s.amount_paid or 0) for s in sales_sorted)
+    customer_name = (
+        (payload.customer_name or "").strip()
+        or (sales_sorted[0].customer_name or "").strip()
+        or "Customer"
+    )
+    payment_method = (sales_sorted[0].payment_method or "cash").upper()
+
+    receipt_number_source = sales_sorted[0].client_sale_id or str(sales_sorted[0].id)
+    receipt_number = str(receipt_number_source).split(":")[0][-8:].upper()
+
+    lines: list[str] = []
+    for sale in sales_sorted:
+        product_name = product_name_by_id.get(int(sale.product_id), f"Product #{sale.product_id}")
+        quantity = Decimal(sale.quantity or 0)
+        unit_price = Decimal(sale.unit_price or 0)
+        line_total = Decimal(sale.total_price or 0)
+        lines.append(
+            f"- {product_name}: {quantity} x GHS {unit_price:.2f} = GHS {line_total:.2f}"
+        )
+
+    business_name = (current_user.business_name or "Gel Invent Business").strip()
+    served_by = (current_user.name or "Owner").strip()
+    receipt_datetime = sales_sorted[0].created_at.strftime("%Y-%m-%d %H:%M")
+
+    body_lines = [
+        f"{business_name}",
+        "Sales Receipt",
+        "",
+        f"Receipt No: {receipt_number}",
+        f"Date: {receipt_datetime}",
+        f"Served by: {served_by}",
+        f"Customer: {customer_name}",
+        "",
+        "Items:",
+        *lines,
+        "",
+        f"Payment Method: {payment_method}",
+        f"Total: GHS {total_amount:.2f}",
+    ]
+
+    if amount_paid > 0:
+        body_lines.append(f"Amount Paid: GHS {amount_paid:.2f}")
+
+    if payment_method == "CREDIT" and amount_paid > 0:
+        balance = total_amount - amount_paid
+        body_lines.append(f"Balance: GHS {balance:.2f}")
+
+    body_lines.extend([
+        "",
+        "Thank you for your purchase.",
+        "",
+        "Sent from Gel Invent",
+    ])
+
+    try:
+        send_email(
+            to_email=str(payload.to_email),
+            subject=f"Receipt from {business_name} #{receipt_number}",
+            body_text="\n".join(body_lines),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to send receipt email: {exc}") from exc
+
+    return SendReceiptEmailResponse(message="Receipt email sent successfully")
 
 
 @router.get("", response_model=list[SaleRead])

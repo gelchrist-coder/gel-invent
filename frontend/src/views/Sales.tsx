@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
-import { fetchSalesCached, createSaleForBranch, createSalesBulk, deleteSale, fetchProductsCached, getCachedProducts, getCachedSales } from "../api";
+import { fetchSalesCached, createSaleForBranch, createSalesBulk, deleteSale, fetchProductsCached, getCachedProducts, getCachedSales, sendSalesReceiptEmail } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
@@ -26,6 +26,10 @@ export default function Sales() {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [saleConfirmed, setSaleConfirmed] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [confirmedSales, setConfirmedSales] = useState<Sale[]>([]);
+  const [receiptEmail, setReceiptEmail] = useState("");
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<string | null>(null);
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [outboxCount, setOutboxCount] = useState<number>(() => getSalesOutboxCount());
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -138,6 +142,9 @@ export default function Sales() {
       client_sale_id: s.client_sale_id ?? `${receiptId}:${idx}`,
     }));
     setPendingSales(withClientIds);
+    setConfirmedSales([]);
+    setEmailStatus(null);
+    setReceiptEmail("");
     setShowConfirmation(true);
     setSaleConfirmed(false); // Reset confirmed state for new sale
   };
@@ -151,12 +158,14 @@ export default function Sales() {
       }
 
       // Create all sales
-      await createSalesBulk(pendingSales);
+      const createdSales = await createSalesBulk(pendingSales);
+      setConfirmedSales(createdSales);
       await loadData(); // Refresh sales and products (to update stock)
       setSaleConfirmed(true); // Show success state with print/done buttons
     } catch (err) {
       // Network issue: queue sale locally and sync later.
       enqueueSales(pendingSales);
+      setConfirmedSales([]);
       const updated = applyLocalSaleToCachedProducts(pendingSales);
       if (updated) setProducts(updated);
       setOfflineNotice("Offline mode: sale saved locally. It will sync when internet returns.");
@@ -173,9 +182,39 @@ export default function Sales() {
     doneRef.current = true;
     setShowConfirmation(false);
     setPendingSales([]);
+    setConfirmedSales([]);
+    setEmailStatus(null);
+    setReceiptEmail("");
     setSaleConfirmed(false);
     // Reset flag after state updates
     setTimeout(() => { doneRef.current = false; }, 100);
+  };
+
+  const sendReceiptToEmail = async () => {
+    const email = receiptEmail.trim();
+    if (!email) {
+      setEmailStatus("Enter a customer email address.");
+      return;
+    }
+    if (!confirmedSales.length) {
+      setEmailStatus("This receipt is not yet synced online. Connect internet and try again.");
+      return;
+    }
+
+    setEmailSending(true);
+    setEmailStatus(null);
+    try {
+      const response = await sendSalesReceiptEmail({
+        sale_ids: confirmedSales.map((s) => s.id),
+        to_email: email,
+        customer_name: pendingSales[0]?.customer_name || undefined,
+      });
+      setEmailStatus(response.message || "Receipt email sent.");
+    } catch (err) {
+      setEmailStatus(err instanceof Error ? err.message : "Failed to send receipt email.");
+    } finally {
+      setEmailSending(false);
+    }
   };
 
   const productById = useMemo(() => {
@@ -785,42 +824,83 @@ export default function Sales() {
                   </button>
                 </div>
               ) : (
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button
-                    type="button"
-                    onClick={printReceipt}
-                    style={{
-                      flex: 1,
-                      padding: "12px 18px",
-                      border: "1px solid #cbd5e1",
-                      background: "white",
-                      borderRadius: 9,
-                      fontSize: 15,
-                      fontWeight: 600,
-                      color: "#334155",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Print
-                  </button>
+                <div style={{ display: "grid", gap: 10 }}>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button
+                      type="button"
+                      onClick={printReceipt}
+                      style={{
+                        flex: 1,
+                        padding: "12px 18px",
+                        border: "1px solid #cbd5e1",
+                        background: "white",
+                        borderRadius: 9,
+                        fontSize: 15,
+                        fontWeight: 600,
+                        color: "#334155",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Print
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={handleDone}
-                    style={{
-                      flex: 1,
-                      padding: "12px 18px",
-                      border: "none",
-                      background: "#0f172a",
-                      borderRadius: 9,
-                      fontSize: 16,
-                      fontWeight: 700,
-                      color: "white",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Done
-                  </button>
+                    <button
+                      type="button"
+                      onClick={handleDone}
+                      style={{
+                        flex: 1,
+                        padding: "12px 18px",
+                        border: "none",
+                        background: "#0f172a",
+                        borderRadius: 9,
+                        fontSize: 16,
+                        fontWeight: 700,
+                        color: "white",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Done
+                    </button>
+                  </div>
+
+                  <div style={{ display: "grid", gap: 8, padding: 10, border: "1px solid #dbe5f2", borderRadius: 10, background: "#ffffff" }}>
+                    <label style={{ display: "grid", gap: 4, margin: 0, fontSize: 12, color: "#475569", fontWeight: 600 }}>
+                      Email receipt to customer
+                      <input
+                        type="email"
+                        value={receiptEmail}
+                        onChange={(e) => setReceiptEmail(e.target.value)}
+                        placeholder="customer@email.com"
+                        style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 14 }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={sendReceiptToEmail}
+                      disabled={emailSending || !receiptEmail.trim()}
+                      style={{
+                        padding: "10px 12px",
+                        border: "none",
+                        borderRadius: 8,
+                        background: emailSending ? "#94a3b8" : "#2563eb",
+                        color: "white",
+                        fontWeight: 700,
+                        cursor: emailSending ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {emailSending ? "Sending..." : "Send Receipt Email"}
+                    </button>
+                    {emailStatus && (
+                      <p style={{ margin: 0, fontSize: 12, color: emailStatus.toLowerCase().includes("success") ? "#166534" : "#b91c1c" }}>
+                        {emailStatus}
+                      </p>
+                    )}
+                    {confirmedSales.length === 0 && (
+                      <p style={{ margin: 0, fontSize: 11, color: "#92400e" }}>
+                        Receipt email is available after online sale sync.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
