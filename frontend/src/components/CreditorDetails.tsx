@@ -1,4 +1,4 @@
-import { API_BASE, buildAuthHeaders } from "../api";
+import { API_BASE, buildAuthHeaders, resilientFetch } from "../api";
 import { useCallback, useEffect, useState } from "react";
 
 interface Transaction {
@@ -49,7 +49,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
   const fetchTransactions = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE}/creditors/${creditor.id}/transactions`, {
+      const response = await resilientFetch(`${API_BASE}/creditors/${creditor.id}/transactions`, {
         headers: buildAuthHeaders(),
       });
 
@@ -544,7 +544,7 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
 
   const fetchProducts = async () => {
     try {
-      const response = await fetch(`${API_BASE}/products/`, { headers: buildAuthHeaders() });
+      const response = await resilientFetch(`${API_BASE}/products/`, { headers: buildAuthHeaders() });
       if (response.ok) {
         const data = (await response.json()) as Array<Record<string, unknown>>;
         const mapped: Product[] = (Array.isArray(data) ? data : []).map((p) => {
@@ -608,7 +608,7 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
 
     try {
       // Create a credit sale so the backend will generate the creditor ledger entry.
-      const response = await fetch(`${API_BASE}/sales`, {
+      const response = await resilientFetch(`${API_BASE}/sales`, {
         method: "POST",
         headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -866,7 +866,7 @@ function TransactionModal({ creditorId, creditorName, transactionType, onClose, 
     setError("");
 
     try {
-      const response = await fetch(`${API_BASE}/creditors/transactions`, {
+      const response = await resilientFetch(`${API_BASE}/creditors/transactions`, {
         method: "POST",
         headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({

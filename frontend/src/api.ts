@@ -43,6 +43,72 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+export async function resilientFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  options?: { timeoutMs?: number; retries?: number },
+): Promise<Response> {
+  const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const retries = Math.max(0, options?.retries ?? 1);
+  const method = (init?.method || "GET").toUpperCase();
+  const maxAttempts = method === "GET" ? retries + 1 : 1;
+
+  let response: Response | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      response = await fetch(input, {
+        ...(init ?? {}),
+        method,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      const canRetry = method === "GET" && attempt < maxAttempts;
+      if (canRetry && (isAbortError(error) || error instanceof TypeError)) {
+        await delay(500 * attempt);
+        continue;
+      }
+
+      if (isAbortError(error)) {
+        throw new Error("Server is taking longer than expected. Please tap Retry.");
+      }
+
+      if (error instanceof TypeError) {
+        throw new Error(
+          navigator.onLine
+            ? "Unable to reach the server right now. Please try again."
+            : "You appear to be offline. Please check your internet connection."
+        );
+      }
+
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+
+    if (!response) {
+      continue;
+    }
+
+    if (method === "GET" && [502, 503, 504].includes(response.status) && attempt < maxAttempts) {
+      await delay(500 * attempt);
+      response = null;
+      continue;
+    }
+
+    break;
+  }
+
+  if (!response) {
+    throw new Error("Unable to reach the server right now. Please try again.");
+  }
+
+  return response;
+}
+
 function getCacheKey(key: string): string {
   const branchId = localStorage.getItem("activeBranchId");
   return `${key}:${branchId || "default"}`;
@@ -167,60 +233,15 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
       if (Number.isFinite(parsed) && parsed > 0) headers["X-Branch-Id"] = String(parsed);
     }
 
-    const maxAttempts = method === "GET" ? GET_RETRY_ATTEMPTS + 1 : 1;
-    let response: Response | null = null;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-      try {
-        response = await fetch(`${API_BASE}${path}`, {
-          ...options,
-          method,
-          headers,
-          signal: controller.signal,
-        });
-      } catch (error) {
-        const canRetry = method === "GET" && attempt < maxAttempts;
-        if (canRetry && (isAbortError(error) || error instanceof TypeError)) {
-          await delay(500 * attempt);
-          continue;
-        }
-
-        if (isAbortError(error)) {
-          throw new Error("Server is taking longer than expected. Please tap Retry.");
-        }
-
-        if (error instanceof TypeError) {
-          throw new Error(
-            navigator.onLine
-              ? "Unable to reach the server right now. Please try again."
-              : "You appear to be offline. Please check your internet connection."
-          );
-        }
-
-        throw error;
-      } finally {
-        window.clearTimeout(timeout);
-      }
-
-      if (!response) {
-        continue;
-      }
-
-      if (method === "GET" && [502, 503, 504].includes(response.status) && attempt < maxAttempts) {
-        await delay(500 * attempt);
-        response = null;
-        continue;
-      }
-
-      break;
-    }
-
-    if (!response) {
-      throw new Error("Unable to reach the server right now. Please try again.");
-    }
+    const response = await resilientFetch(
+      `${API_BASE}${path}`,
+      {
+        ...options,
+        method,
+        headers,
+      },
+      { timeoutMs: REQUEST_TIMEOUT_MS, retries: method === "GET" ? GET_RETRY_ATTEMPTS : 0 },
+    );
 
     if (!response.ok) {
       if (response.status === 401) {
@@ -268,7 +289,7 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
 // Data Export/Import (Admin only)
 
 export async function exportData(): Promise<{ blob: Blob; filename: string | null }> {
-  const response = await fetch(`${API_BASE}/data/export`, {
+  const response = await resilientFetch(`${API_BASE}/data/export`, {
     method: "GET",
     headers: buildAuthHeaders(),
   });
@@ -305,7 +326,7 @@ export async function exportData(): Promise<{ blob: Blob; filename: string | nul
 }
 
 export async function exportDataXlsx(days: number = 30): Promise<{ blob: Blob; filename: string | null }> {
-  const response = await fetch(`${API_BASE}/data/export/xlsx?days=${encodeURIComponent(String(days))}`, {
+  const response = await resilientFetch(`${API_BASE}/data/export/xlsx?days=${encodeURIComponent(String(days))}`, {
     method: "GET",
     headers: buildAuthHeaders(),
   });
@@ -342,7 +363,7 @@ export async function exportDataXlsx(days: number = 30): Promise<{ blob: Blob; f
 }
 
 export async function importData(payload: unknown, force: boolean = false): Promise<{ message: string }> {
-  const response = await fetch(`${API_BASE}/data/import?force=${force ? "true" : "false"}`,
+  const response = await resilientFetch(`${API_BASE}/data/import?force=${force ? "true" : "false"}`,
     {
       method: "POST",
       headers: buildAuthHeaders({ "Content-Type": "application/json" }),
@@ -821,7 +842,7 @@ export async function exportMovementsPdf(
   
   const headers = buildAuthHeaders();
   
-  const resp = await fetch(`${API_BASE}/inventory/movements/export-pdf?${params.toString()}`, {
+  const resp = await resilientFetch(`${API_BASE}/inventory/movements/export-pdf?${params.toString()}`, {
     method: "GET",
     headers,
   });

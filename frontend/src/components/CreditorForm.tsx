@@ -1,4 +1,4 @@
-import { API_BASE, buildAuthHeaders } from "../api";
+import { API_BASE, buildAuthHeaders, resilientFetch } from "../api";
 import { useState } from "react";
 
 interface CreditorFormProps {
@@ -39,7 +39,7 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
         ? `${API_BASE}/creditors/${creditor.id}`
         : `${API_BASE}/creditors/`;
       
-      const response = await fetch(url, {
+      const response = await resilientFetch(url, {
         method: creditor ? "PUT" : "POST",
         headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({

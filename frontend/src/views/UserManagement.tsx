@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API_BASE, createBranch, fetchBranches } from "../api";
+import { API_BASE, buildAuthHeaders, createBranch, fetchBranches, resilientFetch } from "../api";
 import { Branch } from "../types";
 
 type Employee = {
@@ -37,8 +37,7 @@ export default function UserManagement() {
   const [success, setSuccess] = useState("");
 
   useEffect(() => {
-    loadEmployees();
-    loadBranches();
+    void Promise.all([loadEmployees(), loadBranches()]);
   }, []);
 
   const loadBranches = async () => {
@@ -58,11 +57,8 @@ export default function UserManagement() {
 
   const loadEmployees = async () => {
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/employees/`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const response = await resilientFetch(`${API_BASE}/employees/`, {
+        headers: buildAuthHeaders(),
       });
 
       if (response.ok) {
@@ -71,6 +67,7 @@ export default function UserManagement() {
       }
     } catch (err) {
       console.error("Error loading employees:", err);
+      setError("Users list took too long to load. Please retry.");
     } finally {
       setLoading(false);
     }
@@ -87,7 +84,6 @@ export default function UserManagement() {
     }
 
     try {
-      const token = localStorage.getItem("token");
       const payload: Record<string, unknown> = {
         name: formData.name,
         email: formData.email,
@@ -100,12 +96,9 @@ export default function UserManagement() {
       if (typeof formData.branch_id === "number") {
         payload.branch_id = formData.branch_id;
       }
-      const response = await fetch(`${API_BASE}/employees/`, {
+      const response = await resilientFetch(`${API_BASE}/employees/`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
       });
 
@@ -125,13 +118,9 @@ export default function UserManagement() {
 
   const handleToggleActive = async (employeeId: number, currentStatus: boolean) => {
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/employees/${employeeId}`, {
+      const response = await resilientFetch(`${API_BASE}/employees/${employeeId}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ is_active: !currentStatus }),
       });
 
@@ -145,13 +134,9 @@ export default function UserManagement() {
 
   const handleChangeEmployeeBranch = async (employeeId: number, branchId: number) => {
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_BASE}/employees/${employeeId}`, {
+      const response = await resilientFetch(`${API_BASE}/employees/${employeeId}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ branch_id: branchId }),
       });
       if (response.ok) {
