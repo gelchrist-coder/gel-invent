@@ -532,7 +532,7 @@ def send_sale_receipt_email(
 """
 
     if summary_extra_text:
-    body_lines.insert(-3, summary_extra_text)
+        body_lines.insert(-3, summary_extra_text)
 
     try:
         send_email(
