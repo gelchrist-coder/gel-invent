@@ -45,8 +45,8 @@ class IPv4SMTP_SSL(_IPv4SMTPMixin, smtplib.SMTP_SSL):
     pass
 
 
-def send_email(*, to_email: str, subject: str, body_text: str) -> None:
-    """Send a plain-text email via SMTP using environment variables.
+def send_email(*, to_email: str, subject: str, body_text: str, body_html: str | None = None) -> None:
+    """Send an email via SMTP using environment variables.
 
     Required env vars:
     - SMTP_HOST
@@ -106,6 +106,8 @@ def send_email(*, to_email: str, subject: str, body_text: str) -> None:
     msg["To"] = to_email
     msg["Subject"] = subject
     msg.set_content(body_text)
+    if body_html:
+        msg.add_alternative(body_html, subtype="html")
 
     smtp_timeout = float(os.getenv("SMTP_TIMEOUT", "20"))
     connect_retries = int(os.getenv("SMTP_CONNECT_RETRIES", "2"))

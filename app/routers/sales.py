@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from html import escape
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
@@ -398,6 +399,7 @@ def send_sale_receipt_email(
     receipt_number = str(receipt_number_source).split(":")[0][-8:].upper()
 
     lines: list[str] = []
+    item_rows_html: list[str] = []
     for sale in sales_sorted:
         product_name = product_name_by_id.get(int(sale.product_id), f"Product #{sale.product_id}")
         quantity = Decimal(sale.quantity or 0)
@@ -405,6 +407,14 @@ def send_sale_receipt_email(
         line_total = Decimal(sale.total_price or 0)
         lines.append(
             f"- {product_name}: {quantity} x GHS {unit_price:.2f} = GHS {line_total:.2f}"
+        )
+        item_rows_html.append(
+            "<tr>"
+            f"<td style='padding:10px;border-bottom:1px solid #edf2f7'>{escape(product_name)}</td>"
+            f"<td style='padding:10px;border-bottom:1px solid #edf2f7;text-align:right'>{quantity}</td>"
+            f"<td style='padding:10px;border-bottom:1px solid #edf2f7;text-align:right'>GHS {unit_price:.2f}</td>"
+            f"<td style='padding:10px;border-bottom:1px solid #edf2f7;text-align:right;font-weight:700'>GHS {line_total:.2f}</td>"
+            "</tr>"
         )
 
     business_name = (current_user.business_name or "Gel Invent Business").strip()
@@ -441,11 +451,95 @@ def send_sale_receipt_email(
         "Sent from Gel Invent",
     ])
 
+        outstanding_balance = total_amount - amount_paid if amount_paid > 0 else total_amount
+        summary_extra_text = ""
+        summary_extra_html = ""
+
+        if amount_paid > 0:
+                summary_extra_html += (
+                        f"<tr><td style='padding:6px 0;color:#475569'>Amount Paid</td>"
+                        f"<td style='padding:6px 0;text-align:right;font-weight:600'>GHS {amount_paid:.2f}</td></tr>"
+                )
+                if payment_method in {"CREDIT", "PARTIAL"}:
+                        summary_extra_html += (
+                                f"<tr><td style='padding:6px 0;color:#475569'>Balance</td>"
+                                f"<td style='padding:6px 0;text-align:right;font-weight:700;color:#b45309'>GHS {outstanding_balance:.2f}</td></tr>"
+                        )
+
+        if payment_method in {"CREDIT", "PARTIAL"}:
+                summary_extra_text = f"Outstanding: GHS {outstanding_balance:.2f}"
+
+        receipt_html = f"""
+<!DOCTYPE html>
+<html lang=\"en\">
+    <body style=\"margin:0;padding:20px;background:#f4f7fb;font-family:Arial,sans-serif;color:#0f172a\">
+        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:700px;margin:0 auto;background:#ffffff;border:1px solid #dbe5f2;border-radius:12px;overflow:hidden\">
+            <tr>
+                <td style=\"padding:20px 24px;background:linear-gradient(120deg,#1f7aff,#2563eb);color:#ffffff\">
+                    <div style=\"font-size:12px;letter-spacing:1px;opacity:.9\">OFFICIAL RECEIPT</div>
+                    <div style=\"font-size:28px;font-weight:800;line-height:1.1;margin-top:6px\">{escape(business_name)}</div>
+                    <div style=\"margin-top:8px;font-size:13px;opacity:.95\">Receipt #{escape(receipt_number)} • {escape(receipt_datetime)}</div>
+                </td>
+            </tr>
+            <tr>
+                <td style=\"padding:18px 24px\">
+                    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"font-size:14px\">
+                        <tr>
+                            <td style=\"padding:2px 0;color:#475569\"><strong>Customer:</strong> {escape(customer_name)}</td>
+                            <td style=\"padding:2px 0;color:#475569;text-align:right\"><strong>Served by:</strong> {escape(served_by)}</td>
+                        </tr>
+                        <tr>
+                            <td style=\"padding:2px 0;color:#475569\"><strong>Payment:</strong> {escape(payment_method)}</td>
+                            <td style=\"padding:2px 0;color:#475569;text-align:right\"><strong>Issued from:</strong> Gel Invent</td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+            <tr>
+                <td style=\"padding:0 24px 6px\">
+                    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border:1px solid #e2e8f0;border-radius:10px;overflow:hidden\">
+                        <thead>
+                            <tr style=\"background:#f8fafc;color:#334155;font-size:12px;text-transform:uppercase\">
+                                <th style=\"padding:10px;text-align:left\">Item</th>
+                                <th style=\"padding:10px;text-align:right\">Qty</th>
+                                <th style=\"padding:10px;text-align:right\">Unit Price</th>
+                                <th style=\"padding:10px;text-align:right\">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {''.join(item_rows_html)}
+                        </tbody>
+                    </table>
+                </td>
+            </tr>
+            <tr>
+                <td style=\"padding:12px 24px 18px\">
+                    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"font-size:14px\">
+                        <tr>
+                            <td style=\"padding:6px 0;color:#475569\">Total</td>
+                            <td style=\"padding:6px 0;text-align:right;font-size:22px;font-weight:800;color:#0f172a\">GHS {total_amount:.2f}</td>
+                        </tr>
+                        {summary_extra_html}
+                    </table>
+                    <div style=\"margin-top:12px;padding:12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;color:#334155;font-size:13px\">
+                        Thank you for your purchase. Please keep this receipt for your records.
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </body>
+</html>
+"""
+
+        if summary_extra_text:
+                body_lines.insert(-3, summary_extra_text)
+
     try:
         send_email(
             to_email=str(payload.to_email),
             subject=f"Receipt from {business_name} #{receipt_number}",
             body_text="\n".join(body_lines),
+            body_html=receipt_html,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to send receipt email: {exc}") from exc
