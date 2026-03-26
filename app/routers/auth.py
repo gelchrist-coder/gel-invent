@@ -172,7 +172,12 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     supabase_user_id: str | None = None
     if is_supabase_auth_sync_enabled():
         try:
-            auth_user = create_auth_user(email=email, password=user_data.password, name=user_data.name)
+            auth_user = create_auth_user(
+                email=email,
+                password=user_data.password,
+                name=user_data.name,
+                phone=phone,
+            )
             supabase_user_id = auth_user.user_id
         except SupabaseAuthError as exc:
             # Surface duplicate-email and provisioning failures from Auth.

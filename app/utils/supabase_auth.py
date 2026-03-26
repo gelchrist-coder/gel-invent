@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
 
+from app.utils.phone import to_e164_phone
+
 
 @dataclass
 class SupabaseAuthResult:
@@ -70,14 +72,31 @@ def _request_json(method: str, url: str, payload: dict[str, Any] | None = None) 
         raise SupabaseAuthError(f"Supabase Auth connection failed: {exc.reason}") from exc
 
 
-def create_auth_user(email: str, password: str, name: str | None = None) -> SupabaseAuthResult:
+def create_auth_user(
+    email: str,
+    password: str,
+    name: str | None = None,
+    phone: str | None = None,
+) -> SupabaseAuthResult:
     data = {
         "email": email,
         "password": password,
         "email_confirm": True,
     }
+
+    metadata: dict[str, Any] = {}
     if name:
-        data["user_metadata"] = {"name": name}
+        metadata["name"] = name
+    if phone:
+        metadata["phone"] = phone
+
+    phone_e164 = to_e164_phone(phone)
+    if phone_e164:
+        data["phone"] = phone_e164
+        data["phone_confirm"] = True
+
+    if metadata:
+        data["user_metadata"] = metadata
 
     resp = _request_json("POST", f"{_auth_base_url()}/admin/users", data)
     user_id = str(resp.get("id") or "").strip()
