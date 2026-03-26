@@ -63,11 +63,17 @@ export default function Sales() {
     } catch (err) {
       // If products can't be fetched, fall back to cached products so POS can still work.
       const cached = loadCachedProducts();
+      const message = err instanceof Error ? err.message : "Failed to load data";
+      const isOffline = !navigator.onLine;
       if (cached?.length) {
         setProducts(cached);
-        setOfflineNotice("Offline mode: using cached products. Sales will sync when internet returns.");
+        setOfflineNotice(
+          isOffline
+            ? "Offline mode: using cached products. Sales will sync when internet returns."
+            : "Using cached products while we reconnect to the server."
+        );
       } else {
-        setError(err instanceof Error ? err.message : "Failed to load data");
+        setError(message);
       }
     } finally {
       setLoading(false);

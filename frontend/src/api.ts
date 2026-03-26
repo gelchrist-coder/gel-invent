@@ -32,7 +32,16 @@ type CacheEntry<T> = {
 const dataCache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 30000; // 30 seconds - data is considered fresh
 const inflightGetRequests = new Map<string, Promise<unknown>>();
-const REQUEST_TIMEOUT_MS = 12000;
+const REQUEST_TIMEOUT_MS = 25000;
+const GET_RETRY_ATTEMPTS = 1;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
 
 function getCacheKey(key: string): string {
   const branchId = localStorage.getItem("activeBranchId");
@@ -158,24 +167,59 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
       if (Number.isFinite(parsed) && parsed > 0) headers["X-Branch-Id"] = String(parsed);
     }
 
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const maxAttempts = method === "GET" ? GET_RETRY_ATTEMPTS + 1 : 1;
+    let response: Response | null = null;
 
-    let response: Response;
-    try {
-      response = await fetch(`${API_BASE}${path}`, {
-        ...options,
-        method,
-        headers,
-        signal: controller.signal,
-      });
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        throw new Error("Request timed out. Please check your internet and try again.");
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+      try {
+        response = await fetch(`${API_BASE}${path}`, {
+          ...options,
+          method,
+          headers,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        const canRetry = method === "GET" && attempt < maxAttempts;
+        if (canRetry && (isAbortError(error) || error instanceof TypeError)) {
+          await delay(500 * attempt);
+          continue;
+        }
+
+        if (isAbortError(error)) {
+          throw new Error("Server is taking longer than expected. Please tap Retry.");
+        }
+
+        if (error instanceof TypeError) {
+          throw new Error(
+            navigator.onLine
+              ? "Unable to reach the server right now. Please try again."
+              : "You appear to be offline. Please check your internet connection."
+          );
+        }
+
+        throw error;
+      } finally {
+        window.clearTimeout(timeout);
       }
-      throw error;
-    } finally {
-      window.clearTimeout(timeout);
+
+      if (!response) {
+        continue;
+      }
+
+      if (method === "GET" && [502, 503, 504].includes(response.status) && attempt < maxAttempts) {
+        await delay(500 * attempt);
+        response = null;
+        continue;
+      }
+
+      break;
+    }
+
+    if (!response) {
+      throw new Error("Unable to reach the server right now. Please try again.");
     }
 
     if (!response.ok) {
