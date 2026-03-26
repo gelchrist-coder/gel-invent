@@ -32,6 +32,7 @@ type CacheEntry<T> = {
 const dataCache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 30000; // 30 seconds - data is considered fresh
 const inflightGetRequests = new Map<string, Promise<unknown>>();
+const REQUEST_TIMEOUT_MS = 12000;
 
 function getCacheKey(key: string): string {
   const branchId = localStorage.getItem("activeBranchId");
@@ -143,56 +144,70 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   const execute = async (): Promise<T> => {
-  const headers: Record<string, string> = { 
-    "Content-Type": "application/json", 
-    ...(options?.headers as Record<string, string> ?? {}) 
-  };
-  
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(options?.headers as Record<string, string> ?? {})
+    };
 
-  if (activeBranchId) {
-    const parsed = Number.parseInt(activeBranchId, 10);
-    if (Number.isFinite(parsed) && parsed > 0) headers["X-Branch-Id"] = String(parsed);
-  }
-  
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    method,
-    headers,
-  });
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
-      throw new Error("Not authenticated");
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
-    const body = await response.text();
+
+    if (activeBranchId) {
+      const parsed = Number.parseInt(activeBranchId, 10);
+      if (Number.isFinite(parsed) && parsed > 0) headers["X-Branch-Id"] = String(parsed);
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    let response: Response;
     try {
-      const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
-      const detail = parsed?.detail ?? parsed?.message;
-      const message = typeof detail === "string" ? detail : response.statusText;
-      throw new Error(message || "Request failed");
+      response = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        method,
+        headers,
+        signal: controller.signal,
+      });
     } catch (error) {
-      if (error instanceof SyntaxError) {
-        throw new Error(body || response.statusText);
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new Error("Request timed out. Please check your internet and try again.");
       }
       throw error;
+    } finally {
+      window.clearTimeout(timeout);
     }
-  }
 
-  if (response.status === 204) {
-    return undefined as T;
-  }
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
+        throw new Error("Not authenticated");
+      }
+      const body = await response.text();
+      try {
+        const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
+        const detail = parsed?.detail ?? parsed?.message;
+        const message = typeof detail === "string" ? detail : response.statusText;
+        throw new Error(message || "Request failed");
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          throw new Error(body || response.statusText);
+        }
+        throw error;
+      }
+    }
 
-  const text = await response.text();
-  if (!text) {
-    return undefined as T;
-  }
-  return JSON.parse(text) as T;
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    const text = await response.text();
+    if (!text) {
+      return undefined as T;
+    }
+    return JSON.parse(text) as T;
   };
 
   if (method !== "GET") {

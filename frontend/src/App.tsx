@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { createMovement, createProduct, deleteProduct, fetchBranchesCached, fetchMe, fetchProductsCached, updateProduct, getCachedProducts, clearDataCache } from "./api";
+import { createMovement, createProduct, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, updateProduct, getCachedProducts, clearDataCache } from "./api";
 import Layout from "./components/Layout";
 import ProductForm from "./components/ProductForm";
 import ProductList from "./components/ProductList";
@@ -39,7 +39,6 @@ function readStoredUser(): StoredUser | null {
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("token"));
   const [activeView, setActiveView] = useState("dashboard");
-  const [visitedViews, setVisitedViews] = useState<string[]>(["dashboard"]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -62,6 +61,7 @@ export default function App() {
 
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const prefetchedBranchRef = useRef<number | null>(null);
 
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
 
@@ -206,6 +206,21 @@ export default function App() {
     return () => window.removeEventListener("branchesChanged", handler as EventListener);
   }, [isAuthenticated, activeBranchId]);
 
+  // Warm caches in background so page switches feel instant.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    if (prefetchedBranchRef.current === activeBranchId) return;
+    prefetchedBranchRef.current = activeBranchId;
+
+    fetchSalesCached().catch(() => {});
+    fetchInventoryAnalytics().catch(() => {});
+
+    if (userRole === "Admin") {
+      fetchSalesDashboard().catch(() => {});
+    }
+  }, [isAuthenticated, activeBranchId, userRole]);
+
   // Auto-refresh when another user signs in
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
@@ -272,14 +287,6 @@ export default function App() {
     run();
   }, [isAuthenticated, activeBranchId]);
 
-  useEffect(() => {
-    if (!visitedViews.includes(activeView)) {
-      setVisitedViews((prev) => [...prev, activeView]);
-    }
-  }, [activeView, visitedViews]);
-
-
-
   const handleLogin = (_email: string, _password: string) => {
     const user = readStoredUser();
     if (user) {
@@ -297,7 +304,6 @@ export default function App() {
 
     // Always start authenticated users on dashboard.
     setActiveView("dashboard");
-    setVisitedViews(["dashboard"]);
     setIsAuthenticated(true);
   };
 
@@ -645,11 +651,7 @@ export default function App() {
       activeBranchId={activeBranchId}
       onChangeBranch={userRole === "Admin" ? handleChangeBranch : undefined}
     >
-      {visitedViews.map((view) => (
-        <div key={view} style={{ display: view === activeView ? "block" : "none" }}>
-          {renderView(view)}
-        </div>
-      ))}
+      {renderView(activeView)}
     </Layout>
   );
 }
