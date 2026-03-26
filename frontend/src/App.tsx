@@ -126,8 +126,19 @@ export default function App() {
             else localStorage.removeItem("activeBranchId");
           }
         })
-        .catch(() => {
-          logoutAndReset();
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : "";
+          const isAuthFailure =
+            message === "Not authenticated" ||
+            /unauth|401|invalid token|expired token/i.test(message);
+
+          // Keep local session on transient startup failures (network/cold start).
+          if (isAuthFailure) {
+            logoutAndReset();
+            return;
+          }
+
+          console.warn("Session revalidation skipped due to temporary error:", err);
         });
     }
   }, []);
