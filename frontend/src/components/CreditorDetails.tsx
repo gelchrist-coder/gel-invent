@@ -528,10 +528,17 @@ interface Product {
   quantity_in_stock: number;
 }
 
-function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }: DebtModalProps) {
+interface SaleLineItem {
+  id: string;
+  productId: string;
+  quantity: string;
+}
+
+function DebtModal({ creditorId, creditorName, onClose, onSuccess }: DebtModalProps) {
   const [products, setProducts] = useState<Product[]>([]);
-  const [selectedProductId, setSelectedProductId] = useState("");
-  const [quantity, setQuantity] = useState("");
+  const [lineItems, setLineItems] = useState<SaleLineItem[]>([
+    { id: `line-${Date.now()}`, productId: "", quantity: "" },
+  ]);
   const [initialPayment, setInitialPayment] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
@@ -568,29 +575,70 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
     }
   };
 
-  const selectedProduct = products.find((p) => p.id === parseInt(selectedProductId));
-  const quantityNumPreview = parseFloat(quantity || "0");
-  const totalAmount = selectedProduct ? selectedProduct.price * quantityNumPreview : 0;
+  const parsedLines = lineItems.map((line) => {
+    const product = products.find((p) => p.id === Number.parseInt(line.productId, 10));
+    const quantityNum = Number.parseFloat(line.quantity || "0");
+    const subtotal = product ? product.price * quantityNum : 0;
+    return {
+      ...line,
+      product,
+      quantityNum: Number.isFinite(quantityNum) ? quantityNum : 0,
+      subtotal,
+    };
+  });
+
+  const totalAmount = parsedLines.reduce((sum, line) => sum + line.subtotal, 0);
   const initialPaymentNum = parseFloat(initialPayment || "0");
   const creditAmount = totalAmount - initialPaymentNum;
+
+  const addLineItem = () => {
+    setLineItems((prev) => [
+      ...prev,
+      { id: `line-${Date.now()}-${prev.length}`, productId: "", quantity: "" },
+    ]);
+  };
+
+  const updateLineItem = (id: string, patch: Partial<SaleLineItem>) => {
+    setLineItems((prev) => prev.map((line) => (line.id === id ? { ...line, ...patch } : line)));
+  };
+
+  const removeLineItem = (id: string) => {
+    setLineItems((prev) => {
+      if (prev.length <= 1) {
+        return prev;
+      }
+      return prev.filter((line) => line.id !== id);
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!selectedProductId) {
-      setError("Please select a product");
+    const validLines = parsedLines.filter((line) => line.product && line.quantityNum > 0);
+
+    if (validLines.length === 0) {
+      setError("Please add at least one product with a valid quantity");
       return;
     }
 
-    const quantityNum = parseFloat(quantity);
-    if (!quantityNum || quantityNum <= 0) {
-      setError("Please enter a valid quantity");
+    if (parsedLines.some((line) => line.productId && line.quantityNum <= 0)) {
+      setError("Please enter valid quantities for all selected products");
       return;
     }
 
-    if (selectedProduct && quantityNum > selectedProduct.quantity_in_stock) {
-      setError(`Only ${selectedProduct.quantity_in_stock} units available in stock`);
-      return;
+    const quantitiesByProduct = new Map<number, number>();
+    for (const line of validLines) {
+      const productId = line.product!.id;
+      const current = quantitiesByProduct.get(productId) ?? 0;
+      quantitiesByProduct.set(productId, current + line.quantityNum);
+    }
+
+    for (const [productId, requestedQty] of quantitiesByProduct.entries()) {
+      const product = products.find((p) => p.id === productId);
+      if (product && requestedQty > product.quantity_in_stock) {
+        setError(`Only ${product.quantity_in_stock} units available for ${product.name}`);
+        return;
+      }
     }
 
     if (initialPaymentNum < 0) {
@@ -607,25 +655,46 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
     setError("");
 
     try {
-      // Create a credit sale so the backend will generate the creditor ledger entry.
-      const response = await resilientFetch(`${API_BASE}/sales`, {
+      // Record all lines as credit sales so debt entries are generated consistently.
+      const salesPayload = validLines.map((line) => ({
+        product_id: line.product!.id,
+        quantity: line.quantityNum,
+        unit_price: line.product!.price,
+        total_price: line.subtotal,
+        customer_name: creditorName,
+        payment_method: "credit",
+        notes: notes.trim() || null,
+      }));
+
+      const response = await resilientFetch(`${API_BASE}/sales/bulk`, {
         method: "POST",
         headers: buildAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          product_id: parseInt(selectedProductId),
-          quantity: quantityNum,
-          unit_price: selectedProduct?.price ?? 0,
-          total_price: (selectedProduct?.price ?? 0) * quantityNum,
-          customer_name: creditorName,
-          payment_method: "credit",
-          amount_paid: initialPaymentNum > 0 ? initialPaymentNum : undefined,
-          notes: notes.trim() || null,
-        }),
+        body: JSON.stringify(salesPayload),
       });
 
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || "Failed to record sale");
+      }
+
+      // Apply upfront payment once against the creditor ledger for the full invoice.
+      if (initialPaymentNum > 0) {
+        const paymentResponse = await resilientFetch(`${API_BASE}/creditors/transactions`, {
+          method: "POST",
+          headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            creditor_id: creditorId,
+            amount: initialPaymentNum,
+            transaction_type: "payment",
+            notes:
+              notes.trim() ||
+              `Initial payment for multi-product credit sale (${validLines.length} item${validLines.length === 1 ? "" : "s"})`,
+          }),
+        });
+
+        if (!paymentResponse.ok) {
+          throw new Error("Sales were recorded, but initial payment could not be saved. Please record payment manually.");
+        }
       }
 
       onSuccess();
@@ -657,7 +726,7 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
           backgroundColor: "white",
           borderRadius: 8,
           width: "100%",
-          maxWidth: 500,
+          maxWidth: 620,
           maxHeight: "90vh",
           overflow: "auto",
           padding: 24,
@@ -672,54 +741,111 @@ function DebtModal({ creditorId: _creditorId, creditorName, onClose, onSuccess }
         </p>
 
         <form onSubmit={handleSubmit}>
-          {/* Product Selection */}
+          {/* Product Lines */}
           <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", marginBottom: 6, fontSize: 14, fontWeight: 500 }}>
-              Product <span style={{ color: "#ef4444" }}>*</span>
+            <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+              Products <span style={{ color: "#ef4444" }}>*</span>
             </label>
+
             {loadingProducts ? (
               <p style={{ fontSize: 14, color: "#6b7280" }}>Loading products...</p>
             ) : (
-              <select
-                value={selectedProductId}
-                onChange={(e) => setSelectedProductId(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  border: "1px solid #d1d5db",
-                  borderRadius: 6,
-                  fontSize: 14,
-                }}
-              >
-                <option value="">Select a product</option>
-                {products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.name} - GHS {product.price.toFixed(2)} ({product.quantity_in_stock} in stock)
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {parsedLines.map((line, index) => (
+                  <div
+                    key={line.id}
+                    style={{
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 8,
+                      padding: 10,
+                      backgroundColor: "#fafafa",
+                    }}
+                  >
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 130px auto", gap: 8, alignItems: "end" }}>
+                      <div>
+                        <label style={{ display: "block", marginBottom: 4, fontSize: 12, color: "#4b5563" }}>Product</label>
+                        <select
+                          value={line.productId}
+                          onChange={(e) => updateLineItem(line.id, { productId: e.target.value })}
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: 6,
+                            fontSize: 14,
+                          }}
+                        >
+                          <option value="">Select a product</option>
+                          {products.map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {product.name} - GHS {product.price.toFixed(2)} ({product.quantity_in_stock} in stock)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-          {/* Quantity */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", marginBottom: 6, fontSize: 14, fontWeight: 500 }}>
-              Quantity <span style={{ color: "#ef4444" }}>*</span>
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                border: "1px solid #d1d5db",
-                borderRadius: 6,
-                fontSize: 14,
-              }}
-              placeholder="0"
-            />
+                      <div>
+                        <label style={{ display: "block", marginBottom: 4, fontSize: 12, color: "#4b5563" }}>Quantity</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={line.quantity}
+                          onChange={(e) => updateLineItem(line.id, { quantity: e.target.value })}
+                          style={{
+                            width: "100%",
+                            padding: "10px 12px",
+                            border: "1px solid #d1d5db",
+                            borderRadius: 6,
+                            fontSize: 14,
+                          }}
+                          placeholder="0"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeLineItem(line.id)}
+                        disabled={lineItems.length === 1}
+                        style={{
+                          padding: "10px 12px",
+                          backgroundColor: lineItems.length === 1 ? "#e5e7eb" : "#fee2e2",
+                          color: lineItems.length === 1 ? "#6b7280" : "#b91c1c",
+                          border: "none",
+                          borderRadius: 6,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: lineItems.length === 1 ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    <p style={{ margin: "8px 0 0", fontSize: 12, color: "#6b7280" }}>
+                      Line {index + 1}: GHS {line.subtotal.toFixed(2)}
+                    </p>
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={addLineItem}
+                  style={{
+                    padding: "10px 14px",
+                    backgroundColor: "#eff6ff",
+                    color: "#1d4ed8",
+                    border: "1px solid #bfdbfe",
+                    borderRadius: 6,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    justifySelf: "start",
+                  }}
+                >
+                  + Add Another Product
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Total Amount Display */}
