@@ -33,6 +33,7 @@ export default function Sales() {
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [outboxCount, setOutboxCount] = useState<number>(() => getSalesOutboxCount());
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [salesPeriod, setSalesPeriod] = useState<"all" | "day" | "week" | "month">("all");
   const hasLoadedOnce = useRef(false);
 
   // Get user and business info for receipt
@@ -362,9 +363,44 @@ export default function Sales() {
     }
   };
 
+  const salesPeriodLabel: Record<"all" | "day" | "week" | "month", string> = {
+    all: "All time",
+    day: "Today",
+    week: "This week",
+    month: "This month",
+  };
+
+  const periodStart = useMemo(() => {
+    if (salesPeriod === "all") return null;
+    const now = new Date();
+    if (salesPeriod === "day") {
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    }
+    if (salesPeriod === "week") {
+      const day = now.getDay();
+      const diff = (day + 6) % 7; // Monday start
+      const start = new Date(now);
+      start.setDate(now.getDate() - diff);
+      start.setHours(0, 0, 0, 0);
+      return start;
+    }
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }, [salesPeriod]);
+
+  const filteredSales = useMemo(() => {
+    if (!periodStart) return sales;
+    const startTime = periodStart.getTime();
+    return sales.filter((sale) => new Date(sale.created_at).getTime() >= startTime);
+  }, [sales, periodStart]);
+
+  const filteredSalesTotal = useMemo(
+    () => filteredSales.reduce((sum, sale) => sum + Number(sale.total_price || 0), 0),
+    [filteredSales]
+  );
+
   // PDF Export function
-  const exportSalesPDF = () => {
-    if (sales.length === 0) return;
+  const exportSalesPDF = (list: Sale[]) => {
+    if (list.length === 0) return;
 
     const getProductName = (productId: number) => {
       const product = productById.get(productId);
@@ -382,7 +418,7 @@ export default function Sales() {
       });
     };
 
-    const totalRevenue = sales.reduce((sum, s) => sum + Number(s.total_price), 0);
+    const totalRevenue = list.reduce((sum, s) => sum + Number(s.total_price), 0);
 
     const pdfWindow = window.open("", "_blank");
     if (!pdfWindow) {
@@ -390,7 +426,7 @@ export default function Sales() {
       return;
     }
 
-    const rowsHTML = sales.map(sale => `
+    const rowsHTML = list.map(sale => `
       <tr>
         <td>${formatDate(sale.created_at)}</td>
         <td>${getProductName(sale.product_id)}</td>
@@ -424,7 +460,7 @@ export default function Sales() {
         <div class="subtitle">Generated on ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}</div>
         
         <div class="summary">
-          <strong>Total Sales:</strong> ${sales.length} transactions | 
+          <strong>Total Sales:</strong> ${list.length} transactions | 
           <strong>Total Revenue:</strong> GHS ${totalRevenue.toFixed(2)}
         </div>
         
@@ -504,10 +540,33 @@ export default function Sales() {
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Recent Sales</h3>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              Total ({salesPeriodLabel[salesPeriod]}): <strong style={{ color: "#111827" }}>GHS {filteredSalesTotal.toFixed(2)}</strong>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              {(["day", "week", "month", "all"] as const).map((period) => (
+                <button
+                  key={period}
+                  onClick={() => setSalesPeriod(period)}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 999,
+                    border: "1px solid #e5e7eb",
+                    background: salesPeriod === period ? "#111827" : "white",
+                    color: salesPeriod === period ? "white" : "#374151",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {period === "day" ? "Day" : period === "week" ? "Week" : period === "month" ? "Month" : "All"}
+                </button>
+              ))}
+            </div>
             <button
-              onClick={() => exportSalesPDF()}
-              disabled={sales.length === 0}
+              onClick={() => exportSalesPDF(filteredSales)}
+              disabled={filteredSales.length === 0}
               style={{
                 padding: "6px 12px",
                 borderRadius: 4,
@@ -516,8 +575,8 @@ export default function Sales() {
                 color: "#374151",
                 fontSize: 12,
                 fontWeight: 500,
-                cursor: sales.length === 0 ? "not-allowed" : "pointer",
-                opacity: sales.length === 0 ? 0.5 : 1,
+                cursor: filteredSales.length === 0 ? "not-allowed" : "pointer",
+                opacity: filteredSales.length === 0 ? 0.5 : 1,
                 display: "flex",
                 alignItems: "center",
                 gap: 4,
@@ -525,7 +584,7 @@ export default function Sales() {
             >
               📄 Export PDF
             </button>
-            {sales.length > 5 && (
+            {filteredSales.length > 5 && (
               <button
                 onClick={() => setShowHistoryModal(true)}
                 style={{
@@ -539,18 +598,18 @@ export default function Sales() {
                   cursor: "pointer",
                 }}
               >
-                View All ({sales.length})
+                View All ({filteredSales.length})
               </button>
             )}
           </div>
         </div>
-        {sales.length === 0 && loading ? (
+        {filteredSales.length === 0 && loading ? (
           <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>Loading sales...</p>
         ) : (
           <>
             {loading ? <p style={{ margin: "0 0 8px 0", color: "#6b7280", fontSize: 12 }}>Refreshing...</p> : null}
-            <SalesList sales={sales.slice(0, 5)} products={products} onDelete={handleDeleteSale} onRefresh={loadData} />
-            {sales.length > 5 && (
+            <SalesList sales={filteredSales.slice(0, 5)} products={products} onDelete={handleDeleteSale} onRefresh={loadData} />
+            {filteredSales.length > 5 && (
               <div style={{ textAlign: "center", marginTop: 12 }}>
                 <button
                   onClick={() => setShowHistoryModal(true)}
@@ -564,7 +623,7 @@ export default function Sales() {
                     cursor: "pointer",
                   }}
                 >
-                  View {sales.length - 5} more sales →
+                  View {filteredSales.length - 5} more sales →
                 </button>
               </div>
             )}
@@ -957,12 +1016,12 @@ export default function Sales() {
               <div>
                 <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Sales History</h2>
                 <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-                  {sales.length} total sales
+                  {filteredSales.length} total sales
                 </p>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button
-                  onClick={() => exportSalesPDF()}
+                  onClick={() => exportSalesPDF(filteredSales)}
                   style={{
                     padding: "8px 14px",
                     borderRadius: 6,
@@ -999,7 +1058,7 @@ export default function Sales() {
 
             {/* Modal Body */}
             <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
-              <SalesList sales={sales} products={products} onDelete={handleDeleteSale} onRefresh={loadData} />
+              <SalesList sales={filteredSales} products={products} onDelete={handleDeleteSale} onRefresh={loadData} />
             </div>
           </div>
         </div>
