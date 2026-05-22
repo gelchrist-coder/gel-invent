@@ -180,6 +180,44 @@ export async function updateMyCategories(categories: string[]): Promise<AuthUser
   return updated;
 }
 
+export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
+  const formData = new FormData();
+  formData.append("logo", file);
+
+  const response = await resilientFetch(`${API_BASE}/auth/me/logo`, {
+    method: "POST",
+    headers: buildAuthHeaders(),
+    body: formData,
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
+      throw new Error("Not authenticated");
+    }
+    const body = await response.text();
+    try {
+      const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
+      const detail = parsed?.detail ?? parsed?.message;
+      const message = typeof detail === "string" ? detail : response.statusText;
+      throw new Error(message || "Request failed");
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new Error(body || response.statusText);
+      }
+      throw error;
+    }
+  }
+
+  const text = await response.text();
+  const updated = text ? (JSON.parse(text) as AuthUser) : ({} as AuthUser);
+  localStorage.setItem("user", JSON.stringify(updated));
+  window.dispatchEvent(new CustomEvent("userChanged", { detail: updated }));
+  return updated;
+}
+
 export type SystemSettings = {
   low_stock_threshold: number;
   expiry_warning_days: number;

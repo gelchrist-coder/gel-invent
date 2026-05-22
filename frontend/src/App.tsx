@@ -257,7 +257,13 @@ export default function App() {
       if (newUser?.id && newUser.id !== currentUserId) {
         console.log("Different user detected in same tab, refreshing...");
         window.location.reload();
+        return;
       }
+
+      setUserName(newUser.name || "User");
+      setBusinessName(newUser.business_name || "Business");
+      setBusinessLogoUrl(newUser.business_logo_url ?? null);
+      setUserRole(newUser.role || "Admin");
     };
 
     window.addEventListener("userChanged", handleCustomUserChange as EventListener);

@@ -424,6 +424,13 @@ def send_sale_receipt_email(
         if logo_url
         else ""
     )
+    watermark_html = (
+        "<tr><td style='padding:0 24px'>"
+        "<div style='font-size:32px;opacity:.08;letter-spacing:4px;text-align:center;margin:6px 0 -6px'>Gel Invent</div>"
+        "</td></tr>"
+        if not logo_url
+        else ""
+    )
     served_by = (current_user.name or "Owner").strip()
     receipt_datetime = sales_sorted[0].created_at.strftime("%Y-%m-%d %H:%M")
 
@@ -488,6 +495,7 @@ def send_sale_receipt_email(
                     <div style=\"margin-top:8px;font-size:13px;opacity:.95\">Receipt #{escape(receipt_number)} • {escape(receipt_datetime)}</div>
                 </td>
             </tr>
+            {watermark_html}
             <tr>
                 <td style=\"padding:18px 24px\">
                     <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"font-size:14px\">

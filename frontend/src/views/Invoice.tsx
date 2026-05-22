@@ -129,6 +129,8 @@ export default function Invoice() {
       ? `<div style="margin-bottom:10px"><img src="${businessLogoUrl}" alt="Logo" style="height:50px;max-width:160px;object-fit:contain" /></div>`
       : "";
 
+    const watermarkHtml = businessLogoUrl ? "" : "<div class=\"watermark\">Gel Invent</div>";
+
     const html = `
       <html>
         <head>
@@ -142,9 +144,11 @@ export default function Invoice() {
             th { text-align: left; background: #f8fafc; }
             .total { text-align: right; font-weight: 700; font-size: 14px; }
             .footer { margin-top: 24px; font-size: 11px; color: #64748b; }
+            .watermark { position: fixed; top: 45%; left: 50%; transform: translate(-50%, -50%) rotate(-18deg); font-size: 56px; font-weight: 700; color: #0f172a; opacity: 0.06; letter-spacing: 4px; pointer-events: none; }
           </style>
         </head>
         <body>
+          ${watermarkHtml}
           <h1>${businessName}</h1>
           ${logoHtml}
           <div class="meta">PROFORMA INVOICE</div>

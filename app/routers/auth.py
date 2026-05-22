@@ -4,7 +4,7 @@ import json
 import secrets
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import or_
@@ -413,6 +413,34 @@ def update_current_user_info(
         cleaned.append(value)
 
     current_user.categories = json.dumps(cleaned) if cleaned else None
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    return _serialize_user(current_user)
+
+
+@router.post("/me/logo", response_model=UserResponse)
+async def upload_business_logo(
+    logo: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    if not is_supabase_storage_enabled():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo upload is not configured")
+
+    if not (logo.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be an image")
+
+    logo_bytes = await logo.read()
+    if len(logo_bytes) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be under 2MB")
+
+    try:
+        logo_url = upload_public_logo(logo_bytes, logo.content_type, logo.filename)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    current_user.business_logo_url = logo_url
     db.add(current_user)
     db.commit()
     db.refresh(current_user)

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
+import { changePassword, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings, uploadBusinessLogo } from "../api";
 import { Branch } from "../types";
 
 type PasswordInputProps = {
@@ -97,6 +97,9 @@ export default function Profile() {
   const [exportingData, setExportingData] = useState(false);
   const [importingData, setImportingData] = useState(false);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
 
   // Branch management state
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -136,6 +139,7 @@ export default function Profile() {
           owner: String(parsedUser.name ?? prev.owner),
           phone: prev.phone || String(parsedUser.phone ?? ""),
           email: String(parsedUser.email ?? prev.email),
+          logo: String((parsedUser as Record<string, unknown>).business_logo_url ?? prev.logo ?? ""),
         }));
       }
     } catch {
@@ -396,6 +400,48 @@ export default function Profile() {
     importFileRef.current?.click();
   };
 
+  const handlePickLogoFile = () => {
+    setLogoError(null);
+    logoInputRef.current?.click();
+  };
+
+  const handleLogoSelected = async (file: File | null) => {
+    if (!file) return;
+    setLogoError(null);
+
+    if (!file.type.startsWith("image/")) {
+      setLogoError("Logo must be an image file.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setLogoError("Logo must be under 2MB.");
+      return;
+    }
+
+    setLogoUploading(true);
+    try {
+      const updated = await uploadBusinessLogo(file);
+      const logoUrl = updated.business_logo_url || "";
+      setBusinessInfo((prev) => ({ ...prev, logo: logoUrl }));
+
+      const rawUser = localStorage.getItem("user");
+      const parsedUser = rawUser ? (JSON.parse(rawUser) as Record<string, unknown>) : {};
+      const nextUser = { ...parsedUser, business_logo_url: logoUrl };
+      localStorage.setItem("user", JSON.stringify(nextUser));
+      window.dispatchEvent(new CustomEvent("userChanged", { detail: nextUser }));
+
+      const rawBusiness = localStorage.getItem("businessInfo");
+      const parsedBusiness = rawBusiness ? (JSON.parse(rawBusiness) as Record<string, unknown>) : {};
+      localStorage.setItem("businessInfo", JSON.stringify({ ...parsedBusiness, logo: logoUrl }));
+      setDataMessage("Logo updated.");
+    } catch (error) {
+      setLogoError(error instanceof Error ? error.message : "Failed to update logo.");
+    } finally {
+      setLogoUploading(false);
+      if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  };
+
   const handleImportFileSelected = async (file: File | null) => {
     if (!file) return;
     setDataMessage(null);
@@ -441,6 +487,13 @@ export default function Profile() {
         accept="application/json,.json"
         style={{ display: "none" }}
         onChange={(e) => handleImportFileSelected(e.target.files?.[0] ?? null)}
+      />
+      <input
+        ref={logoInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={(e) => handleLogoSelected(e.target.files?.[0] ?? null)}
       />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
@@ -571,6 +624,71 @@ export default function Profile() {
                   style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
                 />
               </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                  Business Logo
+                </span>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: 12,
+                    borderRadius: 10,
+                    border: "1px dashed #cbd5f5",
+                    background: "#f8fbff",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 56,
+                      height: 56,
+                      borderRadius: 12,
+                      background: "#e2e8f0",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      overflow: "hidden",
+                      color: "#475569",
+                      fontWeight: 700,
+                      fontSize: 12,
+                    }}
+                  >
+                    {businessInfo.logo ? (
+                      <img
+                        src={businessInfo.logo}
+                        alt="Business logo"
+                        style={{ width: "100%", height: "100%", objectFit: "contain", background: "#fff" }}
+                      />
+                    ) : (
+                      "LOGO"
+                    )}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={handlePickLogoFile}
+                      disabled={logoUploading}
+                      style={{
+                        padding: "8px 14px",
+                        borderRadius: 8,
+                        border: "1px solid #d1d5db",
+                        background: logoUploading ? "#e5e7eb" : "#ffffff",
+                        cursor: logoUploading ? "not-allowed" : "pointer",
+                        fontWeight: 600,
+                        color: "#1f2937",
+                        fontSize: 13,
+                      }}
+                    >
+                      {logoUploading ? "Uploading..." : "Change Logo"}
+                    </button>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>PNG, JPG up to 2MB</span>
+                  </div>
+                </div>
+                {logoError ? (
+                  <span style={{ fontSize: 12, color: "#b91c1c", fontWeight: 600 }}>{logoError}</span>
+                ) : null}
+              </div>
               <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                   Owner Name

@@ -266,6 +266,8 @@ export default function Sales() {
       ? `<div style="margin-bottom:8px;"><img src="${businessLogoUrl}" alt="Logo" style="height:40px;max-width:140px;object-fit:contain;" /></div>`
       : "";
 
+    const watermarkHtml = businessLogoUrl ? "" : "<div class=\"watermark\">Gel Invent</div>";
+
     const receiptHTML = `
       <!DOCTYPE html>
       <html>
@@ -281,10 +283,12 @@ export default function Sales() {
           .total-section { margin-top: 15px; }
           .total-row { display: flex; justify-content: space-between; margin: 5px 0; font-weight: bold; }
           .footer { text-align: center; margin-top: 20px; font-size: 11px; border-top: 2px dashed #000; padding-top: 10px; }
+          .watermark { position: fixed; top: 45%; left: 50%; transform: translate(-50%, -50%) rotate(-18deg); font-size: 36px; font-weight: 700; color: #000; opacity: 0.08; letter-spacing: 2px; pointer-events: none; }
           @media print { body { margin: 0; padding: 10px; } }
         </style>
       </head>
       <body>
+        ${watermarkHtml}
         <div class="header">
           ${logoHtml}
           <div class="business-name">${businessName}</div>
