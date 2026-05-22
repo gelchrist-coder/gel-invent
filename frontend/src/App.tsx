@@ -10,6 +10,7 @@ import { Branch, NewProduct, Product } from "./types";
 import Creditors from "./views/Creditors";
 import Dashboard from "./views/Dashboard";
 import Inventory from "./views/Inventory";
+import Invoice from "./views/Invoice";
 import Login from "./views/Login";
 import Profile from "./views/Profile";
 import Reports from "./views/Reports";
@@ -624,6 +625,8 @@ export default function App() {
         return <Inventory />;
       case "sales":
         return <Sales />;
+      case "invoice":
+        return <Invoice />;
       case "revenue":
         return <RevenueAnalysis />;
       case "reports":
