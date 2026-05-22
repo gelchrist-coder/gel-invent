@@ -164,6 +164,7 @@ export type AuthUser = {
   name: string;
   role: string;
   business_name?: string | null;
+  business_logo_url?: string | null;
   categories?: string[] | null;
   branch_id?: number | null;
   is_active: boolean;

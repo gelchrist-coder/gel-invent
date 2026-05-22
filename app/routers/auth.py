@@ -4,7 +4,7 @@ import json
 import secrets
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import or_
@@ -27,6 +27,7 @@ from app.utils.supabase_auth import (
 )
 from app.utils.email import send_email, smtp_configured
 from app.utils.phone import is_valid_phone, normalize_phone
+from app.utils.supabase_storage import is_supabase_storage_enabled, upload_public_logo
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -52,6 +53,7 @@ class UserCreate(BaseModel):
     name: str
     password: str
     business_name: Optional[str] = None
+    business_logo_url: Optional[str] = None
     categories: Optional[list[str]] = None
     branches: Optional[list[str]] = None  # Optional list of branch names
 
@@ -63,6 +65,7 @@ class UserResponse(BaseModel):
     name: str
     role: str
     business_name: Optional[str] = None
+    business_logo_url: Optional[str] = None
     categories: Optional[list[str]] = None
     branch_id: Optional[int] = None
     is_active: bool
@@ -98,6 +101,7 @@ def _serialize_user(user: User) -> UserResponse:
         name=user.name,
         role=user.role,
         business_name=user.business_name,
+        business_logo_url=getattr(user, "business_logo_url", None),
         categories=_parse_categories(getattr(user, "categories", None)),
         branch_id=getattr(user, "branch_id", None),
         is_active=user.is_active,
@@ -115,6 +119,58 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
+
+
+def _parse_list_input(value: object) -> Optional[list[str]]:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        cleaned = [str(v).strip() for v in value if str(v).strip()]
+        return cleaned or None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                cleaned = [str(v).strip() for v in parsed if str(v).strip()]
+                return cleaned or None
+        except Exception:
+            pass
+        cleaned = [v.strip() for v in raw.split(",") if v.strip()]
+        return cleaned or None
+    return None
+
+
+async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFile | None]:
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        email = str(form.get("email") or "").strip()
+        phone = str(form.get("phone") or "").strip() or None
+        name = str(form.get("name") or "").strip()
+        password = str(form.get("password") or "")
+        business_name = str(form.get("business_name") or "").strip() or None
+        categories = _parse_list_input(form.get("categories"))
+        branches = _parse_list_input(form.get("branches"))
+        logo_file = form.get("business_logo")
+        if not isinstance(logo_file, UploadFile):
+            logo_file = None
+        user_data = UserCreate(
+            email=email,
+            phone=phone,
+            name=name,
+            password=password,
+            business_name=business_name,
+            categories=categories,
+            branches=branches,
+        )
+        return user_data, logo_file
+
+    payload = await request.json()
+    user_data = UserCreate(**payload)
+    return user_data, None
 
 
 class PasswordResetRequest(BaseModel):
@@ -146,8 +202,9 @@ class UpdateMeRequest(BaseModel):
 
 
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
-def signup(user_data: UserCreate, db: Session = Depends(get_db)):
+async def signup(request: Request, db: Session = Depends(get_db)):
     """Register a new user."""
+    user_data, logo_file = await _parse_signup_request(request)
     email = _normalize_email(str(user_data.email))
     # Check if user already exists
     existing_user = db.query(User).filter(User.email == email).first()
@@ -186,6 +243,20 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
                 detail=str(exc),
             ) from exc
 
+    logo_url: str | None = None
+    if logo_file is not None:
+        if not is_supabase_storage_enabled():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo upload is not configured")
+        if not (logo_file.content_type or "").startswith("image/"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be an image")
+        logo_bytes = await logo_file.read()
+        if len(logo_bytes) > 2 * 1024 * 1024:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be under 2MB")
+        try:
+            logo_url = upload_public_logo(logo_bytes, logo_file.content_type, logo_file.filename)
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
     new_user = User(
         supabase_user_id=supabase_user_id,
         email=email,
@@ -193,6 +264,7 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
         name=user_data.name,
         hashed_password=get_password_hash(user_data.password),
         business_name=user_data.business_name,
+        business_logo_url=logo_url,
         categories=json.dumps(user_data.categories) if user_data.categories else None,
         role="Admin",
         is_active=True,
@@ -305,6 +377,7 @@ def get_current_user_info(
         name=current_user.name,
         role=current_user.role,
         business_name=current_user.business_name,
+        business_logo_url=getattr(current_user, "business_logo_url", None),
         categories=categories,
         branch_id=getattr(current_user, "branch_id", None),
         is_active=current_user.is_active,

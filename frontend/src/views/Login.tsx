@@ -76,6 +76,7 @@ export default function Login({ onLogin }: LoginProps) {
     hasBranches: false,
     branches: [] as string[],
   });
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [categoryInput, setCategoryInput] = useState("");
   const [branchInput, setBranchInput] = useState("");
   const [error, setError] = useState("");
@@ -178,7 +179,7 @@ export default function Login({ onLogin }: LoginProps) {
             address: "",
             taxId: "",
             currency: "GHS",
-            logo: "",
+            logo: userData.business_logo_url || "",
           })
         );
       }
@@ -400,6 +401,19 @@ export default function Login({ onLogin }: LoginProps) {
           return;
         }
 
+        if (logoFile) {
+          if (!logoFile.type.startsWith("image/")) {
+            setError("Logo must be an image file");
+            setLoading(false);
+            return;
+          }
+          if (logoFile.size > 2 * 1024 * 1024) {
+            setError("Logo must be under 2MB");
+            setLoading(false);
+            return;
+          }
+        }
+
         // Validate branches if user said they have branches
         if (formData.hasBranches && formData.branches.length === 0) {
           setError("Please add at least one branch or uncheck 'I have multiple branches'");
@@ -408,18 +422,21 @@ export default function Login({ onLogin }: LoginProps) {
         }
 
         // Call signup API
+        const signupFormData = new FormData();
+        signupFormData.append("email", formData.email.trim());
+        signupFormData.append("phone", formData.phone.trim());
+        signupFormData.append("name", formData.name.trim());
+        signupFormData.append("password", formData.password);
+        signupFormData.append("business_name", formData.businessName.trim());
+        signupFormData.append("categories", JSON.stringify(formData.categories));
+        signupFormData.append("branches", JSON.stringify(formData.hasBranches ? formData.branches : []));
+        if (logoFile) {
+          signupFormData.append("business_logo", logoFile);
+        }
+
         const signupResponse = await fetch(`${API_BASE}/auth/signup`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: formData.email,
-            phone: formData.phone,
-            name: formData.name,
-            password: formData.password,
-            business_name: formData.businessName,
-            categories: formData.categories,
-            branches: formData.hasBranches ? formData.branches : [],
-          }),
+          body: signupFormData,
         });
 
         if (!signupResponse.ok) {
@@ -639,6 +656,25 @@ export default function Login({ onLogin }: LoginProps) {
                     className="input"
                     style={{ padding: 12 }}
                   />
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    Business Logo (optional)
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      setLogoFile(file);
+                    }}
+                    className="input"
+                    style={{ padding: 10 }}
+                  />
+                  {logoFile ? (
+                    <span style={{ fontSize: 12, color: "#64748b" }}>Selected: {logoFile.name}</span>
+                  ) : null}
                 </label>
 
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>

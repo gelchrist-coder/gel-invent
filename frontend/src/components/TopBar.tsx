@@ -7,6 +7,7 @@ type Props = {
   userName?: string;
   userRole?: string;
   businessName?: string;
+  businessLogoUrl?: string | null;
   onLogout?: () => void;
   onNavigate?: (view: string) => void;
   branches?: Branch[];
@@ -20,6 +21,7 @@ export default function TopBar({
   userName = "User",
   userRole = "Admin",
   businessName = "Gel Invent",
+  businessLogoUrl,
   onLogout,
   onNavigate,
   branches,
@@ -58,6 +60,7 @@ export default function TopBar({
   }, [showDropdown]);
 
   const businessLabel = String(businessName || "Gel Invent").trim();
+  const logoSrc = businessLogoUrl || appLogo;
   const initial = userName.charAt(0).toUpperCase();
 
   return (
@@ -113,7 +116,7 @@ export default function TopBar({
         }}
       >
         <img
-          src={appLogo}
+          src={logoSrc}
           alt="Gel Invent"
           style={{
             width: isMobile ? 30 : 36,

@@ -23,6 +23,7 @@ type StoredUser = {
   id?: number;
   name?: string;
   business_name?: string;
+  business_logo_url?: string | null;
   role?: string;
   branch_id?: number | null;
 };
@@ -48,6 +49,7 @@ export default function App() {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [userName, setUserName] = useState(() => readStoredUser()?.name || "User");
   const [businessName, setBusinessName] = useState(() => readStoredUser()?.business_name || "Business");
+  const [businessLogoUrl, setBusinessLogoUrl] = useState(() => readStoredUser()?.business_logo_url || null);
   const [userRole, setUserRole] = useState(() => readStoredUser()?.role || "Admin");
   const [currentUserId, setCurrentUserId] = useState<number | null>(() => readStoredUser()?.id ?? null);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -79,6 +81,7 @@ export default function App() {
     localStorage.removeItem("activeBranchId");
     setUserName("User");
     setBusinessName("Business");
+    setBusinessLogoUrl(null);
     setUserRole("Admin");
     setCurrentUserId(null);
     setBranches([]);
@@ -116,6 +119,7 @@ export default function App() {
           setIsAuthenticated(true);
           setUserName(me.name || "User");
           setBusinessName(me.business_name || "Business");
+          setBusinessLogoUrl(me.business_logo_url ?? null);
           setUserRole(me.role || "Admin");
           setCurrentUserId(me.id || null);
 
@@ -293,6 +297,7 @@ export default function App() {
     if (user) {
       setUserName(user.name || "User");
       setBusinessName(user.business_name || "Business");
+      setBusinessLogoUrl(user.business_logo_url ?? null);
       setUserRole(user.role || "Admin");
       setCurrentUserId(user.id ?? null);
 
@@ -649,6 +654,7 @@ export default function App() {
       onLogout={handleLogout}
       userName={userName}
       businessName={businessName}
+      businessLogoUrl={businessLogoUrl}
       userRole={userRole}
       branches={branches}
       activeBranchId={activeBranchId}

@@ -107,6 +107,7 @@ type Props = {
   children: ReactNode;
   userName?: string;
   businessName?: string;
+  businessLogoUrl?: string | null;
   userRole?: string;
   branches?: Branch[];
   activeBranchId?: number | null;
@@ -120,6 +121,7 @@ export default function Layout({
   children,
   userName = "User",
   businessName = "Business",
+  businessLogoUrl,
   userRole = "Admin",
   branches,
   activeBranchId,
@@ -392,6 +394,7 @@ export default function Layout({
           userName={userName}
           userRole={userRole}
           businessName={businessName}
+          businessLogoUrl={businessLogoUrl}
           onLogout={onLogout}
           onNavigate={onNavigate}
           branches={branches}

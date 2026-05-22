@@ -40,6 +40,7 @@ export default function Sales() {
   const currentUser = localStorage.getItem("user");
   const userData = currentUser ? JSON.parse(currentUser) : null;
   const businessName = userData?.business_name || "Your Business";
+  const businessLogoUrl = userData?.business_logo_url || "";
   const salesPerson = userData?.name || "Sales Person";
 
   const loadData = async () => {
@@ -261,6 +262,10 @@ export default function Sales() {
       })
       .join("");
 
+    const logoHtml = businessLogoUrl
+      ? `<div style="margin-bottom:8px;"><img src="${businessLogoUrl}" alt="Logo" style="height:40px;max-width:140px;object-fit:contain;" /></div>`
+      : "";
+
     const receiptHTML = `
       <!DOCTYPE html>
       <html>
@@ -281,6 +286,7 @@ export default function Sales() {
       </head>
       <body>
         <div class="header">
+          ${logoHtml}
           <div class="business-name">${businessName}</div>
           <div>Sales Receipt</div>
         </div>

@@ -28,6 +28,7 @@ def _ensure_critical_auth_schema_sync() -> None:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_logo_url VARCHAR(512)"))
         conn.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id_unique "
@@ -88,6 +89,7 @@ def _run_startup_migrations_sync() -> None:
             )
         )
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_logo_url VARCHAR(512)"))
         conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
 
         # Product columns added over time
