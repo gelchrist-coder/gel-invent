@@ -217,7 +217,9 @@ export default function Login({ onLogin }: LoginProps) {
       return;
     }
 
-    const loginData = await loginResponse.json();
+    const loginData = await loginResponse.json().catch(() => {
+      throw new Error(`Server returned non-JSON response (status ${loginResponse.status}). The backend URL may be misconfigured.`);
+    });
     localStorage.setItem("token", loginData.access_token);
 
     // Login response now includes user data — no need for a second /auth/me request.
@@ -535,7 +537,13 @@ export default function Login({ onLogin }: LoginProps) {
       }
       setLoading(false);
     } catch (err) {
-      setError("Network error. Please try again.");
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[Login] Unhandled error:", err);
+      if (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("fetch")) {
+        setError("Cannot reach the server. Check your internet connection and try again.");
+      } else {
+        setError(message || "An unexpected error occurred. Please try again.");
+      }
       setLoading(false);
     }
   };
