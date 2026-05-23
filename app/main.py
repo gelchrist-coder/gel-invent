@@ -15,6 +15,7 @@ app = FastAPI(
     title="Gel Invent API",
     version="0.1.0",
     root_path="/api" if os.getenv("VERCEL") else "",
+    redirect_slashes=False,
 )
 
 # Startup migrations can take time (ALTER/UPDATE backfills). Railway healthchecks will fail
