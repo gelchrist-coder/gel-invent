@@ -57,8 +57,9 @@ const dataCache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 30000; // 30 seconds - data is considered fresh
 const inflightGetRequests = new Map<string, Promise<unknown>>();
 const REQUEST_TIMEOUT_MS = 25000;
+const GET_REQUEST_TIMEOUT_MS = 35000;
 const GET_RETRY_ATTEMPTS = 1;
-const STARTUP_REQUEST_TIMEOUT_MS = 35000;
+const STARTUP_REQUEST_TIMEOUT_MS = GET_REQUEST_TIMEOUT_MS;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -73,9 +74,9 @@ export async function resilientFetch(
   init?: RequestInit,
   options?: { timeoutMs?: number; retries?: number },
 ): Promise<Response> {
-  const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
-  const retries = Math.max(0, options?.retries ?? 1);
   const method = (init?.method || "GET").toUpperCase();
+  const timeoutMs = options?.timeoutMs ?? (method === "GET" ? GET_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
+  const retries = Math.max(0, options?.retries ?? 1);
   const maxAttempts = method === "GET" ? retries + 1 : 1;
 
   let response: Response | null = null;
@@ -313,7 +314,7 @@ async function jsonRequestWithBehavior<T>(
         headers,
       },
       {
-        timeoutMs: behavior?.timeoutMs ?? REQUEST_TIMEOUT_MS,
+        timeoutMs: behavior?.timeoutMs ?? (method === "GET" ? GET_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS),
         retries: method === "GET" ? (behavior?.retries ?? GET_RETRY_ATTEMPTS) : 0,
       },
     );
