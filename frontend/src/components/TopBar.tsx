@@ -8,6 +8,7 @@ type Props = {
   userRole?: string;
   businessName?: string;
   businessLogoUrl?: string | null;
+  businessLocation?: string | null;
   onLogout?: () => void;
   onNavigate?: (view: string) => void;
   branches?: Branch[];
@@ -22,6 +23,7 @@ export default function TopBar({
   userRole = "Admin",
   businessName = "Gel Invent",
   businessLogoUrl,
+  businessLocation,
   onLogout,
   onNavigate,
   branches,
@@ -256,6 +258,20 @@ export default function TopBar({
                 zIndex: 1000,
               }}
             >
+              {visibleBranches.length === 1 && businessLocation ? (
+                <div
+                  style={{
+                    marginBottom: 8,
+                    padding: 10,
+                    borderRadius: 10,
+                    border: "1px solid #e2e8f0",
+                    background: "#f8fafc",
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 4, letterSpacing: "0.4px" }}>LOCATION</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#0f172a" }}>{businessLocation}</div>
+                </div>
+              ) : null}
               {visibleBranches.length > 1 && onChangeBranch ? (
                 <div
                   style={{
