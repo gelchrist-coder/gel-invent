@@ -710,22 +710,38 @@ export default function Sales() {
               position: "relative",
               textAlign: "center",
             }}>
-              <div style={{
-                width: 54,
-                height: 54,
-                borderRadius: "50%",
-                border: "2px solid #ddd6fe",
-                color: "#6366f1",
-                margin: "0 auto 10px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: 700,
-                fontSize: 22,
-                lineHeight: 1,
-              }}>
-                POS
-              </div>
+              {businessLogoUrl ? (
+                <img
+                  src={businessLogoUrl}
+                  alt="Business Logo"
+                  style={{
+                    width: 54,
+                    height: 54,
+                    borderRadius: "50%",
+                    objectFit: "cover",
+                    margin: "0 auto 10px",
+                    display: "block",
+                    border: "2px solid #ddd6fe",
+                  }}
+                />
+              ) : (
+                <div style={{
+                  width: 54,
+                  height: 54,
+                  borderRadius: "50%",
+                  border: "2px solid #ddd6fe",
+                  color: "#6366f1",
+                  margin: "0 auto 10px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 700,
+                  fontSize: 22,
+                  lineHeight: 1,
+                }}>
+                  POS
+                </div>
+              )}
               <h2 style={{ fontSize: 28, fontWeight: 800, margin: 0, color: "#0f172a", lineHeight: 1.05 }}>
                 {businessName.toUpperCase()}
               </h2>
