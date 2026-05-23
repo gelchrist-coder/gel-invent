@@ -33,54 +33,6 @@ from app.utils.supabase_storage import is_supabase_storage_enabled, upload_publi
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-RECAPTCHA_MIN_SCORE = float(os.getenv("RECAPTCHA_MIN_SCORE", "0.5"))
-
-
-def _verify_recaptcha(token: str, expected_action: str) -> None:
-    secret = (os.getenv("Secret_Key") or "").strip()
-    if not secret:
-        # reCAPTCHA not configured on the server — skip verification
-        return
-    if not token:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reCAPTCHA token is required")
-
-    payload = urllib.parse.urlencode({
-        "secret": secret,
-        "response": token,
-    }).encode("utf-8")
-
-    request = urllib.request.Request(
-        "https://www.google.com/recaptcha/api/siteverify",
-        data=payload,
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            body = response.read().decode("utf-8")
-            result = json.loads(body)
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="reCAPTCHA verification failed") from exc
-
-    if not result.get("success"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reCAPTCHA verification failed")
-
-    action = str(result.get("action") or "").strip()
-    if action and action != expected_action:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reCAPTCHA action mismatch")
-
-    score = float(result.get("score") or 0)
-    if score < RECAPTCHA_MIN_SCORE:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reCAPTCHA score too low")
-
-
-def _require_recaptcha(request: Request, expected_action: str) -> None:
-    token = (request.headers.get("X-Recaptcha-Token") or "").strip()
-    action = (request.headers.get("X-Recaptcha-Action") or "").strip()
-    if action and action != expected_action:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reCAPTCHA action mismatch")
-    _verify_recaptcha(token, expected_action)
-
 
 def _password_rule_error(password: str) -> Optional[str]:
     if len(password) < 8:
@@ -260,7 +212,6 @@ class UpdateMeRequest(BaseModel):
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
 async def signup(request: Request, db: Session = Depends(get_db)):
     """Register a new user."""
-    _require_recaptcha(request, "signup")
     user_data, logo_file = await _parse_signup_request(request)
     email = _normalize_email(str(user_data.email))
     # Check if user already exists
@@ -369,12 +320,10 @@ async def signup(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 def login(
-    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
     """Login and get access token."""
-    _require_recaptcha(request, "login")
     # username field accepts either email or phone number.
     identifier = (form_data.username or "").strip()
     if not identifier:

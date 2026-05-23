@@ -95,27 +95,6 @@ export default function Login({ onLogin }: LoginProps) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
-  const recaptchaSiteKey = String((import.meta.env as Record<string, unknown>).Site_key || "").trim();
-  const [recaptchaReady, setRecaptchaReady] = useState(false);
-
-  useEffect(() => {
-    if (!recaptchaSiteKey) return;
-
-    const existing = document.getElementById("recaptcha-v3");
-    if (existing) {
-      setRecaptchaReady(true);
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = "recaptcha-v3";
-    script.src = `https://www.google.com/recaptcha/api.js?render=${recaptchaSiteKey}`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => setRecaptchaReady(true);
-    script.onerror = () => setError("Failed to load reCAPTCHA.");
-    document.body.appendChild(script);
-  }, [recaptchaSiteKey]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -169,31 +148,8 @@ export default function Login({ onLogin }: LoginProps) {
     return null;
   };
 
-  const getRecaptchaToken = async (action: "login" | "signup"): Promise<string> => {
-    if (!recaptchaSiteKey) {
-      // reCAPTCHA not configured — proceed without a token
-      return "";
-    }
-
-    const grecaptcha = (window as unknown as { grecaptcha?: { ready: (cb: () => void) => void; execute: (key: string, options: { action: string }) => Promise<string>; } }).grecaptcha;
-    if (!grecaptcha) {
-      // Script not loaded — proceed without a token
-      return "";
-    }
-
-    if (!recaptchaReady) {
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
-    }
-
-    return new Promise<string>((resolve, reject) => {
-      try {
-        grecaptcha.ready(() => {
-          grecaptcha.execute(recaptchaSiteKey, { action }).then(resolve).catch(reject);
-        });
-      } catch (err) {
-        reject(err);
-      }
-    });
+  const getRecaptchaToken = async (_action: "login" | "signup"): Promise<string> => {
+    return "";
   };
 
   const performLogin = async (identifier: string, password: string, recaptchaToken: string) => {
@@ -208,10 +164,6 @@ export default function Login({ onLogin }: LoginProps) {
     try {
       loginResponse = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
-        headers: {
-          "X-Recaptcha-Token": recaptchaToken,
-          "X-Recaptcha-Action": "login",
-        },
         body: loginFormData,
         signal: controller.signal,
       });
@@ -505,7 +457,6 @@ export default function Login({ onLogin }: LoginProps) {
         }
 
         // Call signup API
-        const recaptchaToken = await getRecaptchaToken("signup");
         const signupFormData = new FormData();
         signupFormData.append("email", formData.email.trim());
         signupFormData.append("phone", formData.phone.trim());
@@ -521,10 +472,6 @@ export default function Login({ onLogin }: LoginProps) {
 
         const signupResponse = await fetch(`${API_BASE}/auth/signup`, {
           method: "POST",
-          headers: {
-            "X-Recaptcha-Token": recaptchaToken,
-            "X-Recaptcha-Action": "signup",
-          },
           body: signupFormData,
         });
 
@@ -536,8 +483,7 @@ export default function Login({ onLogin }: LoginProps) {
         }
 
         setInfo("Account created successfully.");
-        const loginToken = await getRecaptchaToken("login");
-        await performLogin(formData.email, formData.password, loginToken);
+        await performLogin(formData.email, formData.password, "");
       } else {
         // Sign in validation
         if (!formData.email.trim() || !formData.password.trim()) {
@@ -546,8 +492,7 @@ export default function Login({ onLogin }: LoginProps) {
           return;
         }
 
-        const loginToken = await getRecaptchaToken("login");
-        await performLogin(formData.email, formData.password, loginToken);
+        await performLogin(formData.email, formData.password, "");
       }
       setLoading(false);
     } catch (err) {
