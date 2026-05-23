@@ -9,11 +9,11 @@ from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Product, StockMovement, Sale, User, SystemSettings, Branch
+from ..models import Product, StockMovement, Sale, User, SystemSettings, Branch, Supplier, Purchase
 from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
-from app.utils.movement_reasons import classify_movement
+from app.utils.movement_reasons import classify_movement, validate_reason_and_change
 from app.utils.expiry import get_batch_balances, writeoff_expired_batches
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -41,6 +41,191 @@ class BranchTransferCreate(BaseModel):
     to_branch_id: int
     quantity: Decimal = Field(gt=0)
     notes: str | None = None
+
+
+@router.get("/suppliers", response_model=list[schemas.SupplierRead])
+def list_suppliers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    return db.scalars(
+        select(Supplier)
+        .where(
+            Supplier.user_id.in_(tenant_user_ids),
+            Supplier.is_active.is_(True),
+        )
+        .order_by(func.lower(Supplier.name), Supplier.id.asc())
+    ).all()
+
+
+@router.post("/suppliers", response_model=schemas.SupplierRead, status_code=201)
+def create_supplier(
+    payload: schemas.SupplierCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    normalized_name = payload.name.strip().lower()
+
+    existing = db.scalar(
+        select(Supplier).where(
+            func.lower(func.trim(Supplier.name)) == normalized_name,
+            Supplier.user_id.in_(tenant_user_ids),
+            Supplier.is_active.is_(True),
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="Supplier already exists")
+
+    supplier = Supplier(user_id=current_user.id, **payload.model_dump())
+    db.add(supplier)
+    db.commit()
+    db.refresh(supplier)
+    return supplier
+
+
+@router.get("/purchases", response_model=list[schemas.PurchaseRead])
+def list_purchases(
+    limit: int = Query(default=40, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    purchases = db.scalars(
+        select(Purchase)
+        .where(
+            Purchase.user_id.in_(tenant_user_ids),
+            Purchase.branch_id == active_branch_id,
+        )
+        .order_by(Purchase.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    creator_ids = sorted({p.user_id for p in purchases})
+    creators = (
+        db.execute(select(User.id, User.name).where(User.id.in_(creator_ids))).all()
+        if creator_ids
+        else []
+    )
+    creator_name_by_id = {int(uid): name for uid, name in creators}
+
+    for purchase in purchases:
+        purchase.created_by_name = creator_name_by_id.get(purchase.user_id)
+
+    return purchases
+
+
+@router.post("/purchases", response_model=schemas.PurchaseRead, status_code=201)
+def create_purchase(
+    payload: schemas.PurchaseCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+
+    product = db.scalar(
+        select(Product).where(
+            Product.id == payload.product_id,
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        )
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    supplier: Supplier | None = None
+    if payload.supplier_id is not None:
+        supplier = db.scalar(
+            select(Supplier).where(
+                Supplier.id == payload.supplier_id,
+                Supplier.user_id.in_(tenant_user_ids),
+                Supplier.is_active.is_(True),
+            )
+        )
+        if not supplier:
+            raise HTTPException(status_code=404, detail="Supplier not found")
+
+    supplier_name = supplier.name if supplier else (payload.supplier_name or "").strip()
+    if not supplier_name:
+        raise HTTPException(status_code=400, detail="Supplier is required")
+
+    if supplier is None:
+        supplier = db.scalar(
+            select(Supplier).where(
+                func.lower(func.trim(Supplier.name)) == supplier_name.lower(),
+                Supplier.user_id.in_(tenant_user_ids),
+                Supplier.is_active.is_(True),
+            )
+        )
+        if supplier:
+            supplier_name = supplier.name
+
+    if product.expiry_date is not None and payload.expiry_date is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Expiry date is required when purchasing stock for a perishable product",
+        )
+
+    existing_movements = db.scalar(
+        select(func.count(StockMovement.id)).where(
+            StockMovement.product_id == product.id,
+            StockMovement.user_id.in_(tenant_user_ids),
+            StockMovement.branch_id == active_branch_id,
+        )
+    )
+    movement_reason = "Restock" if int(existing_movements or 0) > 0 else "New Stock"
+    quantity = Decimal(payload.quantity)
+    rule_error = validate_reason_and_change(movement_reason, quantity)
+    if rule_error:
+        raise HTTPException(status_code=400, detail=rule_error)
+
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    batch_number = f"BATCH-{product.sku}-{timestamp}"
+    movement = StockMovement(
+        product_id=product.id,
+        user_id=current_user.id,
+        branch_id=active_branch_id,
+        change=quantity,
+        reason=movement_reason,
+        batch_number=batch_number,
+        expiry_date=payload.expiry_date,
+        unit_cost_price=payload.unit_cost_price,
+        unit_selling_price=payload.unit_selling_price if payload.unit_selling_price is not None else product.selling_price,
+    )
+    db.add(movement)
+    db.flush()
+
+    product.supplier = supplier_name
+    product.cost_price = payload.unit_cost_price
+    if payload.unit_selling_price is not None:
+        product.selling_price = payload.unit_selling_price
+
+    total_cost = (Decimal(payload.quantity) * Decimal(payload.unit_cost_price)).quantize(Decimal("0.01"))
+    purchase = Purchase(
+        user_id=current_user.id,
+        branch_id=active_branch_id,
+        supplier_id=supplier.id if supplier else None,
+        product_id=product.id,
+        stock_movement_id=movement.id,
+        supplier_name=supplier_name,
+        product_name=product.name,
+        product_sku=product.sku,
+        invoice_number=(payload.invoice_number or "").strip() or None,
+        quantity=payload.quantity,
+        unit_cost_price=payload.unit_cost_price,
+        unit_selling_price=payload.unit_selling_price,
+        total_cost=total_cost,
+        purchase_date=payload.purchase_date or date.today(),
+        notes=(payload.notes or "").strip() or None,
+    )
+    db.add(purchase)
+    db.commit()
+    db.refresh(purchase)
+    purchase.created_by_name = current_user.name
+    return purchase
 
 
 @router.post("/transfers")
@@ -121,6 +306,7 @@ def transfer_stock_between_branches(
             unit=source_product.unit,
             pack_size=source_product.pack_size,
             category=source_product.category,
+            supplier=source_product.supplier,
             expiry_date=source_product.expiry_date,
             cost_price=source_product.cost_price,
             pack_cost_price=source_product.pack_cost_price,

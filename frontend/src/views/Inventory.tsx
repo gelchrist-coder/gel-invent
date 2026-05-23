@@ -4,12 +4,13 @@ import { createBranchTransfer, createMovement, deleteProduct, fetchAllMovements,
 import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
 import MovementHistory from "../components/MovementHistory";
+import PurchasingPanel from "../components/PurchasingPanel";
 import { useExpiryTracking } from "../settings";
 import type { Branch, Product } from "../types";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
-type InventoryTab = "overview" | "alerts" | "actions" | "history";
+type InventoryTab = "overview" | "alerts" | "actions" | "purchasing" | "history";
 
 export default function Inventory() {
   // Check if current user is Admin
@@ -304,6 +305,11 @@ export default function Inventory() {
       id: "actions",
       label: "Stock Actions",
       description: "Add stock, record losses, transfer stock, or delete a product.",
+    },
+    {
+      id: "purchasing",
+      label: "Purchasing",
+      description: "Create suppliers, record stock purchases, and review recent buying activity.",
     },
     {
       id: "history",
@@ -739,6 +745,14 @@ export default function Inventory() {
           </button>
         </div>
       </div>
+      ) : null}
+
+      {activeTab === "purchasing" ? (
+        <PurchasingPanel
+          products={products}
+          usesExpiryTracking={usesExpiryTracking}
+          onPurchaseRecorded={loadData}
+        />
       ) : null}
 
       {activeTab === "history" ? (

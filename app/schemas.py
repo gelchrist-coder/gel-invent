@@ -34,6 +34,62 @@ class ProductRead(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SupplierBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    contact_person: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=50)
+    email: str | None = Field(default=None, max_length=255)
+    address: str | None = Field(default=None, max_length=1000)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class SupplierCreate(SupplierBase):
+    pass
+
+
+class SupplierRead(SupplierBase):
+    id: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PurchaseCreate(BaseModel):
+    product_id: int = Field(..., gt=0)
+    supplier_id: int | None = Field(default=None, gt=0)
+    supplier_name: str | None = Field(default=None, max_length=255)
+    invoice_number: str | None = Field(default=None, max_length=100)
+    quantity: Decimal = Field(..., gt=0, decimal_places=2)
+    unit_cost_price: Decimal = Field(..., ge=0, decimal_places=2)
+    unit_selling_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    purchase_date: date | None = Field(default=None)
+    expiry_date: date | None = Field(default=None)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class PurchaseRead(BaseModel):
+    id: int
+    supplier_id: int | None = None
+    supplier_name: str
+    product_id: int | None = None
+    product_name: str
+    product_sku: str
+    stock_movement_id: int | None = None
+    invoice_number: str | None = None
+    quantity: Decimal
+    unit_cost_price: Decimal
+    unit_selling_price: Decimal | None = None
+    total_cost: Decimal
+    purchase_date: date | None = None
+    notes: str | None = None
+    created_at: datetime
+    created_by_name: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class StockMovementBase(BaseModel):
     change: Decimal = Field(..., decimal_places=2)
     reason: str = Field(default="adjustment", max_length=255)

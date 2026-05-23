@@ -87,6 +87,24 @@ class Product(Base):
     )
 
 
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    contact_person: Mapped[str | None] = mapped_column(String(255), default=None)
+    phone: Mapped[str | None] = mapped_column(String(50), default=None)
+    email: Mapped[str | None] = mapped_column(String(255), default=None)
+    address: Mapped[str | None] = mapped_column(Text, default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class StockMovement(Base):
     __tablename__ = "stock_movements"
 
@@ -113,6 +131,34 @@ class StockMovement(Base):
 
     product: Mapped[Product] = relationship(back_populates="movements")
     sale: Mapped["Sale | None"] = relationship()
+
+
+class Purchase(Base):
+    __tablename__ = "purchases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True, default=None)
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), index=True, default=None)
+    stock_movement_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stock_movements.id", ondelete="SET NULL"), index=True, default=None
+    )
+    supplier_name: Mapped[str] = mapped_column(String(255))
+    product_name: Mapped[str] = mapped_column(String(255))
+    product_sku: Mapped[str] = mapped_column(String(64))
+    invoice_number: Mapped[str | None] = mapped_column(String(100), default=None)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    unit_cost_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    unit_selling_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    purchase_date: Mapped[datetime | None] = mapped_column(Date, default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    product: Mapped[Product | None] = relationship()
+    supplier: Mapped[Supplier | None] = relationship()
+    stock_movement: Mapped[StockMovement | None] = relationship()
 
 
 class Sale(Base):

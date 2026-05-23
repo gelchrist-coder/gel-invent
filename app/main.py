@@ -68,6 +68,17 @@ def _ensure_critical_product_schema_sync() -> None:
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
 
 
+def _ensure_critical_purchasing_schema_sync() -> None:
+    """Create purchasing tables used by inventory supplier workflows.
+
+    These are lightweight `checkfirst` creates for new tables only, keeping the
+    first supplier/purchase requests safe in serverless environments where full
+    startup migrations are disabled by default.
+    """
+    models.Supplier.__table__.create(bind=engine, checkfirst=True)
+    models.Purchase.__table__.create(bind=engine, checkfirst=True)
+
+
 def _should_run_startup_migrations() -> bool:
     """Control runtime schema patches/backfills.
 
@@ -435,6 +446,17 @@ async def on_startup() -> None:
         print("⚠️ Critical product schema sync skipped — timed out after 5 s")
     except Exception as e:
         print(f"⚠️ Could not verify critical product schema: {type(e).__name__}: {e}")
+
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(_ensure_critical_purchasing_schema_sync),
+            timeout=5.0,
+        )
+        print("✅ Critical purchasing schema verified")
+    except asyncio.TimeoutError:
+        print("⚠️ Critical purchasing schema sync skipped — timed out after 5 s")
+    except Exception as e:
+        print(f"⚠️ Could not verify critical purchasing schema: {type(e).__name__}: {e}")
 
     if not _should_run_startup_migrations():
         print("ℹ️ Startup migrations skipped (RUN_STARTUP_MIGRATIONS disabled)")

@@ -96,3 +96,57 @@ export type Branch = {
   name: string;
   is_active: boolean;
 };
+
+export type Supplier = {
+  id: number;
+  name: string;
+  contact_person?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  notes?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NewSupplier = {
+  name: string;
+  contact_person?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  notes?: string | null;
+};
+
+export type Purchase = {
+  id: number;
+  supplier_id?: number | null;
+  supplier_name: string;
+  product_id?: number | null;
+  product_name: string;
+  product_sku: string;
+  stock_movement_id?: number | null;
+  invoice_number?: string | null;
+  quantity: number;
+  unit_cost_price: number;
+  unit_selling_price?: number | null;
+  total_cost: number;
+  purchase_date?: string | null;
+  notes?: string | null;
+  created_at: string;
+  created_by_name?: string | null;
+};
+
+export type NewPurchase = {
+  product_id: number;
+  supplier_id?: number | null;
+  supplier_name?: string | null;
+  invoice_number?: string | null;
+  quantity: number;
+  unit_cost_price: number;
+  unit_selling_price?: number | null;
+  purchase_date?: string | null;
+  expiry_date?: string | null;
+  notes?: string | null;
+};
