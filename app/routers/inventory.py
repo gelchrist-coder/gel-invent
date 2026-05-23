@@ -9,6 +9,7 @@ from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from .. import schemas
 from ..models import Product, StockMovement, Sale, User, SystemSettings, Branch, Supplier, Purchase
 from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
