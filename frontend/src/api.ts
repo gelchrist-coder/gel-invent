@@ -13,7 +13,9 @@ function resolveApiBaseUrl(): string {
     return "/api";
   }
 
-  return configured;
+  // Strip trailing /api if someone included it in the URL — backend routes
+  // are mounted at /products, /sales etc., not /api/products, /api/sales.
+  return configured.replace(/\/api\/?$/, "");
 }
 
 // API base URL (configure via VITE_API_URL on Vercel/Netlify/etc)
