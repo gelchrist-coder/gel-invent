@@ -71,6 +71,12 @@ _critical_schema_ready = False
 _critical_schema_lock = threading.Lock()
 
 
+def mark_critical_schema_ready() -> None:
+    """Mark auth-critical runtime schema as already verified for this process."""
+    global _critical_schema_ready
+    _critical_schema_ready = True
+
+
 def ensure_critical_schema() -> None:
     """Best-effort runtime schema guard for columns queried on every request.
 

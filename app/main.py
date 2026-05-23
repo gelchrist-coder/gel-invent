@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .database import Base, engine
+from .database import Base, engine, mark_critical_schema_ready
 from .auth import get_current_active_user
 from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns
 from . import models
@@ -430,6 +430,7 @@ async def on_startup() -> None:
             asyncio.to_thread(_ensure_critical_auth_schema_sync),
             timeout=5.0,
         )
+        mark_critical_schema_ready()
         print("✅ Critical auth schema verified")
     except asyncio.TimeoutError:
         print("⚠️ Critical auth schema sync skipped — timed out after 5 s")

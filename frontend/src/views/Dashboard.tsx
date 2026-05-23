@@ -88,6 +88,8 @@ export default function Dashboard({ onNavigate }: Props) {
       if (isAdmin) {
         setSalesForTrend(salesData as TrendSale[]);
       }
+    } catch (error) {
+      console.warn("Dashboard refresh skipped due to temporary error:", error);
     } finally {
       setLoading(false);
     }
@@ -141,12 +143,14 @@ export default function Dashboard({ onNavigate }: Props) {
         if (isAdmin) {
           setSalesForTrend(salesData as TrendSale[]);
         }
+      } catch (error) {
+        console.warn("Dashboard startup load degraded due to temporary error:", error);
       } finally {
         setLoading(false);
         setDashboardLoading(false);
       }
     };
-    loadData();
+    void loadData();
   }, [token, isAdmin]);
 
   useEffect(() => {
