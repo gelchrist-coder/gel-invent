@@ -11,7 +11,11 @@ from .auth import get_current_active_user
 from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns
 from . import models
 
-app = FastAPI(title="Gel Invent API", version="0.1.0")
+app = FastAPI(
+    title="Gel Invent API",
+    version="0.1.0",
+    root_path="/api" if os.getenv("VERCEL") else "",
+)
 
 # Startup migrations can take time (ALTER/UPDATE backfills). Railway healthchecks will fail
 # if we block application startup. Run them in the background instead.
