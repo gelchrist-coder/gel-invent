@@ -141,6 +141,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [recaptchaLoadError, setRecaptchaLoadError] = useState("");
   const recaptchaContainerRef = useRef<HTMLDivElement | null>(null);
   const recaptchaWidgetIdRef = useRef<number | null>(null);
+  const authWarmupPromiseRef = useRef<Promise<void> | null>(null);
 
   const resetRecaptcha = () => {
     setRecaptchaToken("");
@@ -149,12 +150,32 @@ export default function Login({ onLogin }: LoginProps) {
     }
   };
 
-  // Warm up the serverless backend as soon as the login page loads so the
-  // cold-start delay doesn't hit the user mid-login.
-  useEffect(() => {
+  const warmAuthBackend = (force = false): Promise<void> => {
+    if (!force && authWarmupPromiseRef.current) {
+      return authWarmupPromiseRef.current;
+    }
+
     const controller = new AbortController();
-    fetch(`${API_BASE}/health`, { signal: controller.signal }).catch(() => {});
-    return () => controller.abort();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+    const request = fetch(`${API_BASE}/health/db?ts=${Date.now()}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(() => undefined)
+      .catch(() => undefined)
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+        authWarmupPromiseRef.current = null;
+      });
+
+    authWarmupPromiseRef.current = request;
+    return request;
+  };
+
+  // Warm the DB-backed auth path as soon as the login page loads so the
+  // cold-start delay doesn't hit the first credential check.
+  useEffect(() => {
+    void warmAuthBackend();
   }, []);
 
   useEffect(() => {
@@ -342,17 +363,17 @@ export default function Login({ onLogin }: LoginProps) {
       // Retry once on server errors (cold-start 502/503/504)
       if (loginResponse.status >= 500) {
         setInfo("Server is warming up — retrying…");
-        await new Promise((resolve) => window.setTimeout(resolve, 2500));
-        loginResponse = await attemptLoginRequest(identifier, password, 35000, captchaToken);
+        await warmAuthBackend(true);
+        loginResponse = await attemptLoginRequest(identifier, password, 45000, captchaToken);
         setInfo("");
       }
     } catch (err) {
       if (err instanceof Error && err.message === "__timeout__") {
-        // Cold-start timeout — retry once automatically
+        // Cold-start timeout — warm the DB path, then retry once automatically.
         setInfo("Server is warming up — retrying…");
-        await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        await warmAuthBackend(true);
         try {
-          loginResponse = await attemptLoginRequest(identifier, password, 40000, captchaToken);
+          loginResponse = await attemptLoginRequest(identifier, password, 45000, captchaToken);
           setInfo("");
         } catch (retryErr) {
           setInfo("");
