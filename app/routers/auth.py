@@ -55,6 +55,7 @@ class UserCreate(BaseModel):
     name: str
     password: str
     business_name: Optional[str] = None
+    business_location: Optional[str] = None
     business_logo_url: Optional[str] = None
     categories: Optional[list[str]] = None
     branches: Optional[list[str]] = None  # Optional list of branch names
@@ -93,6 +94,23 @@ def _parse_categories(value: Optional[str]) -> Optional[list[str]]:
     # Fallback: treat as comma-separated
     cleaned = [v.strip() for v in value.split(",") if v.strip()]
     return cleaned or None
+
+
+def _ordered_branch_names(primary_location: Optional[str], branches: Optional[list[str]]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    for raw_name in [primary_location, *(branches or [])]:
+        name = str(raw_name or "").strip()
+        if not name:
+            continue
+        normalized = name.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(name)
+
+    return ordered
 
 
 def _serialize_user(user: User) -> UserResponse:
@@ -155,6 +173,7 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
         name = str(form.get("name") or "").strip()
         password = str(form.get("password") or "")
         business_name = str(form.get("business_name") or "").strip() or None
+        business_location = str(form.get("business_location") or "").strip() or None
         categories = _parse_list_input(form.get("categories"))
         branches = _parse_list_input(form.get("branches"))
         logo_file = form.get("business_logo")
@@ -166,6 +185,7 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
             name=name,
             password=password,
             business_name=business_name,
+            business_location=business_location,
             categories=categories,
             branches=branches,
         )
@@ -287,19 +307,15 @@ async def signup(request: Request, db: Session = Depends(get_db)):
 
     db.refresh(new_user)
 
-    # Create branches based on signup input
-    if user_data.branches and len(user_data.branches) > 0:
-        # User specified branches - create them
-        for branch_name in user_data.branches:
-            branch = Branch(owner_user_id=new_user.id, name=branch_name.strip(), is_active=True)
-            db.add(branch)
-        db.commit()
-    else:
-        # No branches specified - create a single default branch using business name
-        default_name = user_data.business_name.strip() if user_data.business_name else "Main Store"
-        branch = Branch(owner_user_id=new_user.id, name=default_name, is_active=True)
+    # The requested business location becomes the first branch name.
+    branch_names = _ordered_branch_names(user_data.business_location, user_data.branches)
+    if not branch_names:
+        branch_names = ["Main Store"]
+
+    for branch_name in branch_names:
+        branch = Branch(owner_user_id=new_user.id, name=branch_name, is_active=True)
         db.add(branch)
-        db.commit()
+    db.commit()
 
     # Create SystemSettings with default values
     settings = SystemSettings(

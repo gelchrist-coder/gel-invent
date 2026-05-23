@@ -72,6 +72,7 @@ export default function Login({ onLogin }: LoginProps) {
     password: "",
     confirmPassword: "",
     businessName: "",
+    businessLocation: "",
     categories: [] as string[],
     hasBranches: false,
     branches: [] as string[],
@@ -326,6 +327,10 @@ export default function Login({ onLogin }: LoginProps) {
   const addBranch = (raw: string) => {
     const value = raw.trim();
     if (!value) return;
+    if (formData.businessLocation.trim().toLowerCase() === value.toLowerCase()) {
+      setBranchInput("");
+      return;
+    }
     if (formData.branches.some((b) => b.toLowerCase() === value.toLowerCase())) return;
     setFormData({
       ...formData,
@@ -457,6 +462,11 @@ export default function Login({ onLogin }: LoginProps) {
           setLoading(false);
           return;
         }
+        if (!formData.businessLocation.trim()) {
+          setError("Please enter your primary business location");
+          setLoading(false);
+          return;
+        }
         if (formData.password !== formData.confirmPassword) {
           setError("Passwords do not match");
           setLoading(false);
@@ -484,7 +494,7 @@ export default function Login({ onLogin }: LoginProps) {
 
         // Validate branches if user said they have branches
         if (formData.hasBranches && formData.branches.length === 0) {
-          setError("Please add at least one branch or uncheck 'I have multiple branches'");
+          setError("Please add at least one additional branch/location or uncheck 'I have multiple branches'");
           setLoading(false);
           return;
         }
@@ -496,6 +506,7 @@ export default function Login({ onLogin }: LoginProps) {
         signupFormData.append("name", formData.name.trim());
         signupFormData.append("password", formData.password);
         signupFormData.append("business_name", formData.businessName.trim());
+        signupFormData.append("business_location", formData.businessLocation.trim());
         signupFormData.append("categories", JSON.stringify(formData.categories));
         signupFormData.append("branches", JSON.stringify(formData.hasBranches ? formData.branches : []));
         if (logoFile) {
@@ -734,6 +745,24 @@ export default function Login({ onLogin }: LoginProps) {
 
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    Primary Business Location *
+                  </span>
+                  <input
+                    type="text"
+                    value={formData.businessLocation}
+                    onChange={(e) => setFormData({ ...formData, businessLocation: e.target.value })}
+                    placeholder="e.g., Accra Main Store"
+                    required={isSignUp}
+                    className="input"
+                    style={{ padding: 12 }}
+                  />
+                  <span style={{ fontSize: 12, color: "#6b7280" }}>
+                    This becomes your first branch name.
+                  </span>
+                </label>
+
+                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                     Business Logo (optional)
                   </span>
                   <input
@@ -907,7 +936,7 @@ export default function Login({ onLogin }: LoginProps) {
                       </button>
                     </div>
                     <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-                      Press Enter or click Add for each branch
+                      Add only the extra branch names. Your primary business location is used as the first branch automatically.
                     </p>
 
                     {formData.branches.length > 0 && (
