@@ -39,7 +39,8 @@ RECAPTCHA_MIN_SCORE = float(os.getenv("RECAPTCHA_MIN_SCORE", "0.5"))
 def _verify_recaptcha(token: str, expected_action: str) -> None:
     secret = (os.getenv("Secret_Key") or "").strip()
     if not secret:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reCAPTCHA is not configured")
+        # reCAPTCHA not configured on the server — skip verification
+        return
     if not token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reCAPTCHA token is required")
 

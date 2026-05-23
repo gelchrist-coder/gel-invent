@@ -169,16 +169,16 @@ export default function Login({ onLogin }: LoginProps) {
     return null;
   };
 
-  const getRecaptchaToken = async (action: "login" | "signup") => {
+  const getRecaptchaToken = async (action: "login" | "signup"): Promise<string> => {
     if (!recaptchaSiteKey) {
-      setError("reCAPTCHA is not configured.");
-      throw new Error("recaptcha_missing");
+      // reCAPTCHA not configured — proceed without a token
+      return "";
     }
 
     const grecaptcha = (window as unknown as { grecaptcha?: { ready: (cb: () => void) => void; execute: (key: string, options: { action: string }) => Promise<string>; } }).grecaptcha;
     if (!grecaptcha) {
-      setError("reCAPTCHA failed to load.");
-      throw new Error("recaptcha_unavailable");
+      // Script not loaded — proceed without a token
+      return "";
     }
 
     if (!recaptchaReady) {
