@@ -6,6 +6,7 @@ export type Product = {
   unit: string;
   pack_size?: number | null;
   category?: string | null;
+  supplier?: string | null;
   expiry_date?: string | null;
   cost_price?: number | null;
   pack_cost_price?: number | null;
@@ -36,6 +37,7 @@ export type NewProduct = {
   unit?: string;
   pack_size?: number | null;
   category?: string | null;
+  supplier?: string | null;
   expiry_date?: string | null;
   cost_price?: number | null;
   pack_cost_price?: number | null;

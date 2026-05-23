@@ -100,6 +100,7 @@ def _run_startup_migrations_sync() -> None:
         # Product columns added over time
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_size INTEGER"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(100)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier VARCHAR(255)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS expiry_date DATE"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_cost_price NUMERIC(10,2)"))

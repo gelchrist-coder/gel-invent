@@ -39,7 +39,6 @@ export default function ProductForm({
     initialStock?: string;
     packSize?: string;
     reorderLevel?: string;
-    supplier?: string;
     status?: string;
   }>({ 
     sku: "", 
@@ -128,6 +127,7 @@ export default function ProductForm({
         unit: form.unit || "pcs",
         pack_size: form.packSize ? parseInt(form.packSize) : undefined,
         category: form.category || undefined,
+        supplier: form.supplier?.trim() || undefined,
         expiry_date: isPerishable ? (form.expiry_date || undefined) : undefined,
         cost_price: form.costPrice ? parseFloat(form.costPrice) : undefined,
         pack_cost_price: form.packCostPrice ? parseFloat(form.packCostPrice) : undefined,

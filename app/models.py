@@ -69,6 +69,7 @@ class Product(Base):
     unit: Mapped[str] = mapped_column(String(32), default="unit")
     pack_size: Mapped[int | None] = mapped_column(Integer, default=None)
     category: Mapped[str | None] = mapped_column(String(100), default=None)
+    supplier: Mapped[str | None] = mapped_column(String(255), default=None)
     expiry_date: Mapped[datetime | None] = mapped_column(Date, default=None)
     cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     pack_cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)

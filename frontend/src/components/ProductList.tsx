@@ -94,6 +94,7 @@ export default function ProductList({
       description: product.description,
       unit: product.unit,
       category: product.category,
+      supplier: product.supplier,
       expiry_date: product.expiry_date,
       cost_price: product.cost_price,
       pack_cost_price: product.pack_cost_price,
@@ -281,6 +282,7 @@ export default function ProductList({
     const matchesSearch = !searchTerm || 
       p.name.toLowerCase().includes(searchLower) ||
       p.sku.toLowerCase().includes(searchLower) ||
+      (p.supplier && p.supplier.toLowerCase().includes(searchLower)) ||
       (p.description && p.description.toLowerCase().includes(searchLower));
 
     // Category filter
@@ -393,6 +395,19 @@ export default function ProductList({
                     <option key={cat} value={cat} />
                   ))}
                 </datalist>
+              </label>
+              <label>
+                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                  Supplier
+                </span>
+                <input
+                  className="input"
+                  type="text"
+                  value={editForm.supplier || ""}
+                  onChange={(e) => setEditForm({ ...editForm, supplier: e.target.value || null })}
+                  placeholder="Supplier name or company"
+                  style={{ fontSize: 14, padding: 10 }}
+                />
               </label>
               <label>
                 <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
@@ -902,6 +917,9 @@ export default function ProductList({
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", marginBottom: 2 }}>{p.name}</div>
                     <div style={{ fontSize: 12, color: "#6b7280" }}>SKU: {p.sku}</div>
+                    {p.supplier ? (
+                      <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>Supplier: {p.supplier}</div>
+                    ) : null}
                   </div>
                   <span
                     style={{
@@ -1062,7 +1080,12 @@ export default function ProductList({
                   onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
                   >
                     <td style={{ padding: "12px", fontWeight: 500, color: "#111827" }}>
-                      {p.name}
+                      <div>{p.name}</div>
+                      {p.supplier ? (
+                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                          Supplier: {p.supplier}
+                        </div>
+                      ) : null}
                     </td>
                     <td style={{ padding: "12px", color: "#6b7280", fontFamily: "monospace", fontSize: 13 }}>
                       {p.sku}

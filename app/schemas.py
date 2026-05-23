@@ -11,6 +11,7 @@ class ProductBase(BaseModel):
     unit: str = Field(default="unit", min_length=1, max_length=32)
     pack_size: int | None = Field(default=None)
     category: str | None = Field(default=None, max_length=100)
+    supplier: str | None = Field(default=None, max_length=255)
     expiry_date: date | None = Field(default=None)
     cost_price: Decimal | None = Field(default=None, decimal_places=2)
     pack_cost_price: Decimal | None = Field(default=None, decimal_places=2)

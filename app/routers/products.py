@@ -24,6 +24,7 @@ class ProductUpdate(BaseModel):
     description: Optional[str] = None
     unit: Optional[str] = None
     category: Optional[str] = None
+    supplier: Optional[str] = None
     expiry_date: Optional[date] = None
     cost_price: Optional[Decimal] = None
     pack_cost_price: Optional[Decimal] = None
