@@ -5,6 +5,7 @@ import type { Product, Purchase, Supplier } from "../types";
 
 type Props = {
   products: Product[];
+  initialProductId?: number | null;
   usesExpiryTracking?: boolean;
   onPurchaseRecorded?: () => Promise<void> | void;
 };
@@ -32,6 +33,7 @@ function trimOrUndefined(value: string): string | undefined {
 
 export default function PurchasingPanel({
   products,
+  initialProductId = null,
   usesExpiryTracking = true,
   onPurchaseRecorded,
 }: Props) {
@@ -82,12 +84,15 @@ export default function PurchasingPanel({
     }
 
     setSelectedProductId((prev) => {
+      if (initialProductId != null && products.some((product) => product.id === initialProductId)) {
+        return initialProductId;
+      }
       if (prev != null && products.some((product) => product.id === prev)) {
         return prev;
       }
       return products[0].id;
     });
-  }, [products]);
+  }, [initialProductId, products]);
 
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === selectedProductId) ?? null,
@@ -378,7 +383,7 @@ export default function PurchasingPanel({
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Record Purchase</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-              Record supplier purchases and turn them into stock-in with cost details.
+              Use this for supplier-backed restocks so stock-in stays linked to supplier, invoice, and cost details.
             </p>
           </div>
 

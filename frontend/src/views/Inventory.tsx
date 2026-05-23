@@ -303,13 +303,13 @@ export default function Inventory() {
     },
     {
       id: "actions",
-      label: "Stock Actions",
-      description: "Add stock, record losses, transfer stock, or delete a product.",
+      label: "Quick Adjustments",
+      description: "Make manual stock corrections, record losses, transfer stock, or delete a product.",
     },
     {
       id: "purchasing",
       label: "Purchasing",
-      description: "Create suppliers, record stock purchases, and review recent buying activity.",
+      description: "Use this for supplier-backed restocks, invoices, and recent buying activity.",
     },
     {
       id: "history",
@@ -414,10 +414,47 @@ export default function Inventory() {
       {activeTab === "actions" ? (
       <div className="card" style={{ marginBottom: 24 }}>
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Stock Actions</h3>
+          <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Quick Stock Adjustments</h3>
           <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-            Select a product, choose what you want to do, then save. Every action is recorded in movement history and reports.
+            Use this for manual corrections and internal stock changes. For supplier-backed restocks, use Purchasing so supplier, invoice, and purchase history are captured.
           </p>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+            marginBottom: 16,
+            padding: 14,
+            borderRadius: 12,
+            border: "1px solid #bfdbfe",
+            background: "linear-gradient(180deg, #eff6ff, #dbeafe)",
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8", marginBottom: 4 }}>Restocking from a supplier?</div>
+            <p style={{ margin: 0, fontSize: 13, color: "#1e3a8a" }}>
+              Record supplier deliveries in Purchasing so the stock increase also keeps invoice, supplier, and cost details.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab("purchasing")}
+            style={{
+              padding: "9px 14px",
+              borderRadius: 8,
+              border: "1px solid #2563eb",
+              background: "#2563eb",
+              color: "#ffffff",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Open Purchasing
+          </button>
         </div>
 
         <div
@@ -488,7 +525,7 @@ export default function Inventory() {
                   cursor: submittingAction ? "not-allowed" : "pointer",
                 }}
               >
-                Add Stock
+                Quick Add
               </button>
               <button
                 type="button"
@@ -551,7 +588,7 @@ export default function Inventory() {
           {!isDeleteAction ? (
             <label>
               <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>
-                {isTransferAction ? "Quantity to Transfer" : isDamageAction ? "Quantity Damaged" : "Quantity Added"}
+                {isTransferAction ? "Quantity to Transfer" : isDamageAction ? "Quantity Damaged" : "Quantity to Add"}
               </span>
               <input
                 type="number"
@@ -559,7 +596,7 @@ export default function Inventory() {
                 step="1"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                placeholder={isTransferAction ? "Enter quantity to transfer" : isNewStockAction ? "Enter stock added" : "Enter quantity damaged"}
+                placeholder={isTransferAction ? "Enter quantity to transfer" : isNewStockAction ? "Enter quantity to add" : "Enter quantity damaged"}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
                 disabled={submittingAction}
               />
@@ -593,7 +630,7 @@ export default function Inventory() {
 
           {isNewStockAction ? (
             <div>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Stock Action</span>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Adjustment Type</span>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
                   type="button"
@@ -610,7 +647,7 @@ export default function Inventory() {
                     cursor: submittingAction ? "not-allowed" : "pointer",
                   }}
                 >
-                  New Stock
+                  Opening Stock
                 </button>
                 <button
                   type="button"
@@ -627,9 +664,12 @@ export default function Inventory() {
                     cursor: submittingAction ? "not-allowed" : "pointer",
                   }}
                 >
-                  Restock
+                  Manual Top-Up
                 </button>
               </div>
+              <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 6 }}>
+                Use Purchasing instead when this stock came from a supplier delivery.
+              </small>
             </div>
           ) : null}
 
@@ -703,7 +743,7 @@ export default function Inventory() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={2}
-                placeholder={isTransferAction ? "Optional transfer note" : isNewStockAction ? "Optional stock note" : "Optional damage details"}
+                placeholder={isTransferAction ? "Optional transfer note" : isNewStockAction ? "Optional adjustment note" : "Optional damage details"}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14, resize: "vertical" }}
                 disabled={submittingAction}
               />
@@ -741,7 +781,7 @@ export default function Inventory() {
                   ? "Transfer Stock"
                 : isDamageAction
                   ? "Record Damage"
-                  : "Add Stock"}
+                  : "Save Adjustment"}
           </button>
         </div>
       </div>
@@ -750,6 +790,7 @@ export default function Inventory() {
       {activeTab === "purchasing" ? (
         <PurchasingPanel
           products={products}
+          initialProductId={selectedProductId}
           usesExpiryTracking={usesExpiryTracking}
           onPurchaseRecorded={loadData}
         />
