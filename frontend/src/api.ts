@@ -6,10 +6,16 @@ function normalizeBaseUrl(url: string): string {
 
 function resolveApiBaseUrl(): string {
   const configured = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+  const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
-  // Use same-origin proxy by default so preview/staging deployments avoid CORS issues.
-  if (!configured || configured === "https://your-backend.vercel.app") {
+  // Local development uses the Vite /api proxy. Hosted frontends should talk to
+  // the backend directly because not every deployment target proxies /api.
+  if (isLocalhost) {
     return "/api";
+  }
+
+  if (!configured || configured === "https://your-backend.vercel.app") {
+    return "https://gel-invent.vercel.app";
   }
 
   return configured;

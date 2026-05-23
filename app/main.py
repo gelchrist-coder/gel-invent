@@ -364,8 +364,15 @@ else:
     ]
 
 # FastAPI CORS does not support wildcard domains in allow_origins (e.g. https://*.vercel.app).
-# Use allow_origin_regex to support Vercel preview deployment URLs.
-allow_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX") or r"^https://gel-invent(-[a-z0-9-]+)?\.vercel\.app$"
+# Use allow_origin_regex to support common hosted frontend URLs when the UI is
+# deployed separately from the backend.
+allow_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX") or (
+    r"^https://(" 
+    r"([a-z0-9-]+\.)?vercel\.app|"
+    r"[a-z0-9-]+\.netlify\.app|"
+    r"[a-z0-9-]+\.up\.railway\.app"
+    r")$"
+)
 
 app.add_middleware(
     CORSMiddleware,
