@@ -161,22 +161,38 @@ export default function Sales() {
     if (pendingSales.length === 0) return;
     setConfirming(true);
     try {
+      // Instant UI: mark as confirmed and sync in the background.
+      setSaleConfirmed(true);
+      setConfirmedSales([]);
+
+      // Optimistically update local stock and queue the sale.
+      enqueueSales(pendingSales);
+      const updated = applyLocalSaleToCachedProducts(pendingSales);
+      if (updated) setProducts(updated);
+
       if (!navigator.onLine) {
-        throw new Error("Offline");
+        setOfflineNotice("Offline mode: sale saved locally. It will sync when internet returns.");
+        return;
       }
 
-      // Create all sales
-      const createdSales = await createSalesBulk(pendingSales);
-      setConfirmedSales(createdSales);
-      await loadData(); // Refresh sales and products (to update stock)
-      setSaleConfirmed(true); // Show success state with print/done buttons
+      // Sync in background; don't block the UI.
+      void (async () => {
+        try {
+          const createdSales = await createSalesBulk(pendingSales);
+          setConfirmedSales(createdSales);
+          await loadData();
+          setOfflineNotice(null);
+        } catch {
+          setOfflineNotice("Sale queued for sync. We'll retry automatically.");
+        }
+      })();
     } catch (err) {
       // Network issue: queue sale locally and sync later.
       enqueueSales(pendingSales);
       setConfirmedSales([]);
       const updated = applyLocalSaleToCachedProducts(pendingSales);
       if (updated) setProducts(updated);
-      setOfflineNotice("Offline mode: sale saved locally. It will sync when internet returns.");
+      setOfflineNotice("Sale queued for sync. We'll retry automatically.");
       setSaleConfirmed(true);
     } finally {
       setConfirming(false);
