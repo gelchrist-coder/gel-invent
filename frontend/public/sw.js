@@ -3,14 +3,22 @@
    - Subsequent loads can work offline (for previously visited routes/assets).
 */
 
-const CACHE_NAME = "gel-invent-shell-v1";
+const CACHE_NAME = "gel-invent-shell-v2";
+const OFFLINE_URL = "/offline.html";
+const PRECACHE_URLS = [
+  "/",
+  "/index.html",
+  "/offline.html",
+  "/manifest.webmanifest",
+  "/pwa-icon.svg",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE_NAME);
       // Cache the app shell entrypoints.
-      await cache.addAll(["/", "/index.html"]);
+      await cache.addAll(PRECACHE_URLS);
       await self.skipWaiting();
     })(),
   );
@@ -48,7 +56,7 @@ self.addEventListener("fetch", (event) => {
           cache.put("/index.html", fresh.clone());
           return fresh;
         } catch {
-          const cached = await caches.match("/index.html");
+          const cached = await caches.match(OFFLINE_URL);
           return cached || new Response("Offline", { status: 503, statusText: "Offline" });
         }
       })(),
@@ -68,7 +76,8 @@ self.addEventListener("fetch", (event) => {
         cache.put(req, fresh.clone());
         return fresh;
       } catch {
-        return cached || new Response("Offline", { status: 503, statusText: "Offline" });
+        const fallback = await caches.match(OFFLINE_URL);
+        return cached || fallback || new Response("Offline", { status: 503, statusText: "Offline" });
       }
     })(),
   );
