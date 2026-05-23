@@ -938,32 +938,55 @@ export default function ProductList({
                   </span>
                 </div>
 
-                <div style={{ display: "flex", gap: 8 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: isAdmin ? "1fr 1fr" : "1fr",
+                    gap: 8,
+                  }}
+                >
                   {isAdmin && (
-                    <button
-                      onClick={() => startEdit(p)}
-                      disabled={busy}
-                      style={{
-                        flex: 1,
-                        padding: "8px 12px",
-                        fontSize: 13,
-                        background: "#3b82f6",
-                        color: "white",
-                        border: "none",
-                        borderRadius: 8,
-                        cursor: busy ? "not-allowed" : "pointer",
-                        fontWeight: 600,
-                      }}
-                      title="Edit product"
-                    >
-                      Edit
-                    </button>
+                    <>
+                      <button
+                        onClick={() => startEdit(p)}
+                        disabled={busy}
+                        style={{
+                          padding: "8px 12px",
+                          fontSize: 13,
+                          background: "#3b82f6",
+                          color: "white",
+                          border: "none",
+                          borderRadius: 8,
+                          cursor: busy ? "not-allowed" : "pointer",
+                          fontWeight: 600,
+                        }}
+                        title="Edit product"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => startAdjustment(p.id)}
+                        disabled={busy}
+                        style={{
+                          padding: "8px 12px",
+                          fontSize: 13,
+                          background: "#0f766e",
+                          color: "white",
+                          border: "none",
+                          borderRadius: 8,
+                          cursor: busy ? "not-allowed" : "pointer",
+                          fontWeight: 600,
+                        }}
+                        title="Adjust stock"
+                      >
+                        Adjust
+                      </button>
+                    </>
                   )}
                   <button
                     onClick={onOpenInventory}
                     disabled={busy}
                     style={{
-                      flex: 1,
                       padding: "8px 12px",
                       fontSize: 13,
                       background: "#10b981",
@@ -977,6 +1000,25 @@ export default function ProductList({
                   >
                     Inventory Actions
                   </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => void handleDelete(p)}
+                      disabled={busy}
+                      style={{
+                        padding: "8px 12px",
+                        fontSize: 13,
+                        background: "#dc2626",
+                        color: "white",
+                        border: "none",
+                        borderRadius: 8,
+                        cursor: busy ? "not-allowed" : "pointer",
+                        fontWeight: 600,
+                      }}
+                      title="Delete product"
+                    >
+                      Delete
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -1002,7 +1044,7 @@ export default function ProductList({
                 <th style={{ padding: "12px", textAlign: "right", fontWeight: 600, color: "#374151" }}>Selling Price</th>
                 <th style={{ padding: "12px", textAlign: "right", fontWeight: 600, color: "#374151" }}>Profit Margin</th>
                 <th style={{ padding: "12px", textAlign: "left", fontWeight: 600, color: "#374151" }}>Created By</th>
-                <th style={{ padding: "12px", textAlign: "center", fontWeight: 600, color: "#374151", width: "220px" }}>Actions</th>
+                <th style={{ padding: "12px", textAlign: "center", fontWeight: 600, color: "#374151", width: "280px" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1081,25 +1123,51 @@ export default function ProductList({
                       </span>
                     </td>
                     <td style={{ padding: "12px" }}>
-                      <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: isAdmin ? "1fr 1fr" : "1fr",
+                          gap: 6,
+                          justifyContent: "center",
+                        }}
+                      >
                         {isAdmin && (
-                          <button
-                            onClick={() => startEdit(p)}
-                            disabled={busy}
-                            style={{
-                              padding: "6px 12px",
-                              fontSize: 12,
-                              background: "#3b82f6",
-                              color: "white",
-                              border: "none",
-                              borderRadius: 6,
-                              cursor: busy ? "not-allowed" : "pointer",
-                              fontWeight: 500,
-                            }}
-                          title="Edit product"
-                          >
-                          Edit
-                          </button>
+                          <>
+                            <button
+                              onClick={() => startEdit(p)}
+                              disabled={busy}
+                              style={{
+                                padding: "6px 12px",
+                                fontSize: 12,
+                                background: "#3b82f6",
+                                color: "white",
+                                border: "none",
+                                borderRadius: 6,
+                                cursor: busy ? "not-allowed" : "pointer",
+                                fontWeight: 500,
+                              }}
+                              title="Edit product"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => startAdjustment(p.id)}
+                              disabled={busy}
+                              style={{
+                                padding: "6px 12px",
+                                fontSize: 12,
+                                background: "#0f766e",
+                                color: "white",
+                                border: "none",
+                                borderRadius: 6,
+                                cursor: busy ? "not-allowed" : "pointer",
+                                fontWeight: 500,
+                              }}
+                              title="Adjust stock"
+                            >
+                              Adjust
+                            </button>
+                          </>
                         )}
                         <button
                           onClick={onOpenInventory}
@@ -1118,6 +1186,25 @@ export default function ProductList({
                         >
                           Inventory Actions
                         </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => void handleDelete(p)}
+                            disabled={busy}
+                            style={{
+                              padding: "6px 12px",
+                              fontSize: 12,
+                              background: "#dc2626",
+                              color: "white",
+                              border: "none",
+                              borderRadius: 6,
+                              cursor: busy ? "not-allowed" : "pointer",
+                              fontWeight: 500,
+                            }}
+                            title="Delete product"
+                          >
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

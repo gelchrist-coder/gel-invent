@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createMovement, createProduct, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, updateProduct, getCachedProducts, clearDataCache } from "./api";
 import Layout from "./components/Layout";
@@ -96,7 +96,7 @@ export default function App() {
     setOutboxCount(0);
   };
 
-  const syncQueuedSales = async () => {
+  const syncQueuedSales = useCallback(async () => {
     if (!isAuthenticated || !navigator.onLine || syncInFlightRef.current || getSalesOutboxCount() === 0) {
       setOutboxCount(getSalesOutboxCount());
       return;
@@ -119,7 +119,7 @@ export default function App() {
       syncInFlightRef.current = false;
       setIsSyncingOutbox(false);
     }
-  };
+  }, [isAuthenticated, userRole]);
 
   // Check if user is authenticated on mount
   useEffect(() => {
@@ -304,7 +304,7 @@ export default function App() {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt as EventListener);
       window.removeEventListener("appinstalled", handleAppInstalled);
     };
-  }, [isAuthenticated, userRole]);
+  }, [syncQueuedSales]);
 
   // Auto-refresh when another user signs in
   useEffect(() => {

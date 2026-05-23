@@ -54,7 +54,6 @@ export default function Creditors() {
     };
     window.addEventListener("activeBranchChanged", handler as EventListener);
     return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

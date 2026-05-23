@@ -186,11 +186,14 @@ export default function Dashboard({ onNavigate }: Props) {
     }
   };
 
+  const dashboardTopProducts = dashboardData?.top_products;
+  const dashboardRecentSales = dashboardData?.recent_sales;
+
   // Top products from dashboard data
-  const topProducts = dashboardData?.top_products ?? [];
+  const topProducts = useMemo(() => dashboardTopProducts ?? [], [dashboardTopProducts]);
 
   // Recent sales from dashboard data
-  const recentSales = dashboardData?.recent_sales ?? [];
+  const recentSales = useMemo(() => dashboardRecentSales ?? [], [dashboardRecentSales]);
 
   const salesTrend = useMemo<TrendPoint[]>(() => {
     const today = new Date();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { fetchProductsCached } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
@@ -24,7 +24,7 @@ export default function Invoice() {
   const businessLogoUrl = userData?.business_logo_url || "";
   const salesPerson = userData?.name || "Sales Person";
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -51,11 +51,11 @@ export default function Invoice() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadData();
-  }, []);
+  }, [loadData]);
 
   useEffect(() => {
     const handler = () => {
@@ -63,8 +63,7 @@ export default function Invoice() {
     };
     window.addEventListener("activeBranchChanged", handler as EventListener);
     return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadData]);
 
   const productById = useMemo(() => {
     const map = new Map<number, Product>();

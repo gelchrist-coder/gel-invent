@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
-import { fetchSalesCached, createSaleForBranch, createSalesBulk, deleteSale, fetchProductsCached, getCachedProducts, getCachedSales, sendSalesReceiptEmail } from "../api";
+import { fetchSalesCached, createSalesBulk, deleteSale, fetchProductsCached, getCachedProducts, getCachedSales, sendSalesReceiptEmail } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
@@ -42,7 +42,7 @@ export default function Sales() {
   const businessLogoUrl = userData?.business_logo_url || "";
   const salesPerson = userData?.name || "Sales Person";
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!hasLoadedOnce.current) {
       setLoading(true);
     }
@@ -80,11 +80,11 @@ export default function Sales() {
       setLoading(false);
       hasLoadedOnce.current = true;
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   useEffect(() => {
     const handler = () => {
@@ -92,8 +92,7 @@ export default function Sales() {
     };
     window.addEventListener("activeBranchChanged", handler as EventListener);
     return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadData]);
 
   useEffect(() => {
     const handler = () => setOutboxCount(getSalesOutboxCount());
@@ -107,7 +106,7 @@ export default function Sales() {
     };
   }, []);
 
-  const syncOutboxOnce = async () => {
+  const syncOutboxOnce = useCallback(async () => {
     const result = await syncSalesOutboxOnce();
     if (result.syncedCount === 0 && result.remainingCount === 0) {
       return;
@@ -120,7 +119,7 @@ export default function Sales() {
     } catch {
       // ignore
     }
-  };
+  }, [loadData]);
 
   useEffect(() => {
     const onOnline = () => {
@@ -130,7 +129,7 @@ export default function Sales() {
     // Also try syncing shortly after mount.
     void syncOutboxOnce();
     return () => window.removeEventListener("online", onOnline);
-  }, []);
+  }, [syncOutboxOnce]);
 
   const handleCreateSale = async (salesArray: NewSale[]) => {
     // Show confirmation modal instead of submitting immediately

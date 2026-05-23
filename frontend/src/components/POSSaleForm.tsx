@@ -26,12 +26,8 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const [notes, setNotes] = useState("");
   const [uiMessage, setUiMessage] = useState<{ type: "error" | "info"; text: string } | null>(null);
 
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
-  const [clearArmed, setClearArmed] = useState(false);
-  const clearArmTimeoutRef = useRef<number | null>(null);
   const messageTimeoutRef = useRef<number | null>(null);
   const customerInputRef = useRef<HTMLInputElement | null>(null);
-  const [lastAdded, setLastAdded] = useState<{ productId: number; unit: 'piece' | 'pack' } | null>(null);
 
   const userCategories = useAppCategories();
 
@@ -45,17 +41,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const [initialPayment, setInitialPayment] = useState<number>(0);
 
   useEffect(() => {
-    if (cart.length === 0) {
-      setCheckoutOpen(false);
-      setClearArmed(false);
-    }
-  }, [cart.length]);
-
-  useEffect(() => {
     return () => {
-      if (clearArmTimeoutRef.current != null) {
-        window.clearTimeout(clearArmTimeoutRef.current);
-      }
       if (messageTimeoutRef.current != null) {
         window.clearTimeout(messageTimeoutRef.current);
       }
@@ -117,7 +103,6 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     
     if (existingItem) {
       // Increase quantity if already in cart
-      setLastAdded({ productId: product.id, unit });
       setCart(cart.map(item => 
         item.product.id === product.id && item.sellingUnit === unit
           ? { ...item, quantity: item.quantity + 1 }
@@ -125,7 +110,6 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
       ));
     } else {
       // Add new item
-      setLastAdded({ productId: product.id, unit });
       setCart([...cart, { product, quantity: 1, sellingUnit: unit }]);
     }
   };
@@ -191,42 +175,6 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     setCreditorName("");
     setCreditorPhone("");
     setInitialPayment(0);
-    setLastAdded(null);
-    setCheckoutOpen(false);
-    setClearArmed(false);
-  };
-
-  const armOrClearCart = () => {
-    if (!clearArmed) {
-      setClearArmed(true);
-      if (clearArmTimeoutRef.current != null) {
-        window.clearTimeout(clearArmTimeoutRef.current);
-      }
-      clearArmTimeoutRef.current = window.setTimeout(() => {
-        setClearArmed(false);
-        clearArmTimeoutRef.current = null;
-      }, 2500);
-      return;
-    }
-    clearCart();
-  };
-
-  const undoLastAdd = () => {
-    if (!lastAdded) return;
-    const match = cart.find(
-      (item) => item.product.id === lastAdded.productId && item.sellingUnit === lastAdded.unit,
-    );
-    if (!match) {
-      setLastAdded(null);
-      return;
-    }
-
-    if (match.quantity > 1) {
-      updateQuantity(match.product.id, match.sellingUnit, match.quantity - 1);
-    } else {
-      removeFromCart(match.product.id, match.sellingUnit);
-    }
-    setLastAdded(null);
   };
 
   // Calculate totals
