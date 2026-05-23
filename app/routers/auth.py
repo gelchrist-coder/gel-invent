@@ -7,7 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import or_
@@ -168,6 +168,18 @@ class Token(BaseModel):
     user: UserResponse
 
 
+def _build_token_response(user: User) -> dict[str, object]:
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": _serialize_user(user),
+    }
+
+
 class TokenData(BaseModel):
     email: Optional[str] = None
 
@@ -256,7 +268,7 @@ class UpdateMeRequest(BaseModel):
     categories: Optional[list[str]] = None
 
 
-@router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def signup(request: Request, db: Session = Depends(get_db)):
     """Register a new user."""
     user_data, logo_file = await _parse_signup_request(request)
@@ -358,15 +370,17 @@ async def signup(request: Request, db: Session = Depends(get_db)):
     db.add(settings)
     db.commit()
 
-    return SignupResponse(**_serialize_user(new_user).model_dump(), verification_code=None)
+    return _build_token_response(new_user)
 
 
 @router.post("/login", response_model=Token)
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
+    recaptcha_token: str | None = Form(default=None),
     db: Session = Depends(get_db)
 ):
     """Login and get access token."""
+    _verify_recaptcha_or_raise(recaptcha_token)
     # username field accepts either email or phone number.
     identifier = (form_data.username or "").strip()
     if not identifier:
@@ -400,17 +414,7 @@ def login(
 
     # Email verification disabled.
     
-    # Create access token
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": _serialize_user(user),
-    }
+    return _build_token_response(user)
 
 
 @router.get("/me", response_model=UserResponse)

@@ -33,6 +33,20 @@ type LoginProps = {
   onLogin: (email: string, password: string) => void;
 };
 
+type AuthResponse = {
+  access_token: string;
+  token_type: string;
+  user?: {
+    id?: number;
+    email?: string;
+    name?: string;
+    role?: string;
+    business_name?: string | null;
+    business_logo_url?: string | null;
+    branch_id?: number | null;
+  } | null;
+};
+
 type PasswordInputProps = {
   value: string;
   onChange: (value: string) => void;
@@ -88,7 +102,7 @@ function PasswordInput({
 }
 
 export default function Login({ onLogin }: LoginProps) {
-  const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY?.trim() || "";
+  const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY?.trim() || import.meta.env.Site_key?.trim() || "";
   const recaptchaEnabled = recaptchaSiteKey.length > 0;
   const [isSignUp, setIsSignUp] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
@@ -155,7 +169,7 @@ export default function Login({ onLogin }: LoginProps) {
   }, []);
 
   useEffect(() => {
-    if (!recaptchaEnabled || !isSignUp || showReset) {
+    if (!recaptchaEnabled || showReset) {
       setRecaptchaToken("");
       return;
     }
@@ -204,7 +218,7 @@ export default function Login({ onLogin }: LoginProps) {
     return () => {
       cancelled = true;
     };
-  }, [isSignUp, recaptchaEnabled, recaptchaSiteKey, showReset]);
+  }, [recaptchaEnabled, recaptchaSiteKey, showReset]);
 
   const switchAuthMode = (nextIsSignUp: boolean) => {
     if (nextIsSignUp === isSignUp) return;
@@ -248,74 +262,10 @@ export default function Login({ onLogin }: LoginProps) {
     return null;
   };
 
-  const attemptLoginRequest = async (identifier: string, password: string, timeoutMs: number): Promise<Response> => {
-    const loginFormData = new URLSearchParams();
-    loginFormData.append("username", identifier);
-    loginFormData.append("password", password);
+  const completeAuthenticatedSession = async (authData: AuthResponse, identifier: string, password: string) => {
+    localStorage.setItem("token", authData.access_token);
 
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      return await fetch(`${API_BASE}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: loginFormData,
-        signal: controller.signal,
-      });
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        throw new Error("__timeout__");
-      }
-      throw err;
-    } finally {
-      window.clearTimeout(timeoutId);
-    }
-  };
-
-  const performLogin = async (identifier: string, password: string) => {
-    let loginResponse: Response;
-    try {
-      loginResponse = await attemptLoginRequest(identifier, password, 30000);
-
-      // Retry once on server errors (cold-start 502/503/504)
-      if (loginResponse.status >= 500) {
-        setInfo("Server is warming up — retrying…");
-        await new Promise((resolve) => window.setTimeout(resolve, 2500));
-        loginResponse = await attemptLoginRequest(identifier, password, 35000);
-        setInfo("");
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message === "__timeout__") {
-        // Cold-start timeout — retry once automatically
-        setInfo("Server is warming up — retrying…");
-        await new Promise((resolve) => window.setTimeout(resolve, 2500));
-        try {
-          loginResponse = await attemptLoginRequest(identifier, password, 40000);
-          setInfo("");
-        } catch (retryErr) {
-          setInfo("");
-          throw new Error("Login timed out. The server is still starting up — please try again in a moment.");
-        }
-      } else {
-        throw err;
-      }
-    }
-
-    if (!loginResponse.ok) {
-      const errorData = await safeJson(loginResponse);
-      const detail = isRecord(errorData) && typeof errorData.detail === "string" ? errorData.detail : null;
-      setError(detail || "Invalid email/phone or password");
-      return;
-    }
-
-    const loginData = await loginResponse.json().catch(() => {
-      throw new Error(`Server returned non-JSON response (status ${loginResponse.status}). The backend URL may be misconfigured.`);
-    });
-    localStorage.setItem("token", loginData.access_token);
-
-    // Login response now includes user data — no need for a second /auth/me request.
-    const userData = loginData.user ?? null;
+    const userData = authData.user ?? null;
     if (userData) {
       localStorage.setItem("user", JSON.stringify(userData));
 
@@ -337,9 +287,9 @@ export default function Login({ onLogin }: LoginProps) {
 
       window.dispatchEvent(new CustomEvent("userChanged", { detail: userData }));
     } else {
-      // Fallback: fetch user data separately if not included in login response
+      // Fallback: fetch user data separately if not included in auth response
       const userResponse = await fetch(`${API_BASE}/auth/me`, {
-        headers: { Authorization: `Bearer ${loginData.access_token}` },
+        headers: { Authorization: `Bearer ${authData.access_token}` },
       });
       if (userResponse.ok) {
         const meData = await userResponse.json();
@@ -349,6 +299,85 @@ export default function Login({ onLogin }: LoginProps) {
     }
 
     onLogin(identifier, password);
+  };
+
+  const attemptLoginRequest = async (
+    identifier: string,
+    password: string,
+    timeoutMs: number,
+    captchaToken?: string,
+  ): Promise<Response> => {
+    const loginFormData = new URLSearchParams();
+    loginFormData.append("username", identifier);
+    loginFormData.append("password", password);
+    if (captchaToken) {
+      loginFormData.append("recaptcha_token", captchaToken);
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: loginFormData,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new Error("__timeout__");
+      }
+      throw err;
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  };
+
+  const performLogin = async (identifier: string, password: string, captchaToken?: string) => {
+    let loginResponse: Response;
+    try {
+      loginResponse = await attemptLoginRequest(identifier, password, 30000, captchaToken);
+
+      // Retry once on server errors (cold-start 502/503/504)
+      if (loginResponse.status >= 500) {
+        setInfo("Server is warming up — retrying…");
+        await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        loginResponse = await attemptLoginRequest(identifier, password, 35000, captchaToken);
+        setInfo("");
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === "__timeout__") {
+        // Cold-start timeout — retry once automatically
+        setInfo("Server is warming up — retrying…");
+        await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        try {
+          loginResponse = await attemptLoginRequest(identifier, password, 40000, captchaToken);
+          setInfo("");
+        } catch (retryErr) {
+          setInfo("");
+          throw new Error("Login timed out. The server is still starting up — please try again in a moment.");
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    if (!loginResponse.ok) {
+      if (recaptchaEnabled) {
+        resetRecaptcha();
+      }
+      const errorData = await safeJson(loginResponse);
+      const detail = isRecord(errorData) && typeof errorData.detail === "string" ? errorData.detail : null;
+      setError(detail || "Invalid email/phone or password");
+      return;
+    }
+
+    const loginData = (await loginResponse.json().catch(() => {
+      throw new Error(`Server returned non-JSON response (status ${loginResponse.status}). The backend URL may be misconfigured.`);
+    })) as AuthResponse;
+
+    await completeAuthenticatedSession(loginData, identifier, password);
   };
 
   const COMMON_CATEGORIES = [
@@ -627,7 +656,10 @@ export default function Login({ onLogin }: LoginProps) {
         }
 
         setInfo("Account created successfully.");
-        await performLogin(formData.email, formData.password);
+        const signupData = (await signupResponse.json().catch(() => {
+          throw new Error(`Server returned non-JSON response (status ${signupResponse.status}). The backend URL may be misconfigured.`);
+        })) as AuthResponse;
+        await completeAuthenticatedSession(signupData, formData.email, formData.password);
       } else {
         // Sign in validation
         if (!formData.email.trim() || !formData.password.trim()) {
@@ -635,14 +667,19 @@ export default function Login({ onLogin }: LoginProps) {
           setLoading(false);
           return;
         }
+        if (recaptchaEnabled && !recaptchaToken) {
+          setError("Please complete the reCAPTCHA checkbox");
+          setLoading(false);
+          return;
+        }
 
-        await performLogin(formData.email, formData.password);
+        await performLogin(formData.email, formData.password, recaptchaToken);
       }
       setLoading(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[Login] Unhandled error:", err);
-      if (isSignUp && recaptchaEnabled) {
+      if (recaptchaEnabled) {
         resetRecaptcha();
       }
       if (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("fetch")) {
@@ -1301,7 +1338,7 @@ export default function Login({ onLogin }: LoginProps) {
               </label>
             )}
 
-            {isSignUp && recaptchaEnabled && (
+            {recaptchaEnabled && !showReset && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <div ref={recaptchaContainerRef} />
                 {recaptchaLoadError && (
