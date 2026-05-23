@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Gel Invent">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f7aff" />
+      <stop offset="1" stop-color="#0b1021" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)" />
+  <circle cx="256" cy="220" r="96" fill="#ffffff" opacity="0.95" />
+  <path d="M164 356h184a20 20 0 0 1 20 20v24H144v-24a20 20 0 0 1 20-20z" fill="#ffffff" opacity="0.95" />
+  <text x="256" y="236" text-anchor="middle" font-family="Arial, sans-serif" font-size="80" font-weight="700" fill="#1f7aff">GI</text>
+</svg>

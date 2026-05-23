@@ -1,0 +1,17 @@
+{
+  "name": "Gel Invent",
+  "short_name": "Gel Invent",
+  "description": "Inventory and POS system",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f9ff",
+  "theme_color": "#1f7aff",
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
