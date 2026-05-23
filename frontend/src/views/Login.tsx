@@ -141,6 +141,13 @@ export default function Login({ onLogin }: LoginProps) {
     }, 380);
   };
 
+  const scrollToAuthCard = (nextIsSignUp: boolean) => {
+    switchAuthMode(nextIsSignUp);
+    const target = document.querySelector<HTMLElement>(".auth-signin-zone");
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -560,14 +567,14 @@ export default function Login({ onLogin }: LoginProps) {
             <button
               type="button"
               className="auth-primary-cta"
-              onClick={() => switchAuthMode(true)}
+              onClick={() => scrollToAuthCard(true)}
             >
               Start Free
             </button>
             <button
               type="button"
               className="auth-secondary-cta"
-              onClick={() => switchAuthMode(false)}
+              onClick={() => scrollToAuthCard(false)}
             >
               Explore Sign In
             </button>
