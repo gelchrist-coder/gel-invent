@@ -95,6 +95,14 @@ export default function Login({ onLogin }: LoginProps) {
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
 
+  // Warm up the serverless backend as soon as the login page loads so the
+  // cold-start delay doesn't hit the user mid-login.
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${API_BASE}/health`, { signal: controller.signal }).catch(() => {});
+    return () => controller.abort();
+  }, []);
+
   useEffect(() => {
     const onScroll = () => {
       const next = Math.min(window.scrollY / 700, 1);
@@ -147,31 +155,58 @@ export default function Login({ onLogin }: LoginProps) {
     return null;
   };
 
-  const performLogin = async (identifier: string, password: string) => {
+  const attemptLoginRequest = async (identifier: string, password: string, timeoutMs: number): Promise<Response> => {
     const loginFormData = new URLSearchParams();
     loginFormData.append("username", identifier);
     loginFormData.append("password", password);
 
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 30000);
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
-    let loginResponse: Response;
     try {
-      loginResponse = await fetch(`${API_BASE}/auth/login`, {
+      return await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: loginFormData,
         signal: controller.signal,
       });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        throw new Error("Login request timed out. The server may be starting up — please try again in a moment.");
+        throw new Error("__timeout__");
       }
       throw err;
     } finally {
       window.clearTimeout(timeoutId);
+    }
+  };
+
+  const performLogin = async (identifier: string, password: string) => {
+    let loginResponse: Response;
+    try {
+      loginResponse = await attemptLoginRequest(identifier, password, 30000);
+
+      // Retry once on server errors (cold-start 502/503/504)
+      if (loginResponse.status >= 500) {
+        setInfo("Server is warming up — retrying…");
+        await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        loginResponse = await attemptLoginRequest(identifier, password, 35000);
+        setInfo("");
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === "__timeout__") {
+        // Cold-start timeout — retry once automatically
+        setInfo("Server is warming up — retrying…");
+        await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        try {
+          loginResponse = await attemptLoginRequest(identifier, password, 40000);
+          setInfo("");
+        } catch (retryErr) {
+          setInfo("");
+          throw new Error("Login timed out. The server is still starting up — please try again in a moment.");
+        }
+      } else {
+        throw err;
+      }
     }
 
     if (!loginResponse.ok) {
