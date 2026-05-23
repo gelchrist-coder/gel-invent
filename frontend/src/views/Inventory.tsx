@@ -9,6 +9,7 @@ import type { Branch, Product } from "../types";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
+type InventoryTab = "overview" | "alerts" | "actions" | "history";
 
 export default function Inventory() {
   // Check if current user is Admin
@@ -19,6 +20,7 @@ export default function Inventory() {
 
   const [analytics, setAnalytics] = useState<InventoryAnalytics | null>(null);
   const [movements, setMovements] = useState<MovementHistoryRow[]>([]);
+  const [activeTab, setActiveTab] = useState<InventoryTab>("overview");
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
@@ -285,6 +287,33 @@ export default function Inventory() {
     return null;
   }
 
+  const alertCount = analytics.low_stock_alerts.length + (usesExpiryTracking ? analytics.expiring_products.length : 0);
+  const inventoryTabs: Array<{ id: InventoryTab; label: string; description: string; count?: number }> = [
+    {
+      id: "overview",
+      label: "Overview",
+      description: "Track stock value, totals, and movement summaries at a glance.",
+    },
+    {
+      id: "alerts",
+      label: "Alerts",
+      description: "Review low-stock and expiring-product attention items.",
+      count: alertCount,
+    },
+    {
+      id: "actions",
+      label: "Stock Actions",
+      description: "Add stock, record losses, transfer stock, or delete a product.",
+    },
+    {
+      id: "history",
+      label: "Movement History",
+      description: "Filter, export, and review inventory movement activity.",
+      count: movements.length,
+    },
+  ];
+  const activeTabMeta = inventoryTabs.find((tab) => tab.id === activeTab) ?? inventoryTabs[0];
+
   return (
     <div className="app-shell">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
@@ -307,21 +336,76 @@ export default function Inventory() {
         </button>
       </div>
 
-      {/* Overview Cards */}
-      <div style={{ marginBottom: 24 }}>
-        <InventoryOverview analytics={analytics} usesExpiryTracking={usesExpiryTracking} />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16, padding: 6, border: "1px solid #dbe5f2", borderRadius: 14, background: "linear-gradient(180deg, #f8fbff, #f1f5fb)" }}>
+        {inventoryTabs.map((tab) => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 16px",
+                border: isActive ? "1px solid #2f66d0" : "1px solid transparent",
+                borderRadius: 10,
+                background: isActive ? "linear-gradient(120deg, #2f66d0, #4a82e8)" : "transparent",
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 14,
+                color: isActive ? "#ffffff" : "#475569",
+                boxShadow: isActive ? "0 8px 18px rgba(47, 102, 208, 0.28)" : "none",
+              }}
+            >
+              <span>{tab.label}</span>
+              {typeof tab.count === "number" ? (
+                <span
+                  style={{
+                    minWidth: 22,
+                    height: 22,
+                    padding: "0 6px",
+                    borderRadius: 999,
+                    background: isActive ? "rgba(255,255,255,0.18)" : "#e2e8f0",
+                    color: isActive ? "#ffffff" : "#334155",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {tab.count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Stock Alerts */}
-      <div style={{ marginBottom: 24 }}>
-        <StockAlerts
-          lowStock={analytics.low_stock_alerts}
-          expiring={usesExpiryTracking ? analytics.expiring_products : []}
-          hideExpiringSection={!usesExpiryTracking}
-        />
+      <div style={{ marginBottom: 24, padding: "14px 16px", borderRadius: 12, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.04)" }}>
+        <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "#0f172a" }}>{activeTabMeta.label}</h2>
+        <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>{activeTabMeta.description}</p>
       </div>
 
-      {/* Stock Actions */}
+      {activeTab === "overview" ? (
+        <div style={{ marginBottom: 24 }}>
+          <InventoryOverview analytics={analytics} usesExpiryTracking={usesExpiryTracking} />
+        </div>
+      ) : null}
+
+      {activeTab === "alerts" ? (
+        <div style={{ marginBottom: 24 }}>
+          <StockAlerts
+            lowStock={analytics.low_stock_alerts}
+            expiring={usesExpiryTracking ? analytics.expiring_products : []}
+            hideExpiringSection={!usesExpiryTracking}
+          />
+        </div>
+      ) : null}
+
+      {activeTab === "actions" ? (
       <div className="card" style={{ marginBottom: 24 }}>
         <div style={{ marginBottom: 16 }}>
           <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Stock Actions</h3>
@@ -655,8 +739,9 @@ export default function Inventory() {
           </button>
         </div>
       </div>
+      ) : null}
 
-      {/* Movement History */}
+      {activeTab === "history" ? (
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Movement History</h3>
@@ -709,7 +794,7 @@ export default function Inventory() {
                 onClick={() => {
                   const now = new Date();
                   const day = now.getDay();
-                  const diffToMonday = (day + 6) % 7; // Mon=0 ... Sun=6
+                  const diffToMonday = (day + 6) % 7;
                   const monday = new Date(now);
                   monday.setDate(now.getDate() - diffToMonday);
                   const sunday = new Date(monday);
@@ -768,8 +853,7 @@ export default function Inventory() {
                 Apply
               </button>
             </div>
-            
-            {/* Export to PDF */}
+
             <div style={{ display: "flex", gap: 8, alignItems: "center", borderLeft: "1px solid #e5e7eb", paddingLeft: 12 }}>
               <select
                 value={exportType}
@@ -810,6 +894,7 @@ export default function Inventory() {
         </div>
         <MovementHistory movements={movements} />
       </div>
+      ) : null}
     </div>
   );
 }
