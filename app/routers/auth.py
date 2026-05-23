@@ -164,6 +164,7 @@ def _normalize_email(email: str) -> str:
 class Token(BaseModel):
     access_token: str
     token_type: str
+    user: UserResponse
 
 
 class TokenData(BaseModel):
@@ -406,7 +407,11 @@ def login(
         data={"sub": user.email}, expires_delta=access_token_expires
     )
     
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": _serialize_user(user),
+    }
 
 
 @router.get("/me", response_model=UserResponse)

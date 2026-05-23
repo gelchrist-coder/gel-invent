@@ -219,12 +219,9 @@ export default function Login({ onLogin }: LoginProps) {
     const loginData = await loginResponse.json();
     localStorage.setItem("token", loginData.access_token);
 
-    const userResponse = await fetch(`${API_BASE}/auth/me`, {
-      headers: { Authorization: `Bearer ${loginData.access_token}` },
-    });
-
-    if (userResponse.ok) {
-      const userData = await userResponse.json();
+    // Login response now includes user data — no need for a second /auth/me request.
+    const userData = loginData.user ?? null;
+    if (userData) {
       localStorage.setItem("user", JSON.stringify(userData));
 
       if (userData?.business_name || userData?.name || userData?.email) {
@@ -244,6 +241,16 @@ export default function Login({ onLogin }: LoginProps) {
       }
 
       window.dispatchEvent(new CustomEvent("userChanged", { detail: userData }));
+    } else {
+      // Fallback: fetch user data separately if not included in login response
+      const userResponse = await fetch(`${API_BASE}/auth/me`, {
+        headers: { Authorization: `Bearer ${loginData.access_token}` },
+      });
+      if (userResponse.ok) {
+        const meData = await userResponse.json();
+        localStorage.setItem("user", JSON.stringify(meData));
+        window.dispatchEvent(new CustomEvent("userChanged", { detail: meData }));
+      }
     }
 
     onLogin(identifier, password);
