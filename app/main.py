@@ -48,6 +48,26 @@ def _ensure_critical_auth_schema_sync() -> None:
         )
 
 
+def _ensure_critical_product_schema_sync() -> None:
+    """Apply tiny, idempotent product schema changes required for read safety.
+
+    Product queries select mapped columns directly. In serverless environments we
+    skip the heavier startup migration runner by default, so additive product
+    columns that ship in code must still be created here or `/products` and
+    inventory endpoints can fail immediately on deploy.
+    """
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_size INTEGER"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(100)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier VARCHAR(255)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS expiry_date DATE"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC(10,2)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_cost_price NUMERIC(10,2)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS selling_price NUMERIC(10,2)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_selling_price NUMERIC(10,2)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+
+
 def _should_run_startup_migrations() -> bool:
     """Control runtime schema patches/backfills.
 
@@ -391,9 +411,9 @@ async def on_startup() -> None:
     print(f"Railway Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'Not set')}")
     print(f"Database URL set: {'Yes' if os.getenv('DATABASE_URL') else 'No'}")
 
-    # Always apply critical auth schema changes first to avoid request-time
+    # Always apply critical auth/product schema changes first to avoid request-time
     # failures when background/full migrations are disabled or still running.
-    # Cap at 5 s so a slow/hung DB proxy never blocks startup and delays logins.
+    # Cap at 5 s each so a slow/hung DB proxy never blocks startup too long.
     try:
         await asyncio.wait_for(
             asyncio.to_thread(_ensure_critical_auth_schema_sync),
@@ -404,6 +424,17 @@ async def on_startup() -> None:
         print("⚠️ Critical auth schema sync skipped — timed out after 5 s")
     except Exception as e:
         print(f"⚠️ Could not verify critical auth schema: {type(e).__name__}: {e}")
+
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(_ensure_critical_product_schema_sync),
+            timeout=5.0,
+        )
+        print("✅ Critical product schema verified")
+    except asyncio.TimeoutError:
+        print("⚠️ Critical product schema sync skipped — timed out after 5 s")
+    except Exception as e:
+        print(f"⚠️ Could not verify critical product schema: {type(e).__name__}: {e}")
 
     if not _should_run_startup_migrations():
         print("ℹ️ Startup migrations skipped (RUN_STARTUP_MIGRATIONS disabled)")
