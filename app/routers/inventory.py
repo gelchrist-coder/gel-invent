@@ -5,7 +5,7 @@ from io import BytesIO
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, and_, or_, case
+from sqlalchemy import select, func, and_, or_, case, update
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -87,6 +87,29 @@ def _ensure_supplier_record(
     db.add(supplier)
     db.flush()
     return supplier
+
+
+def _get_supplier_or_404(db: Session, tenant_user_ids: list[int], supplier_id: int) -> Supplier:
+    supplier = db.scalar(
+        select(Supplier).where(
+            Supplier.id == supplier_id,
+            Supplier.user_id.in_(tenant_user_ids),
+        )
+    )
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    return supplier
+
+
+def _supplier_purchase_condition(supplier: Supplier):
+    supplier_key = supplier.name.strip().lower()
+    return or_(
+        Purchase.supplier_id == supplier.id,
+        and_(
+            Purchase.supplier_id.is_(None),
+            func.lower(func.trim(Purchase.supplier_name)) == supplier_key,
+        ),
+    )
 
 
 def _attach_purchase_creator_names(purchases: list[Purchase], db: Session) -> None:
@@ -265,6 +288,155 @@ def create_supplier(
     db.commit()
     db.refresh(supplier)
     return supplier
+
+
+@router.get("/suppliers/{supplier_id}", response_model=schemas.SupplierDetailRead)
+def get_supplier_detail(
+    supplier_id: int,
+    purchase_limit: int = Query(default=50, ge=1, le=300),
+    payment_limit: int = Query(default=50, ge=1, le=300),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    supplier = _get_supplier_or_404(db, tenant_user_ids, supplier_id)
+    _attach_supplier_financials([supplier], db, tenant_user_ids, active_branch_id)
+
+    purchases = db.scalars(
+        select(Purchase)
+        .where(
+            Purchase.user_id.in_(tenant_user_ids),
+            Purchase.branch_id == active_branch_id,
+            _supplier_purchase_condition(supplier),
+        )
+        .order_by(Purchase.created_at.desc())
+        .limit(purchase_limit)
+    ).all()
+    _attach_purchase_creator_names(purchases, db)
+
+    purchase_ids = [purchase.id for purchase in purchases]
+    payment_stmt = (
+        select(SupplierPayment)
+        .where(
+            SupplierPayment.user_id.in_(tenant_user_ids),
+            SupplierPayment.branch_id == active_branch_id,
+            SupplierPayment.supplier_id == supplier.id,
+        )
+        .order_by(SupplierPayment.payment_date.desc(), SupplierPayment.created_at.desc())
+        .limit(payment_limit)
+    )
+    if purchase_ids:
+        payment_stmt = (
+            select(SupplierPayment)
+            .where(
+                SupplierPayment.user_id.in_(tenant_user_ids),
+                SupplierPayment.branch_id == active_branch_id,
+                or_(
+                    SupplierPayment.supplier_id == supplier.id,
+                    SupplierPayment.purchase_id.in_(purchase_ids),
+                ),
+            )
+            .order_by(SupplierPayment.payment_date.desc(), SupplierPayment.created_at.desc())
+            .limit(payment_limit)
+        )
+    payments = db.scalars(payment_stmt).all()
+    _attach_supplier_payment_metadata(payments, db)
+
+    return schemas.SupplierDetailRead(supplier=supplier, purchases=purchases, payments=payments)
+
+
+@router.put("/suppliers/{supplier_id}", response_model=schemas.SupplierRead)
+def update_supplier(
+    supplier_id: int,
+    payload: schemas.SupplierUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    supplier = _get_supplier_or_404(db, tenant_user_ids, supplier_id)
+
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        _attach_supplier_financials([supplier], db, tenant_user_ids, active_branch_id)
+        return supplier
+
+    old_name = supplier.name
+    new_name = old_name
+    if "name" in updates and updates["name"] is not None:
+        trimmed_name = updates["name"].strip()
+        if not trimmed_name:
+            raise HTTPException(status_code=400, detail="Supplier name is required")
+
+        existing = db.scalar(
+            select(Supplier).where(
+                func.lower(func.trim(Supplier.name)) == trimmed_name.lower(),
+                Supplier.user_id.in_(tenant_user_ids),
+                Supplier.is_active.is_(True),
+                Supplier.id != supplier.id,
+            )
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="Supplier already exists")
+        new_name = trimmed_name
+        supplier.name = trimmed_name
+
+    for field_name in ("contact_person", "phone", "email", "address", "notes"):
+        if field_name not in updates:
+            continue
+        raw_value = updates[field_name]
+        if raw_value is None:
+            setattr(supplier, field_name, None)
+            continue
+        trimmed_value = raw_value.strip()
+        setattr(supplier, field_name, trimmed_value or None)
+
+    if new_name.strip().lower() != old_name.strip().lower():
+        old_name_key = old_name.strip().lower()
+        db.execute(
+            update(Purchase)
+            .where(
+                Purchase.user_id.in_(tenant_user_ids),
+                or_(
+                    Purchase.supplier_id == supplier.id,
+                    func.lower(func.trim(Purchase.supplier_name)) == old_name_key,
+                ),
+            )
+            .values(supplier_id=supplier.id, supplier_name=new_name)
+        )
+        db.execute(
+            update(Product)
+            .where(
+                Product.user_id.in_(tenant_user_ids),
+                func.lower(func.trim(Product.supplier)) == old_name_key,
+            )
+            .values(supplier=new_name)
+        )
+
+    db.commit()
+    db.refresh(supplier)
+    _attach_supplier_financials([supplier], db, tenant_user_ids, active_branch_id)
+    return supplier
+
+
+@router.delete("/suppliers/{supplier_id}")
+def deactivate_supplier(
+    supplier_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    supplier = _get_supplier_or_404(db, tenant_user_ids, supplier_id)
+    _attach_supplier_financials([supplier], db, tenant_user_ids, active_branch_id)
+
+    if _to_money(getattr(supplier, "outstanding_balance", MONEY_ZERO)) > MONEY_ZERO:
+        raise HTTPException(status_code=400, detail="Cannot deactivate a supplier with outstanding balance")
+
+    supplier.is_active = False
+    db.commit()
+    return {"message": f"Supplier {supplier.name} deactivated"}
 
 
 @router.get("/purchases", response_model=list[schemas.PurchaseRead])

@@ -48,6 +48,15 @@ class SupplierCreate(SupplierBase):
     pass
 
 
+class SupplierUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    contact_person: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=50)
+    email: str | None = Field(default=None, max_length=255)
+    address: str | None = Field(default=None, max_length=1000)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
 class SupplierRead(SupplierBase):
     id: int
     is_active: bool
@@ -60,6 +69,12 @@ class SupplierRead(SupplierBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SupplierDetailRead(BaseModel):
+    supplier: SupplierRead
+    purchases: list["PurchaseRead"]
+    payments: list["SupplierPaymentRead"]
 
 
 class PurchaseCreate(BaseModel):

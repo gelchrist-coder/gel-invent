@@ -124,6 +124,15 @@ export type NewSupplier = {
   notes?: string | null;
 };
 
+export type SupplierUpdate = {
+  name?: string | null;
+  contact_person?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  notes?: string | null;
+};
+
 export type Purchase = {
   id: number;
   supplier_id?: number | null;
@@ -177,6 +186,12 @@ export type SupplierPayment = {
   notes?: string | null;
   created_at: string;
   created_by_name?: string | null;
+};
+
+export type SupplierDetail = {
+  supplier: Supplier;
+  purchases: Purchase[];
+  payments: SupplierPayment[];
 };
 
 export type NewSupplierPayment = {

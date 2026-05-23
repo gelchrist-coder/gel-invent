@@ -1,4 +1,4 @@
-import { Branch, NewMovement, NewProduct, NewPurchase, NewSale, NewSupplier, NewSupplierPayment, Product, Purchase, Sale, StockMovement, Supplier, SupplierPayment } from "./types";
+import { Branch, NewMovement, NewProduct, NewPurchase, NewSale, NewSupplier, NewSupplierPayment, Product, Purchase, Sale, StockMovement, Supplier, SupplierDetail, SupplierPayment, SupplierUpdate } from "./types";
 
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
@@ -811,6 +811,27 @@ export async function createSupplier(payload: NewSupplier): Promise<Supplier> {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export async function fetchSupplierDetail(supplierId: number): Promise<SupplierDetail> {
+  return jsonRequest<SupplierDetail>(`/inventory/suppliers/${supplierId}`);
+}
+
+export async function updateSupplier(supplierId: number, payload: SupplierUpdate): Promise<Supplier> {
+  const result = await jsonRequest<Supplier>(`/inventory/suppliers/${supplierId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  clearDataCache();
+  return result;
+}
+
+export async function deactivateSupplier(supplierId: number): Promise<{ message: string }> {
+  const result = await jsonRequest<{ message: string }>(`/inventory/suppliers/${supplierId}`, {
+    method: 'DELETE',
+  });
+  clearDataCache();
+  return result;
 }
 
 export async function fetchPurchases(limit = 40): Promise<Purchase[]> {

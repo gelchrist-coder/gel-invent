@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { createPurchase, createSupplier, createSupplierPayment, fetchPurchases, fetchSupplierPayments, fetchSuppliers } from "../api";
-import type { Product, Purchase, Supplier, SupplierPayment } from "../types";
+import { createPurchase, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchases, fetchSupplierDetail, fetchSupplierPayments, fetchSuppliers, updateSupplier } from "../api";
+import type { Product, Purchase, Supplier, SupplierDetail, SupplierPayment } from "../types";
 
 type Props = {
   products: Product[];
@@ -65,6 +65,17 @@ function getPurchaseDateValue(purchase: Purchase): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function getSupplierFormValues(supplier: Supplier) {
+  return {
+    name: supplier.name || "",
+    contact_person: supplier.contact_person || "",
+    phone: supplier.phone || "",
+    email: supplier.email || "",
+    address: supplier.address || "",
+    notes: supplier.notes || "",
+  };
+}
+
 export default function PurchasingPanel({
   products,
   initialProductId = null,
@@ -74,6 +85,10 @@ export default function PurchasingPanel({
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [payments, setPayments] = useState<SupplierPayment[]>([]);
+  const [supplierDetail, setSupplierDetail] = useState<SupplierDetail | null>(null);
+  const [loadingSupplierDetail, setLoadingSupplierDetail] = useState(false);
+  const [editingSupplierId, setEditingSupplierId] = useState<number | null>(null);
+  const [supplierEditForm, setSupplierEditForm] = useState(emptySupplierForm);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [manualSupplierName, setManualSupplierName] = useState("");
@@ -98,6 +113,8 @@ export default function PurchasingPanel({
   const [submittingPurchase, setSubmittingPurchase] = useState(false);
   const [submittingSupplier, setSubmittingSupplier] = useState(false);
   const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [savingSupplierDetail, setSavingSupplierDetail] = useState(false);
+  const [deactivatingSupplierId, setDeactivatingSupplierId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -223,6 +240,11 @@ export default function PurchasingPanel({
     [suppliers],
   );
 
+  const selectedSupplierRecord = useMemo(
+    () => suppliers.find((supplier) => supplier.id === supplierDetail?.supplier.id) ?? supplierDetail?.supplier ?? null,
+    [supplierDetail, suppliers],
+  );
+
   const paymentPurchasesForSupplier = useMemo(
     () => unpaidPurchases.filter((purchase) => paymentSupplierId == null || resolveSupplierIdForPurchase(purchase) === paymentSupplierId),
     [paymentSupplierId, resolveSupplierIdForPurchase, unpaidPurchases],
@@ -275,6 +297,26 @@ export default function PurchasingPanel({
     setPaymentNotes("");
   };
 
+  const loadSupplierDetail = useCallback(async (supplierId: number) => {
+    setLoadingSupplierDetail(true);
+    try {
+      const detail = await fetchSupplierDetail(supplierId);
+      setSupplierDetail(detail);
+      setSupplierEditForm(getSupplierFormValues(detail.supplier));
+      return detail;
+    } finally {
+      setLoadingSupplierDetail(false);
+    }
+  }, []);
+
+  const refreshOpenSupplierDetail = useCallback(async (supplierId?: number | null) => {
+    const targetId = supplierId ?? supplierDetail?.supplier.id ?? null;
+    if (targetId == null) {
+      return null;
+    }
+    return loadSupplierDetail(targetId);
+  }, [loadSupplierDetail, supplierDetail?.supplier.id]);
+
   const focusPurchaseSupplier = (supplier: Supplier) => {
     setSelectedSupplierId(supplier.id);
     setManualSupplierName("");
@@ -310,6 +352,17 @@ export default function PurchasingPanel({
       return;
     }
     openPaymentForPurchase(targetPurchase);
+  };
+
+  const openSupplierDetail = async (supplier: Supplier) => {
+    setError(null);
+    setNotice(null);
+    setEditingSupplierId(null);
+    try {
+      await loadSupplierDetail(supplier.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load supplier detail");
+    }
   };
 
   const handlePaymentSupplierChange = (supplierId: number | null) => {
@@ -360,6 +413,7 @@ export default function PurchasingPanel({
       setManualSupplierName("");
       setNotice(`Supplier ${created.name} added`);
       await loadPanelData();
+      await loadSupplierDetail(created.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create supplier");
     } finally {
@@ -447,6 +501,7 @@ export default function PurchasingPanel({
       setExpiryDate("");
       setNotice(`Purchase recorded for ${purchase.product_name} with status ${getStatusMeta(purchase.payment_status).label.toLowerCase()}`);
       await loadPanelData();
+      await refreshOpenSupplierDetail(purchase.supplier_id ?? selectedSupplierId);
       if (onPurchaseRecorded) {
         await onPurchaseRecorded();
       }
@@ -494,10 +549,76 @@ export default function PurchasingPanel({
       setNotice(`Recorded ${formatCurrency(Number(payment.amount || 0))} payment for ${payment.supplier_name}`);
       resetPaymentForm();
       await loadPanelData();
+      await refreshOpenSupplierDetail(payment.supplier_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to record supplier payment");
     } finally {
       setSubmittingPayment(false);
+    }
+  };
+
+  const handleSaveSupplierDetail = async () => {
+    if (!supplierDetail) {
+      return;
+    }
+
+    if (!supplierEditForm.name.trim()) {
+      setError("Supplier name is required");
+      return;
+    }
+
+    setSavingSupplierDetail(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const updatedSupplier = await updateSupplier(supplierDetail.supplier.id, {
+        name: supplierEditForm.name.trim(),
+        contact_person: trimOrUndefined(supplierEditForm.contact_person),
+        phone: trimOrUndefined(supplierEditForm.phone),
+        email: trimOrUndefined(supplierEditForm.email),
+        address: trimOrUndefined(supplierEditForm.address),
+        notes: trimOrUndefined(supplierEditForm.notes),
+      });
+      setNotice(`Supplier ${updatedSupplier.name} updated`);
+      setEditingSupplierId(null);
+      await loadPanelData();
+      await loadSupplierDetail(updatedSupplier.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update supplier");
+    } finally {
+      setSavingSupplierDetail(false);
+    }
+  };
+
+  const handleDeactivateSupplier = async () => {
+    if (!supplierDetail) {
+      return;
+    }
+
+    const supplier = supplierDetail.supplier;
+    if (!confirm(`Deactivate ${supplier.name}? This keeps purchase history but removes the supplier from active purchasing lists.`)) {
+      return;
+    }
+
+    setDeactivatingSupplierId(supplier.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await deactivateSupplier(supplier.id);
+      if (selectedSupplierId === supplier.id) {
+        setSelectedSupplierId(null);
+      }
+      if (paymentSupplierId === supplier.id) {
+        resetPaymentForm();
+      }
+      setSupplierDetail(null);
+      setEditingSupplierId(null);
+      setNotice(result.message);
+      await loadPanelData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to deactivate supplier");
+    } finally {
+      setDeactivatingSupplierId(null);
     }
   };
 
@@ -629,8 +750,8 @@ export default function PurchasingPanel({
                     style={{
                       padding: "10px 12px",
                       borderRadius: 10,
-                      border: supplier.id === selectedSupplierId ? "1px solid #2563eb" : "1px solid #e2e8f0",
-                      background: supplier.id === selectedSupplierId ? "#eff6ff" : "#ffffff",
+                      border: supplier.id === supplierDetail?.supplier.id ? "1px solid #0f172a" : supplier.id === selectedSupplierId ? "1px solid #2563eb" : "1px solid #e2e8f0",
+                      background: supplier.id === supplierDetail?.supplier.id ? "#f8fafc" : supplier.id === selectedSupplierId ? "#eff6ff" : "#ffffff",
                       display: "grid",
                       gap: 10,
                     }}
@@ -643,6 +764,22 @@ export default function PurchasingPanel({
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          onClick={() => void openSupplierDetail(supplier)}
+                          style={{
+                            padding: "7px 10px",
+                            borderRadius: 8,
+                            border: "1px solid #0f172a",
+                            background: supplier.id === supplierDetail?.supplier.id ? "#0f172a" : "white",
+                            color: supplier.id === supplierDetail?.supplier.id ? "#ffffff" : "#0f172a",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                        >
+                          View Details
+                        </button>
                         <button
                           type="button"
                           onClick={() => focusPurchaseSupplier(supplier)}
@@ -956,6 +1093,311 @@ export default function PurchasingPanel({
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 0 }}>
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Supplier Detail</h3>
+          <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
+            Inspect supplier activity, edit contact details, and deactivate suppliers once their balances are settled.
+          </p>
+        </div>
+
+        {loadingSupplierDetail ? (
+          <p style={{ margin: 0, color: "#6b7280" }}>Loading supplier detail...</p>
+        ) : !supplierDetail || !selectedSupplierRecord ? (
+          <p style={{ margin: 0, color: "#6b7280" }}>Select a supplier from the directory to view details and manage it.</p>
+        ) : (
+          <div style={{ display: "grid", gap: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <h4 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#0f172a" }}>{selectedSupplierRecord.name}</h4>
+                  <span
+                    style={{
+                      padding: "4px 8px",
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      border: selectedSupplierRecord.is_active ? "1px solid #86efac" : "1px solid #fca5a5",
+                      background: selectedSupplierRecord.is_active ? "#dcfce7" : "#fee2e2",
+                      color: selectedSupplierRecord.is_active ? "#166534" : "#b91c1c",
+                    }}
+                  >
+                    {selectedSupplierRecord.is_active ? "Active" : "Inactive"}
+                  </span>
+                </div>
+                <div style={{ marginTop: 6, fontSize: 13, color: "#64748b" }}>
+                  {selectedSupplierRecord.contact_person || selectedSupplierRecord.phone || selectedSupplierRecord.email || "No contact details added yet"}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => focusPurchaseSupplier(selectedSupplierRecord)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: "white",
+                    color: "#1f2937",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Use for Purchase
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openPaymentForSupplier(selectedSupplierRecord)}
+                  disabled={Number(selectedSupplierRecord.unpaid_purchases_count || 0) === 0}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #2563eb",
+                    background: Number(selectedSupplierRecord.unpaid_purchases_count || 0) === 0 ? "#e5e7eb" : "#2563eb",
+                    color: Number(selectedSupplierRecord.unpaid_purchases_count || 0) === 0 ? "#6b7280" : "#ffffff",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: Number(selectedSupplierRecord.unpaid_purchases_count || 0) === 0 ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Record Payment
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (editingSupplierId === selectedSupplierRecord.id) {
+                      setEditingSupplierId(null);
+                      setSupplierEditForm(getSupplierFormValues(selectedSupplierRecord));
+                      return;
+                    }
+                    setEditingSupplierId(selectedSupplierRecord.id);
+                    setSupplierEditForm(getSupplierFormValues(selectedSupplierRecord));
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #0f172a",
+                    background: editingSupplierId === selectedSupplierRecord.id ? "#0f172a" : "white",
+                    color: editingSupplierId === selectedSupplierRecord.id ? "#ffffff" : "#0f172a",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  {editingSupplierId === selectedSupplierRecord.id ? "Cancel Edit" : "Edit Supplier"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDeactivateSupplier()}
+                  disabled={deactivatingSupplierId === selectedSupplierRecord.id}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #dc2626",
+                    background: deactivatingSupplierId === selectedSupplierRecord.id ? "#fecaca" : "white",
+                    color: "#b91c1c",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: deactivatingSupplierId === selectedSupplierRecord.id ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {deactivatingSupplierId === selectedSupplierRecord.id ? "Deactivating..." : "Deactivate Supplier"}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+              <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Total Purchased</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>{formatCurrency(Number(selectedSupplierRecord.total_purchased || 0))}</div>
+              </div>
+              <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Total Paid</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#1d4ed8" }}>{formatCurrency(Number(selectedSupplierRecord.total_paid || 0))}</div>
+              </div>
+              <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Outstanding</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: Number(selectedSupplierRecord.outstanding_balance || 0) > 0 ? "#b45309" : "#166534" }}>
+                  {formatCurrency(Number(selectedSupplierRecord.outstanding_balance || 0))}
+                </div>
+              </div>
+              <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Open Invoices</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: Number(selectedSupplierRecord.unpaid_purchases_count || 0) > 0 ? "#b91c1c" : "#0f172a" }}>
+                  {Number(selectedSupplierRecord.unpaid_purchases_count || 0)}
+                </div>
+              </div>
+            </div>
+
+            {editingSupplierId === selectedSupplierRecord.id ? (
+              <div style={{ display: "grid", gap: 12, padding: 16, borderRadius: 12, border: "1px solid #dbe5f2", background: "#f8fbff" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+                  <label>
+                    <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier Name</span>
+                    <input className="input" value={supplierEditForm.name} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, name: e.target.value }))} />
+                  </label>
+                  <label>
+                    <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Contact Person</span>
+                    <input className="input" value={supplierEditForm.contact_person} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, contact_person: e.target.value }))} />
+                  </label>
+                  <label>
+                    <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Phone</span>
+                    <input className="input" value={supplierEditForm.phone} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, phone: e.target.value }))} />
+                  </label>
+                  <label>
+                    <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Email</span>
+                    <input className="input" value={supplierEditForm.email} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, email: e.target.value }))} />
+                  </label>
+                </div>
+                <label>
+                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Address</span>
+                  <textarea className="textarea" rows={2} value={supplierEditForm.address} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, address: e.target.value }))} />
+                </label>
+                <label>
+                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Notes</span>
+                  <textarea className="textarea" rows={3} value={supplierEditForm.notes} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, notes: e.target.value }))} />
+                </label>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingSupplierId(null);
+                      setSupplierEditForm(getSupplierFormValues(selectedSupplierRecord));
+                    }}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "white",
+                      color: "#334155",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button type="button" className="button" onClick={() => void handleSaveSupplierDetail()} disabled={savingSupplierDetail}>
+                    {savingSupplierDetail ? "Saving..." : "Save Supplier"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Contact Person</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedSupplierRecord.contact_person || "-"}</div>
+                </div>
+                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Phone</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedSupplierRecord.phone || "-"}</div>
+                </div>
+                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Email</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedSupplierRecord.email || "-"}</div>
+                </div>
+                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Last Payment</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatDate(selectedSupplierRecord.last_payment_date)}</div>
+                </div>
+                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff", gridColumn: "1 / -1" }}>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Address</div>
+                  <div style={{ fontSize: 14, color: "#0f172a" }}>{selectedSupplierRecord.address || "No address recorded"}</div>
+                </div>
+                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff", gridColumn: "1 / -1" }}>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Notes</div>
+                  <div style={{ fontSize: 14, color: "#0f172a", whiteSpace: "pre-wrap" }}>{selectedSupplierRecord.notes || "No notes recorded"}</div>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20, alignItems: "start" }}>
+              <div style={{ overflowX: "auto" }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Supplier Purchases</div>
+                {supplierDetail.purchases.length === 0 ? (
+                  <p style={{ margin: 0, color: "#6b7280" }}>No purchases recorded for this supplier yet.</p>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc" }}>
+                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
+                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Product</th>
+                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Status</th>
+                        <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {supplierDetail.purchases.map((purchase) => {
+                        const statusMeta = getStatusMeta(purchase.payment_status);
+                        return (
+                          <tr key={purchase.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                            <td style={{ padding: 12, fontSize: 14 }}>{formatDate(purchase.purchase_date || purchase.created_at)}</td>
+                            <td style={{ padding: 12, fontSize: 14 }}>
+                              <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchase.product_name}</div>
+                              <div style={{ fontSize: 12, color: "#64748b" }}>{purchase.invoice_number || purchase.product_sku}</div>
+                            </td>
+                            <td style={{ padding: 12, fontSize: 14 }}>
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  padding: "4px 8px",
+                                  borderRadius: 999,
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  border: `1px solid ${statusMeta.border}`,
+                                  background: statusMeta.background,
+                                  color: statusMeta.color,
+                                }}
+                              >
+                                {statusMeta.label}
+                              </span>
+                            </td>
+                            <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(purchase.amount_due || 0))}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div style={{ overflowX: "auto" }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Supplier Payments</div>
+                {supplierDetail.payments.length === 0 ? (
+                  <p style={{ margin: 0, color: "#6b7280" }}>No payments recorded for this supplier yet.</p>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc" }}>
+                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
+                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Invoice</th>
+                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Method</th>
+                        <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {supplierDetail.payments.map((payment) => (
+                        <tr key={payment.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                          <td style={{ padding: 12, fontSize: 14 }}>{formatDate(payment.payment_date || payment.created_at)}</td>
+                          <td style={{ padding: 12, fontSize: 14 }}>
+                            <div style={{ fontWeight: 700, color: "#0f172a" }}>{payment.purchase_invoice_number || "-"}</div>
+                            <div style={{ fontSize: 12, color: "#64748b" }}>{payment.product_name || "Payment record"}</div>
+                          </td>
+                          <td style={{ padding: 12, fontSize: 14, textTransform: "capitalize" }}>{payment.payment_method.replace(/_/g, " ")}</td>
+                          <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(payment.amount || 0))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20, alignItems: "start" }}>
