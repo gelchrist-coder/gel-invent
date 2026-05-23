@@ -31,7 +31,7 @@ class ProductUpdate(BaseModel):
     pack_selling_price: Optional[Decimal] = None
 
 
-@router.post("/", response_model=schemas.ProductRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=schemas.ProductRead, status_code=status.HTTP_201_CREATED)
 def create_product(
     payload: schemas.ProductCreate,
     db: Session = Depends(get_db),
@@ -98,7 +98,7 @@ def create_product(
     return product
 
 
-@router.get("/", response_model=list[schemas.ProductRead])
+@router.get("", response_model=list[schemas.ProductRead])
 def list_products(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),

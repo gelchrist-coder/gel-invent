@@ -51,7 +51,7 @@ class EmployeeUpdate(BaseModel):
     phone: Optional[str] = None
 
 
-@router.post("/", response_model=EmployeeResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=EmployeeResponse, status_code=status.HTTP_201_CREATED)
 def create_employee(
     employee_data: EmployeeCreate,
     current_user: User = Depends(get_current_active_user),
@@ -157,7 +157,7 @@ def create_employee(
     return new_employee
 
 
-@router.get("/", response_model=List[EmployeeResponse])
+@router.get("", response_model=List[EmployeeResponse])
 def list_employees(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)

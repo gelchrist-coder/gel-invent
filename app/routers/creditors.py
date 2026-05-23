@@ -45,7 +45,7 @@ class TransactionCreate(BaseModel):
     sale_id: Optional[int] = None
 
 # Get all creditors
-@router.get("/")
+@router.get("")
 async def get_creditors(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -184,7 +184,7 @@ async def get_creditor(
     }
 
 # Create creditor
-@router.post("/")
+@router.post("")
 async def create_creditor(
     creditor: CreditorCreate,
     db: Session = Depends(get_db),

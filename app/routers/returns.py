@@ -22,7 +22,7 @@ from ..utils.tenant import get_tenant_user_ids
 router = APIRouter(prefix="/returns", tags=["returns"])
 
 
-@router.post("/", response_model=schemas.SaleReturnRead)
+@router.post("", response_model=schemas.SaleReturnRead)
 def create_return(
     payload: schemas.SaleReturnCreate,
     db: Session = Depends(get_db),
@@ -145,7 +145,7 @@ def create_return(
     )
 
 
-@router.get("/", response_model=list[schemas.SaleReturnRead])
+@router.get("", response_model=list[schemas.SaleReturnRead])
 def list_returns(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
