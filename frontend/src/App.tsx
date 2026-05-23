@@ -98,6 +98,7 @@ export default function App() {
         const user = JSON.parse(userStr);
         setUserName(user.name || "User");
         setBusinessName(user.business_name || "Business");
+        setBusinessLogoUrl(user.business_logo_url ?? null);
         setUserRole(user.role || "Admin");
         setCurrentUserId(user.id || null);
         if (user.role && user.role !== "Admin") {
@@ -254,7 +255,8 @@ export default function App() {
         logoutAndReset();
         return;
       }
-      if (newUser?.id && newUser.id !== currentUserId) {
+      // Only reload when switching between two different logged-in users (not for initial login).
+      if (currentUserId !== null && newUser?.id && newUser.id !== currentUserId) {
         console.log("Different user detected in same tab, refreshing...");
         window.location.reload();
         return;
