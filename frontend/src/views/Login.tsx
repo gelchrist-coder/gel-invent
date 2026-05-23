@@ -1221,10 +1221,24 @@ export default function Login({ onLogin }: LoginProps) {
           {!showReset && (
           <div style={{ marginTop: 24, textAlign: "center" }}>
             <span style={{ color: "#6b7280", fontSize: 14 }}>
-              {isSignUp
-                ? "Already have an account? Sign In"
-                : "Don't have an account? Sign Up"}
+              {isSignUp ? "Already have an account? " : "Don't have an account? "}
             </span>
+            <button
+              type="button"
+              onClick={() => switchAuthMode(!isSignUp)}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#4f46e5",
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                padding: 0,
+                textDecoration: "underline",
+              }}
+            >
+              {isSignUp ? "Sign In" : "Sign Up"}
+            </button>
           </div>
           )}
           </div>
