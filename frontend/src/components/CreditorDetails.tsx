@@ -551,7 +551,7 @@ function DebtModal({ creditorId, creditorName, onClose, onSuccess }: DebtModalPr
 
   const fetchProducts = async () => {
     try {
-      const response = await resilientFetch(`${API_BASE}/products/`, { headers: buildAuthHeaders() });
+      const response = await resilientFetch(`${API_BASE}/products`, { headers: buildAuthHeaders() });
       if (response.ok) {
         const data = (await response.json()) as Array<Record<string, unknown>>;
         const mapped: Product[] = (Array.isArray(data) ? data : []).map((p) => {

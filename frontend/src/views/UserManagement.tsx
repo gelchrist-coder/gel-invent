@@ -57,7 +57,7 @@ export default function UserManagement() {
 
   const loadEmployees = async () => {
     try {
-      const response = await resilientFetch(`${API_BASE}/employees/`, {
+      const response = await resilientFetch(`${API_BASE}/employees`, {
         headers: buildAuthHeaders(),
       });
 
@@ -96,7 +96,7 @@ export default function UserManagement() {
       if (typeof formData.branch_id === "number") {
         payload.branch_id = formData.branch_id;
       }
-      const response = await resilientFetch(`${API_BASE}/employees/`, {
+      const response = await resilientFetch(`${API_BASE}/employees`, {
         method: "POST",
         headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),

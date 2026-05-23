@@ -4,6 +4,14 @@ function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
+function isHostedVercelFrontend(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.location.hostname.endsWith(".vercel.app");
+}
+
 function resolveApiBaseUrl(): string {
   const configured = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
 
@@ -15,7 +23,20 @@ function resolveApiBaseUrl(): string {
 
   // Strip trailing /api if someone included it in the URL — backend routes
   // are mounted at /products, /sales etc., not /api/products, /api/sales.
-  return configured.replace(/\/api\/?$/, "");
+  const normalized = configured.replace(/\/api\/?$/, "");
+
+  if (isHostedVercelFrontend()) {
+    try {
+      const configuredUrl = new URL(normalized);
+      if (configuredUrl.origin !== window.location.origin) {
+        return "/api";
+      }
+    } catch {
+      // Non-URL values like /api should flow through unchanged below.
+    }
+  }
+
+  return normalized;
 }
 
 // API base URL (configure via VITE_API_URL on Vercel/Netlify/etc)
@@ -37,6 +58,7 @@ const CACHE_TTL = 30000; // 30 seconds - data is considered fresh
 const inflightGetRequests = new Map<string, Promise<unknown>>();
 const REQUEST_TIMEOUT_MS = 25000;
 const GET_RETRY_ATTEMPTS = 1;
+const STARTUP_REQUEST_TIMEOUT_MS = 35000;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -248,6 +270,14 @@ export function buildAuthHeaders(extra?: Record<string, string>): Record<string,
 }
 
 async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  return jsonRequestWithBehavior<T>(path, options);
+}
+
+async function jsonRequestWithBehavior<T>(
+  path: string,
+  options?: RequestInit,
+  behavior?: { timeoutMs?: number; retries?: number },
+): Promise<T> {
   const token = localStorage.getItem("token");
   const activeBranchId = localStorage.getItem("activeBranchId");
   const method = (options?.method || "GET").toUpperCase();
@@ -282,7 +312,10 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
         method,
         headers,
       },
-      { timeoutMs: REQUEST_TIMEOUT_MS, retries: method === "GET" ? GET_RETRY_ATTEMPTS : 0 },
+      {
+        timeoutMs: behavior?.timeoutMs ?? REQUEST_TIMEOUT_MS,
+        retries: method === "GET" ? (behavior?.retries ?? GET_RETRY_ATTEMPTS) : 0,
+      },
     );
 
     if (!response.ok) {
@@ -488,7 +521,10 @@ export async function deleteBranch(branchId: number): Promise<{ message: string 
 }
 
 export async function fetchMe(): Promise<AuthUser> {
-  return jsonRequest<AuthUser>("/auth/me");
+  return jsonRequestWithBehavior<AuthUser>("/auth/me", undefined, {
+    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS,
+    retries: 1,
+  });
 }
 
 export async function changePassword(payload: {
@@ -909,7 +945,10 @@ export async function fetchRevenueAnalytics(period: string = "30d", startDate?: 
   const params = new URLSearchParams({ period });
   if (startDate) params.append("start_date", startDate);
   if (endDate) params.append("end_date", endDate);
-  const data = await jsonRequest<JsonObject>(`/revenue/analytics?${params.toString()}`);
+  const data = await jsonRequestWithBehavior<JsonObject>(`/revenue/analytics?${params.toString()}`, undefined, {
+    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS,
+    retries: 1,
+  });
   setCache(cacheKey, data);
   return data;
 }
@@ -929,11 +968,28 @@ export async function fetchSalesDashboard(filterDate?: string): Promise<JsonObje
     ? `/reports/sales-dashboard?filter_date=${filterDate}` 
     : "/reports/sales-dashboard";
   
-  const data = await jsonRequest<JsonObject>(url);
+  const data = await jsonRequestWithBehavior<JsonObject>(url, undefined, {
+    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS,
+    retries: 1,
+  });
   
   // Only cache if no custom date
   if (!filterDate) {
     setCache("salesDashboard", data);
   }
   return data;
+}
+
+export async function fetchInventoryStatusReport(): Promise<JsonObject> {
+  return jsonRequestWithBehavior<JsonObject>("/reports/inventory-status", undefined, {
+    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS,
+    retries: 1,
+  });
+}
+
+export async function fetchCreditorsSummaryReport(): Promise<JsonObject> {
+  return jsonRequestWithBehavior<JsonObject>("/reports/creditors-summary", undefined, {
+    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS,
+    retries: 1,
+  });
 }

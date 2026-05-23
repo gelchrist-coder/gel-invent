@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { API_BASE, buildAuthHeaders, fetchRevenueAnalytics } from "../api";
+import {
+  fetchCreditorsSummaryReport,
+  fetchInventoryStatusReport,
+  fetchRevenueAnalytics,
+  fetchSalesDashboard,
+} from "../api";
 import { useExpiryTracking } from "../settings";
 
 // SVG Icons for KPI Cards
@@ -322,29 +327,21 @@ export default function Reports() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const headers = buildAuthHeaders({ "Content-Type": "application/json" });
-
       if (activeTab === "sales") {
         if (!salesData) {
-          const res = await fetch(`${API_BASE}/reports/sales-dashboard`, { headers });
-          if (res.ok) {
-            setSalesData(await res.json());
-          }
+          const data = await fetchSalesDashboard();
+          setSalesData(data as SalesDashboard);
         }
         if (!revenueData) {
           const data = await fetchRevenueAnalytics(revenuePeriod);
           setRevenueData(data as RevenueAnalytics);
         }
       } else if (activeTab === "inventory" && !inventoryData) {
-        const res = await fetch(`${API_BASE}/reports/inventory-status`, { headers });
-        if (res.ok) {
-          setInventoryData(await res.json());
-        }
+        const data = await fetchInventoryStatusReport();
+        setInventoryData(data as InventoryStatus);
       } else if (activeTab === "creditors" && !creditorsData) {
-        const res = await fetch(`${API_BASE}/reports/creditors-summary`, { headers });
-        if (res.ok) {
-          setCreditorsData(await res.json());
-        }
+        const data = await fetchCreditorsSummaryReport();
+        setCreditorsData(data as CreditorsSummary);
       }
     } catch (error) {
       console.error("Failed to load report data:", error);

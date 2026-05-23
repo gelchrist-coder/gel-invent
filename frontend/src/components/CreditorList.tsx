@@ -38,7 +38,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
   const fetchCreditors = async () => {
     try {
       setLoading(true);
-      const response = await resilientFetch(`${API_BASE}/creditors/`, {
+      const response = await resilientFetch(`${API_BASE}/creditors`, {
         headers: buildAuthHeaders({ "Content-Type": "application/json" }),
       });
       if (!response.ok) {
