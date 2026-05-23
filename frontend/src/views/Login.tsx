@@ -1,7 +1,33 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { API_BASE } from "../api";
 import appLogo from "../asset/logo.png";
 import wareImage from "../asset/Ware.png";
+
+function loadRecaptchaScript(): Promise<void> {
+  if (typeof window === "undefined") {
+    return Promise.resolve();
+  }
+
+  if (window.grecaptcha) {
+    return Promise.resolve();
+  }
+
+  if (window.__gelInventRecaptchaScriptPromise) {
+    return window.__gelInventRecaptchaScriptPromise;
+  }
+
+  window.__gelInventRecaptchaScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load reCAPTCHA"));
+    document.head.appendChild(script);
+  });
+
+  return window.__gelInventRecaptchaScriptPromise;
+}
 
 type LoginProps = {
   onLogin: (email: string, password: string) => void;
@@ -62,6 +88,8 @@ function PasswordInput({
 }
 
 export default function Login({ onLogin }: LoginProps) {
+  const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY?.trim() || "";
+  const recaptchaEnabled = recaptchaSiteKey.length > 0;
   const [isSignUp, setIsSignUp] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [formPanelAnimation, setFormPanelAnimation] = useState<"" | "auth-panel-enter-signin" | "auth-panel-enter-signup">("");
@@ -95,6 +123,17 @@ export default function Login({ onLogin }: LoginProps) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
+  const [recaptchaToken, setRecaptchaToken] = useState("");
+  const [recaptchaLoadError, setRecaptchaLoadError] = useState("");
+  const recaptchaContainerRef = useRef<HTMLDivElement | null>(null);
+  const recaptchaWidgetIdRef = useRef<number | null>(null);
+
+  const resetRecaptcha = () => {
+    setRecaptchaToken("");
+    if (window.grecaptcha && recaptchaWidgetIdRef.current !== null) {
+      window.grecaptcha.reset(recaptchaWidgetIdRef.current);
+    }
+  };
 
   // Warm up the serverless backend as soon as the login page loads so the
   // cold-start delay doesn't hit the user mid-login.
@@ -115,9 +154,62 @@ export default function Login({ onLogin }: LoginProps) {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  useEffect(() => {
+    if (!recaptchaEnabled || !isSignUp || showReset) {
+      setRecaptchaToken("");
+      return;
+    }
+
+    let cancelled = false;
+
+    loadRecaptchaScript()
+      .then(() => {
+        if (cancelled || !window.grecaptcha || !recaptchaContainerRef.current) {
+          return;
+        }
+
+        window.grecaptcha.ready(() => {
+          if (cancelled || !window.grecaptcha || !recaptchaContainerRef.current) {
+            return;
+          }
+
+          setRecaptchaLoadError("");
+
+          if (recaptchaWidgetIdRef.current === null) {
+            recaptchaWidgetIdRef.current = window.grecaptcha.render(recaptchaContainerRef.current, {
+              sitekey: recaptchaSiteKey,
+              callback: (token: string) => {
+                setRecaptchaToken(token);
+                setRecaptchaLoadError("");
+              },
+              "expired-callback": () => setRecaptchaToken(""),
+              "error-callback": () => {
+                setRecaptchaToken("");
+                setRecaptchaLoadError("reCAPTCHA could not load. Use a reCAPTCHA v2 checkbox site key, not a v3 key.");
+              },
+            });
+            return;
+          }
+
+          window.grecaptcha.reset(recaptchaWidgetIdRef.current);
+          setRecaptchaToken("");
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecaptchaLoadError("reCAPTCHA could not load. Use a reCAPTCHA v2 checkbox site key, not a v3 key.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignUp, recaptchaEnabled, recaptchaSiteKey, showReset]);
+
   const switchAuthMode = (nextIsSignUp: boolean) => {
     if (nextIsSignUp === isSignUp) return;
 
+    resetRecaptcha();
     setIsSignUp(nextIsSignUp);
     setShowReset(false);
     setError("");
@@ -498,6 +590,11 @@ export default function Login({ onLogin }: LoginProps) {
           setLoading(false);
           return;
         }
+        if (recaptchaEnabled && !recaptchaToken) {
+          setError("Please complete the reCAPTCHA checkbox");
+          setLoading(false);
+          return;
+        }
 
         // Call signup API
         const signupFormData = new FormData();
@@ -509,6 +606,9 @@ export default function Login({ onLogin }: LoginProps) {
         signupFormData.append("business_location", formData.businessLocation.trim());
         signupFormData.append("categories", JSON.stringify(formData.categories));
         signupFormData.append("branches", JSON.stringify(formData.hasBranches ? formData.branches : []));
+        if (recaptchaEnabled) {
+          signupFormData.append("recaptcha_token", recaptchaToken);
+        }
         if (logoFile) {
           signupFormData.append("business_logo", logoFile);
         }
@@ -520,6 +620,7 @@ export default function Login({ onLogin }: LoginProps) {
 
         if (!signupResponse.ok) {
           const errorData = await signupResponse.json();
+          resetRecaptcha();
           setError(errorData.detail || "Signup failed");
           setLoading(false);
           return;
@@ -541,6 +642,9 @@ export default function Login({ onLogin }: LoginProps) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[Login] Unhandled error:", err);
+      if (isSignUp && recaptchaEnabled) {
+        resetRecaptcha();
+      }
       if (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("fetch")) {
         setError("Cannot reach the server. Check your internet connection and try again.");
       } else {
@@ -1195,6 +1299,15 @@ export default function Login({ onLogin }: LoginProps) {
                   autoComplete="new-password"
                 />
               </label>
+            )}
+
+            {isSignUp && recaptchaEnabled && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div ref={recaptchaContainerRef} />
+                {recaptchaLoadError && (
+                  <span style={{ fontSize: 12, color: "#b91c1c" }}>{recaptchaLoadError}</span>
+                )}
+              </div>
             )}
           </div>
 

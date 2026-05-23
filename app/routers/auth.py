@@ -3,6 +3,7 @@ from typing import Optional
 import json
 import secrets
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -56,6 +57,7 @@ class UserCreate(BaseModel):
     password: str
     business_name: Optional[str] = None
     business_location: Optional[str] = None
+    recaptcha_token: Optional[str] = None
     business_logo_url: Optional[str] = None
     categories: Optional[list[str]] = None
     branches: Optional[list[str]] = None  # Optional list of branch names
@@ -111,6 +113,34 @@ def _ordered_branch_names(primary_location: Optional[str], branches: Optional[li
         ordered.append(name)
 
     return ordered
+
+
+def _verify_recaptcha_or_raise(token: Optional[str]) -> None:
+    secret = (os.getenv("RECAPTCHA_SECRET_KEY") or "").strip()
+    if not secret:
+        return
+
+    if not token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please complete the reCAPTCHA checkbox")
+
+    payload = urllib.parse.urlencode({"secret": secret, "response": token}).encode("utf-8")
+    request = urllib.request.Request(
+        "https://www.google.com/recaptcha/api/siteverify",
+        data=payload,
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            verification = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not verify reCAPTCHA") from exc
+
+    if not verification.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="reCAPTCHA verification failed. Use a reCAPTCHA v2 checkbox site key and secret.",
+        )
 
 
 def _serialize_user(user: User) -> UserResponse:
@@ -174,6 +204,7 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
         password = str(form.get("password") or "")
         business_name = str(form.get("business_name") or "").strip() or None
         business_location = str(form.get("business_location") or "").strip() or None
+        recaptcha_token = str(form.get("recaptcha_token") or "").strip() or None
         categories = _parse_list_input(form.get("categories"))
         branches = _parse_list_input(form.get("branches"))
         logo_file = form.get("business_logo")
@@ -186,6 +217,7 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
             password=password,
             business_name=business_name,
             business_location=business_location,
+            recaptcha_token=recaptcha_token,
             categories=categories,
             branches=branches,
         )
@@ -228,6 +260,7 @@ class UpdateMeRequest(BaseModel):
 async def signup(request: Request, db: Session = Depends(get_db)):
     """Register a new user."""
     user_data, logo_file = await _parse_signup_request(request)
+    _verify_recaptcha_or_raise(user_data.recaptcha_token)
     email = _normalize_email(str(user_data.email))
     # Check if user already exists
     existing_user = db.query(User).filter(User.email == email).first()
