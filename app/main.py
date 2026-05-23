@@ -1,7 +1,7 @@
 import os
 import asyncio
 from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -421,6 +421,11 @@ async def on_startup() -> None:
     # Schedule migrations/backfills without blocking app readiness.
     asyncio.create_task(_runner())
     print("✅ Application started (migrations running in background)")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    return Response(status_code=204)
 
 
 @app.get("/")
