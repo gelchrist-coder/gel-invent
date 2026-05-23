@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 
 import { Branch } from "../types";
-import appLogo from "../asset/logo.png";
+
 
 type Props = {
   userName?: string;
@@ -60,7 +60,7 @@ export default function TopBar({
   }, [showDropdown]);
 
   const businessLabel = String(businessName || "Gel Invent").trim();
-  const logoSrc = businessLogoUrl || appLogo;
+  const logoSrc = businessLogoUrl || null;
   const initial = userName.charAt(0).toUpperCase();
 
   return (
@@ -115,19 +115,40 @@ export default function TopBar({
           gap: isMobile ? 8 : 12,
         }}
       >
-        <img
-          src={logoSrc}
-          alt="Gel Invent"
-          style={{
-            width: isMobile ? 30 : 36,
-            height: isMobile ? 30 : 36,
-            borderRadius: 10,
-            objectFit: "cover",
-            background: "#fff",
-            boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
-            flexShrink: 0,
-          }}
-        />
+        {logoSrc ? (
+          <img
+            src={logoSrc}
+            alt={businessLabel}
+            style={{
+              width: isMobile ? 30 : 36,
+              height: isMobile ? 30 : 36,
+              borderRadius: 10,
+              objectFit: "cover",
+              background: "#fff",
+              boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
+              flexShrink: 0,
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: isMobile ? 30 : 36,
+              height: isMobile ? 30 : 36,
+              borderRadius: 10,
+              background: "#1e3a8a",
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 800,
+              fontSize: isMobile ? 14 : 17,
+              flexShrink: 0,
+              boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
+            }}
+          >
+            {businessLabel.charAt(0).toUpperCase()}
+          </div>
+        )}
         <div style={{ minWidth: 0 }}>
           <h1
             style={{
