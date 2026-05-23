@@ -148,12 +148,8 @@ export default function Login({ onLogin }: LoginProps) {
     return null;
   };
 
-  const getRecaptchaToken = async (_action: "login" | "signup"): Promise<string> => {
-    return "";
-  };
-
-  const performLogin = async (identifier: string, password: string, recaptchaToken: string) => {
-    const loginFormData = new FormData();
+  const performLogin = async (identifier: string, password: string) => {
+    const loginFormData = new URLSearchParams();
     loginFormData.append("username", identifier);
     loginFormData.append("password", password);
 
@@ -164,6 +160,9 @@ export default function Login({ onLogin }: LoginProps) {
     try {
       loginResponse = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
         body: loginFormData,
         signal: controller.signal,
       });
@@ -483,7 +482,7 @@ export default function Login({ onLogin }: LoginProps) {
         }
 
         setInfo("Account created successfully.");
-        await performLogin(formData.email, formData.password, "");
+        await performLogin(formData.email, formData.password);
       } else {
         // Sign in validation
         if (!formData.email.trim() || !formData.password.trim()) {
@@ -492,7 +491,7 @@ export default function Login({ onLogin }: LoginProps) {
           return;
         }
 
-        await performLogin(formData.email, formData.password, "");
+        await performLogin(formData.email, formData.password);
       }
       setLoading(false);
     } catch (err) {
