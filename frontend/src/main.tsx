@@ -6,22 +6,8 @@ import "./index.css";
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-      registrations.forEach((registration) => {
-        registration.unregister().catch(() => {
-          // Ignore cleanup failures.
-        });
-      });
-    });
-
-    caches.keys().then((keys) => {
-      keys.forEach((key) => {
-        caches.delete(key).catch(() => {
-          // Ignore cleanup failures.
-        });
-      });
-    }).catch(() => {
-      // Ignore cleanup failures.
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      // Ignore registration failures. The app still works online without the PWA shell.
     });
   });
 }

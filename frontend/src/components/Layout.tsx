@@ -109,6 +109,11 @@ type Props = {
   businessName?: string;
   businessLogoUrl?: string | null;
   userRole?: string;
+  isOnline?: boolean;
+  outboxCount?: number;
+  isSyncingOutbox?: boolean;
+  canInstallApp?: boolean;
+  onInstallApp?: () => void;
   branches?: Branch[];
   activeBranchId?: number | null;
   onChangeBranch?: (branchId: number) => void;
@@ -123,6 +128,11 @@ export default function Layout({
   businessName = "Business",
   businessLogoUrl,
   userRole = "Admin",
+  isOnline = true,
+  outboxCount = 0,
+  isSyncingOutbox = false,
+  canInstallApp = false,
+  onInstallApp,
   branches,
   activeBranchId,
   onChangeBranch,
@@ -395,6 +405,11 @@ export default function Layout({
           userRole={userRole}
           businessName={businessName}
           businessLogoUrl={businessLogoUrl}
+          isOnline={isOnline}
+          outboxCount={outboxCount}
+          isSyncingOutbox={isSyncingOutbox}
+          canInstallApp={canInstallApp}
+          onInstallApp={onInstallApp}
           onLogout={onLogout}
           onNavigate={onNavigate}
           branches={branches}

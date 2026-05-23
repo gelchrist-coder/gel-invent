@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { createMovement, createProduct, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, updateProduct, getCachedProducts, clearDataCache } from "./api";
 import Layout from "./components/Layout";
+import { getSalesOutboxCount } from "./offline/storage";
+import { syncSalesOutboxOnce } from "./offline/sync";
 import ProductForm from "./components/ProductForm";
 import ProductList from "./components/ProductList";
 import { useAppCategories } from "./categories";
@@ -40,6 +42,10 @@ function readStoredUser(): StoredUser | null {
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("token"));
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  const [outboxCount, setOutboxCount] = useState(() => getSalesOutboxCount());
+  const [isSyncingOutbox, setIsSyncingOutbox] = useState(false);
+  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [activeView, setActiveView] = useState("dashboard");
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -65,6 +71,7 @@ export default function App() {
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const prefetchedBranchRef = useRef<number | null>(null);
+  const syncInFlightRef = useRef(false);
 
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
 
@@ -86,6 +93,32 @@ export default function App() {
     setCurrentUserId(null);
     setBranches([]);
     setActiveBranchId(null);
+    setOutboxCount(0);
+  };
+
+  const syncQueuedSales = async () => {
+    if (!isAuthenticated || !navigator.onLine || syncInFlightRef.current || getSalesOutboxCount() === 0) {
+      setOutboxCount(getSalesOutboxCount());
+      return;
+    }
+
+    syncInFlightRef.current = true;
+    setIsSyncingOutbox(true);
+    try {
+      const result = await syncSalesOutboxOnce();
+      setOutboxCount(result.remainingCount);
+
+      if (result.syncedCount > 0) {
+        fetchProductsCached((fresh) => setProducts(fresh)).catch(() => {});
+        fetchSalesCached().catch(() => {});
+        if (userRole === "Admin") {
+          fetchSalesDashboard().catch(() => {});
+        }
+      }
+    } finally {
+      syncInFlightRef.current = false;
+      setIsSyncingOutbox(false);
+    }
   };
 
   // Check if user is authenticated on mount
@@ -227,6 +260,52 @@ export default function App() {
     }
   }, [isAuthenticated, activeBranchId, userRole]);
 
+  useEffect(() => {
+    const handleOutboxChanged = () => {
+      setOutboxCount(getSalesOutboxCount());
+      if (navigator.onLine) {
+        void syncQueuedSales();
+      }
+    };
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      void syncQueuedSales();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    const handleBeforeInstallPrompt = (event: BeforeInstallPromptEvent) => {
+      event.preventDefault();
+      setInstallPromptEvent(event);
+    };
+
+    const handleAppInstalled = () => {
+      setInstallPromptEvent(null);
+    };
+
+    window.addEventListener("offlineOutboxChanged", handleOutboxChanged);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt as EventListener);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    setOutboxCount(getSalesOutboxCount());
+    if (navigator.onLine) {
+      void syncQueuedSales();
+    }
+
+    return () => {
+      window.removeEventListener("offlineOutboxChanged", handleOutboxChanged);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt as EventListener);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, [isAuthenticated, userRole]);
+
   // Auto-refresh when another user signs in
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
@@ -329,6 +408,13 @@ export default function App() {
 
   const handleLogout = () => {
     logoutAndReset();
+  };
+
+  const handleInstallApp = async () => {
+    if (!installPromptEvent) return;
+    await installPromptEvent.prompt();
+    await installPromptEvent.userChoice.catch(() => undefined);
+    setInstallPromptEvent(null);
   };
 
   const handleChangeBranch = (branchId: number) => {
@@ -670,6 +756,11 @@ export default function App() {
       businessName={businessName}
       businessLogoUrl={businessLogoUrl}
       userRole={userRole}
+      isOnline={isOnline}
+      outboxCount={outboxCount}
+      isSyncingOutbox={isSyncingOutbox}
+      canInstallApp={installPromptEvent !== null}
+      onInstallApp={handleInstallApp}
       branches={branches}
       activeBranchId={activeBranchId}
       onChangeBranch={userRole === "Admin" ? handleChangeBranch : undefined}

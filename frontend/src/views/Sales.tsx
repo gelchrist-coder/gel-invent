@@ -9,10 +9,9 @@ import {
   cacheProducts,
   enqueueSales,
   getSalesOutboxCount,
-  getSalesOutbox,
-  removeOutboxItem,
   loadCachedProducts,
 } from "../offline/storage";
+import { syncSalesOutboxOnce } from "../offline/sync";
 
 export default function Sales() {
   // Initialize from cache for instant display
@@ -109,24 +108,15 @@ export default function Sales() {
   }, []);
 
   const syncOutboxOnce = async () => {
-    if (!navigator.onLine) return;
-    const outbox = getSalesOutbox().sort((a, b) => a.createdAt - b.createdAt);
-    if (!outbox.length) return;
-
-    for (const item of outbox) {
-      try {
-        await createSaleForBranch(item.sale, item.branchId);
-        removeOutboxItem(item.id);
-      } catch {
-        // Stop on first failure (likely network/auth). We'll retry later.
-        break;
-      }
+    const result = await syncSalesOutboxOnce();
+    if (result.syncedCount === 0 && result.remainingCount === 0) {
+      return;
     }
 
     // Refresh products/sales after syncing.
     try {
       await loadData();
-      setOfflineNotice(null);
+      setOfflineNotice(result.hadFailure ? "Some queued sales are still waiting to sync." : null);
     } catch {
       // ignore
     }

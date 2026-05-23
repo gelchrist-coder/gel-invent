@@ -1,17 +1,30 @@
 {
   "name": "Gel Invent",
   "short_name": "Gel Invent",
-  "description": "Inventory and POS system",
+  "id": "/",
+  "description": "Inventory, POS, branch management, and offline-ready sales sync for growing retail businesses.",
+  "lang": "en",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "portrait-primary",
   "background_color": "#f7f9ff",
   "theme_color": "#1f7aff",
+  "categories": ["business", "productivity", "finance"],
+  "prefer_related_applications": false,
   "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "16x16",
+      "type": "image/x-icon",
+      "purpose": "any"
+    },
     {
       "src": "/pwa-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
   ]
 }
