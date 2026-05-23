@@ -270,9 +270,15 @@ export default function App() {
 
     window.addEventListener("userChanged", handleCustomUserChange as EventListener);
 
+    const handleProductsUpdated = () => {
+      fetchProductsCached((fresh) => setProducts(fresh)).catch(() => {});
+    };
+    window.addEventListener("productsUpdated", handleProductsUpdated);
+
     return () => {
       window.removeEventListener("storage", handleStorageChange);
       window.removeEventListener("userChanged", handleCustomUserChange as EventListener);
+      window.removeEventListener("productsUpdated", handleProductsUpdated);
     };
   }, [currentUserId]);
 

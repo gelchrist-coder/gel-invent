@@ -182,6 +182,7 @@ export default function Sales() {
           setConfirmedSales(createdSales);
           await loadData();
           setOfflineNotice(null);
+          window.dispatchEvent(new CustomEvent("productsUpdated"));
         } catch {
           setOfflineNotice("Sale queued for sync. We'll retry automatically.");
         }
