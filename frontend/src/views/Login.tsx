@@ -201,14 +201,28 @@ export default function Login({ onLogin }: LoginProps) {
     loginFormData.append("username", identifier);
     loginFormData.append("password", password);
 
-    const loginResponse = await fetch(`${API_BASE}/auth/login`, {
-      method: "POST",
-      headers: {
-        "X-Recaptcha-Token": recaptchaToken,
-        "X-Recaptcha-Action": "login",
-      },
-      body: loginFormData,
-    });
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 30000);
+
+    let loginResponse: Response;
+    try {
+      loginResponse = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: {
+          "X-Recaptcha-Token": recaptchaToken,
+          "X-Recaptcha-Action": "login",
+        },
+        body: loginFormData,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new Error("Login request timed out. The server may be starting up — please try again in a moment.");
+      }
+      throw err;
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
 
     if (!loginResponse.ok) {
       const errorData = await safeJson(loginResponse);
