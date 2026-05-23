@@ -50,7 +50,6 @@ export default function App() {
   const [userName, setUserName] = useState(() => readStoredUser()?.name || "User");
   const [businessName, setBusinessName] = useState(() => readStoredUser()?.business_name || "Business");
   const [businessLogoUrl, setBusinessLogoUrl] = useState(() => readStoredUser()?.business_logo_url || null);
-  const [businessLocation, setBusinessLocation] = useState(() => readStoredUser()?.business_location ?? null);
   const [userRole, setUserRole] = useState(() => readStoredUser()?.role || "Admin");
   const [currentUserId, setCurrentUserId] = useState<number | null>(() => readStoredUser()?.id ?? null);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -83,7 +82,6 @@ export default function App() {
     setUserName("User");
     setBusinessName("Business");
     setBusinessLogoUrl(null);
-    setBusinessLocation(null);
     setUserRole("Admin");
     setCurrentUserId(null);
     setBranches([]);
@@ -101,7 +99,6 @@ export default function App() {
         setUserName(user.name || "User");
         setBusinessName(user.business_name || "Business");
         setBusinessLogoUrl(user.business_logo_url ?? null);
-        setBusinessLocation(user.business_location ?? null);
         setUserRole(user.role || "Admin");
         setCurrentUserId(user.id || null);
         if (user.role && user.role !== "Admin") {
@@ -124,7 +121,6 @@ export default function App() {
           setUserName(me.name || "User");
           setBusinessName(me.business_name || "Business");
           setBusinessLogoUrl(me.business_logo_url ?? null);
-          setBusinessLocation(me.business_location ?? null);
           setUserRole(me.role || "Admin");
           setCurrentUserId(me.id || null);
 
@@ -269,7 +265,6 @@ export default function App() {
       setUserName(newUser.name || "User");
       setBusinessName(newUser.business_name || "Business");
       setBusinessLogoUrl(newUser.business_logo_url ?? null);
-      setBusinessLocation(newUser.business_location ?? null);
       setUserRole(newUser.role || "Admin");
     };
 
@@ -317,7 +312,6 @@ export default function App() {
       setUserName(user.name || "User");
       setBusinessName(user.business_name || "Business");
       setBusinessLogoUrl(user.business_logo_url ?? null);
-      setBusinessLocation(user.business_location ?? null);
       setUserRole(user.role || "Admin");
       setCurrentUserId(user.id ?? null);
 
@@ -675,7 +669,6 @@ export default function App() {
       userName={userName}
       businessName={businessName}
       businessLogoUrl={businessLogoUrl}
-      businessLocation={businessLocation}
       userRole={userRole}
       branches={branches}
       activeBranchId={activeBranchId}

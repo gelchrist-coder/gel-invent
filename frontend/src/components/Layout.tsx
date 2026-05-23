@@ -108,7 +108,6 @@ type Props = {
   userName?: string;
   businessName?: string;
   businessLogoUrl?: string | null;
-  businessLocation?: string | null;
   userRole?: string;
   branches?: Branch[];
   activeBranchId?: number | null;
@@ -123,7 +122,6 @@ export default function Layout({
   userName = "User",
   businessName = "Business",
   businessLogoUrl,
-  businessLocation,
   userRole = "Admin",
   branches,
   activeBranchId,
@@ -397,7 +395,6 @@ export default function Layout({
           userRole={userRole}
           businessName={businessName}
           businessLogoUrl={businessLogoUrl}
-          businessLocation={businessLocation}
           onLogout={onLogout}
           onNavigate={onNavigate}
           branches={branches}

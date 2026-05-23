@@ -72,7 +72,6 @@ export default function Login({ onLogin }: LoginProps) {
     password: "",
     confirmPassword: "",
     businessName: "",
-    businessLocation: "",
     categories: [] as string[],
     hasBranches: false,
     branches: [] as string[],
@@ -462,7 +461,6 @@ export default function Login({ onLogin }: LoginProps) {
         signupFormData.append("name", formData.name.trim());
         signupFormData.append("password", formData.password);
         signupFormData.append("business_name", formData.businessName.trim());
-        signupFormData.append("business_location", formData.businessLocation.trim());
         signupFormData.append("categories", JSON.stringify(formData.categories));
         signupFormData.append("branches", JSON.stringify(formData.hasBranches ? formData.branches : []));
         if (logoFile) {
@@ -694,20 +692,6 @@ export default function Login({ onLogin }: LoginProps) {
                     onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
                     placeholder="My Business Ltd"
                     required={isSignUp}
-                    className="input"
-                    style={{ padding: 12 }}
-                  />
-                </label>
-
-                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    Business Location (optional)
-                  </span>
-                  <input
-                    type="text"
-                    value={formData.businessLocation}
-                    onChange={(e) => setFormData({ ...formData, businessLocation: e.target.value })}
-                    placeholder="e.g. Accra, Ghana"
                     className="input"
                     style={{ padding: 12 }}
                   />

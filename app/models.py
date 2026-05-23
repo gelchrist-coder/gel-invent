@@ -23,7 +23,6 @@ class User(Base):
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), index=True, default=None)
     business_name: Mapped[str | None] = mapped_column(String(255), default=None)
     business_logo_url: Mapped[str | None] = mapped_column(String(512), default=None)
-    business_location: Mapped[str | None] = mapped_column(String(255), default=None)
     # JSON string (list of categories). Kept as Text for portability.
     categories: Mapped[str | None] = mapped_column(Text, default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

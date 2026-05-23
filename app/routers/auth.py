@@ -56,7 +56,6 @@ class UserCreate(BaseModel):
     password: str
     business_name: Optional[str] = None
     business_logo_url: Optional[str] = None
-    business_location: Optional[str] = None
     categories: Optional[list[str]] = None
     branches: Optional[list[str]] = None  # Optional list of branch names
 
@@ -69,7 +68,6 @@ class UserResponse(BaseModel):
     role: str
     business_name: Optional[str] = None
     business_logo_url: Optional[str] = None
-    business_location: Optional[str] = None
     categories: Optional[list[str]] = None
     branch_id: Optional[int] = None
     is_active: bool
@@ -106,7 +104,6 @@ def _serialize_user(user: User) -> UserResponse:
         role=user.role,
         business_name=user.business_name,
         business_logo_url=getattr(user, "business_logo_url", None),
-        business_location=getattr(user, "business_location", None),
         categories=_parse_categories(getattr(user, "categories", None)),
         branch_id=getattr(user, "branch_id", None),
         is_active=user.is_active,
@@ -158,7 +155,6 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
         name = str(form.get("name") or "").strip()
         password = str(form.get("password") or "")
         business_name = str(form.get("business_name") or "").strip() or None
-        business_location = str(form.get("business_location") or "").strip() or None
         categories = _parse_list_input(form.get("categories"))
         branches = _parse_list_input(form.get("branches"))
         logo_file = form.get("business_logo")
@@ -170,7 +166,6 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
             name=name,
             password=password,
             business_name=business_name,
-            business_location=business_location,
             categories=categories,
             branches=branches,
         )
@@ -273,7 +268,6 @@ async def signup(request: Request, db: Session = Depends(get_db)):
         hashed_password=get_password_hash(user_data.password),
         business_name=user_data.business_name,
         business_logo_url=logo_url,
-        business_location=user_data.business_location,
         categories=json.dumps(user_data.categories) if user_data.categories else None,
         role="Admin",
         is_active=True,
@@ -391,7 +385,6 @@ def get_current_user_info(
         role=current_user.role,
         business_name=current_user.business_name,
         business_logo_url=getattr(current_user, "business_logo_url", None),
-        business_location=getattr(current_user, "business_location", None),
         categories=categories,
         branch_id=getattr(current_user, "branch_id", None),
         is_active=current_user.is_active,
