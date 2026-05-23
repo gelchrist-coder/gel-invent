@@ -393,9 +393,15 @@ async def on_startup() -> None:
 
     # Always apply critical auth schema changes first to avoid request-time
     # failures when background/full migrations are disabled or still running.
+    # Cap at 5 s so a slow/hung DB proxy never blocks startup and delays logins.
     try:
-        await asyncio.to_thread(_ensure_critical_auth_schema_sync)
+        await asyncio.wait_for(
+            asyncio.to_thread(_ensure_critical_auth_schema_sync),
+            timeout=5.0,
+        )
         print("✅ Critical auth schema verified")
+    except asyncio.TimeoutError:
+        print("⚠️ Critical auth schema sync skipped — timed out after 5 s")
     except Exception as e:
         print(f"⚠️ Could not verify critical auth schema: {type(e).__name__}: {e}")
 

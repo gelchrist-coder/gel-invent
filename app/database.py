@@ -33,15 +33,19 @@ class Base(DeclarativeBase):
 
 is_serverless_runtime = bool(os.getenv("VERCEL"))
 
+# On serverless (Vercel) use a short connect timeout so a hung Railway proxy
+# doesn't block function startup and delay user-facing login requests.
+_connect_timeout = 5 if is_serverless_runtime else 10
+
 connect_args = {
-    "connect_timeout": 10,
+    "connect_timeout": _connect_timeout,
     # TCP keepalive settings reduce idle SSL disconnects on managed Postgres.
     "keepalives": 1,
     "keepalives_idle": 30,
     "keepalives_interval": 10,
     "keepalives_count": 5,
     # Avoid overly aggressive DB-side defaults cancelling simple auth queries.
-    "options": "-c statement_timeout=30000 -c lock_timeout=5000",
+    "options": "-c statement_timeout=10000 -c lock_timeout=5000",
 }
 
 
