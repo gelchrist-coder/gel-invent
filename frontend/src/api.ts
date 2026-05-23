@@ -517,7 +517,7 @@ export async function fetchProducts(): Promise<Product[]> {
     return cached;
   }
   
-  const data = await jsonRequest<Product[]>("/products/");
+  const data = await jsonRequest<Product[]>("/products");
   setCache("products", data);
   return data;
 }
@@ -529,7 +529,7 @@ export async function fetchProductsCached(onUpdate?: (products: Product[]) => vo
   // If we have cached data, return it immediately and refresh in background
   if (cached) {
     // Refresh in background
-    jsonRequest<Product[]>("/products/").then(fresh => {
+    jsonRequest<Product[]>("/products").then(fresh => {
       setCache("products", fresh);
       if (onUpdate) onUpdate(fresh);
     }).catch(() => { /* ignore background refresh errors */ });
@@ -537,7 +537,7 @@ export async function fetchProductsCached(onUpdate?: (products: Product[]) => vo
   }
   
   // No cache, fetch fresh
-  const data = await jsonRequest<Product[]>("/products/");
+  const data = await jsonRequest<Product[]>("/products");
   setCache("products", data);
   return data;
 }
@@ -552,7 +552,7 @@ export async function createProduct(payload: NewProduct, branchIdOverride?: numb
   if (branchIdOverride != null) {
     headers["X-Branch-Id"] = String(branchIdOverride);
   }
-  const result = await jsonRequest<Product>("/products/", {
+  const result = await jsonRequest<Product>("/products", {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
@@ -710,7 +710,7 @@ export type NewSaleReturn = {
 };
 
 export async function createSaleReturn(payload: NewSaleReturn): Promise<SaleReturn> {
-  const result = await jsonRequest<SaleReturn>("/returns/", {
+  const result = await jsonRequest<SaleReturn>("/returns", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -723,7 +723,7 @@ export async function createSaleReturn(payload: NewSaleReturn): Promise<SaleRetu
 }
 
 export async function fetchReturns(): Promise<SaleReturn[]> {
-  return jsonRequest<SaleReturn[]>("/returns/");
+  return jsonRequest<SaleReturn[]>("/returns");
 }
 
 export async function fetchReturnsForSale(saleId: number): Promise<SaleReturn[]> {
