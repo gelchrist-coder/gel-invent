@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import schemas
-from ..models import Product, StockMovement, Sale, User, SystemSettings, Branch, Supplier, Purchase
+from ..models import Product, StockMovement, Sale, User, SystemSettings, Branch, Supplier, Purchase, SupplierPayment
 from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
@@ -19,11 +19,189 @@ from app.utils.expiry import get_batch_balances, writeoff_expired_batches
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
+MONEY_SCALE = Decimal("0.01")
+MONEY_ZERO = Decimal("0.00")
+
 
 def _get_tenant_owner_id(user: User) -> int:
     if user.role == "Admin":
         return user.id
     return user.created_by or user.id
+
+
+def _to_money(value: Decimal | int | float | None) -> Decimal:
+    if value is None:
+        return MONEY_ZERO
+    if isinstance(value, Decimal):
+        return value.quantize(MONEY_SCALE)
+    return Decimal(str(value)).quantize(MONEY_SCALE)
+
+
+def _apply_purchase_payment_state(purchase: Purchase, amount_paid: Decimal | None = None) -> None:
+    total_cost = _to_money(purchase.total_cost)
+    paid = _to_money(amount_paid if amount_paid is not None else purchase.amount_paid)
+
+    if paid < MONEY_ZERO:
+        paid = MONEY_ZERO
+    if paid > total_cost:
+        paid = total_cost
+
+    due = (total_cost - paid).quantize(MONEY_SCALE)
+    purchase.amount_paid = paid
+    if due <= MONEY_ZERO:
+        purchase.payment_status = "paid"
+        purchase.amount_due = MONEY_ZERO
+    elif paid > MONEY_ZERO:
+        purchase.payment_status = "partial"
+        purchase.amount_due = due
+    else:
+        purchase.payment_status = "unpaid"
+        purchase.amount_due = total_cost
+
+
+def _find_supplier_by_name(db: Session, tenant_user_ids: list[int], supplier_name: str) -> Supplier | None:
+    normalized_name = supplier_name.strip().lower()
+    if not normalized_name:
+        return None
+
+    return db.scalar(
+        select(Supplier).where(
+            func.lower(func.trim(Supplier.name)) == normalized_name,
+            Supplier.user_id.in_(tenant_user_ids),
+            Supplier.is_active.is_(True),
+        )
+    )
+
+
+def _ensure_supplier_record(
+    db: Session,
+    current_user: User,
+    tenant_user_ids: list[int],
+    supplier_name: str,
+) -> Supplier:
+    supplier = _find_supplier_by_name(db, tenant_user_ids, supplier_name)
+    if supplier:
+        return supplier
+
+    supplier = Supplier(user_id=current_user.id, name=supplier_name.strip())
+    db.add(supplier)
+    db.flush()
+    return supplier
+
+
+def _attach_purchase_creator_names(purchases: list[Purchase], db: Session) -> None:
+    if not purchases:
+        return
+
+    for purchase in purchases:
+        if purchase.amount_paid is None or purchase.amount_due is None or not purchase.payment_status:
+            _apply_purchase_payment_state(purchase)
+
+    creator_ids = sorted({p.user_id for p in purchases})
+    creators = db.execute(select(User.id, User.name).where(User.id.in_(creator_ids))).all()
+    creator_name_by_id = {int(uid): name for uid, name in creators}
+
+    for purchase in purchases:
+        purchase.created_by_name = creator_name_by_id.get(purchase.user_id)
+
+
+def _attach_supplier_financials(
+    suppliers: list[Supplier],
+    db: Session,
+    tenant_user_ids: list[int],
+    active_branch_id: int,
+) -> None:
+    if not suppliers:
+        return
+
+    purchase_summary_rows = db.execute(
+        select(
+            Purchase.supplier_id,
+            func.lower(func.trim(Purchase.supplier_name)).label("supplier_key"),
+            func.coalesce(func.sum(Purchase.total_cost), 0).label("total_purchased"),
+            func.coalesce(func.sum(func.coalesce(Purchase.amount_paid, 0)), 0).label("total_paid"),
+            func.coalesce(func.sum(func.coalesce(Purchase.amount_due, Purchase.total_cost)), 0).label("outstanding_balance"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (func.coalesce(Purchase.amount_due, Purchase.total_cost) > 0, 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("unpaid_count"),
+        )
+        .where(
+            Purchase.user_id.in_(tenant_user_ids),
+            Purchase.branch_id == active_branch_id,
+        )
+        .group_by(Purchase.supplier_id, func.lower(func.trim(Purchase.supplier_name)))
+    ).all()
+
+    payment_date_rows = db.execute(
+        select(
+            SupplierPayment.supplier_id,
+            func.max(SupplierPayment.payment_date).label("last_payment_date"),
+        )
+        .where(
+            SupplierPayment.user_id.in_(tenant_user_ids),
+            SupplierPayment.branch_id == active_branch_id,
+            SupplierPayment.supplier_id.is_not(None),
+        )
+        .group_by(SupplierPayment.supplier_id)
+    ).all()
+
+    summary_by_id: dict[int, dict[str, Decimal | int]] = {}
+    summary_by_name: dict[str, dict[str, Decimal | int]] = {}
+    for row in purchase_summary_rows:
+        summary = {
+            "total_purchased": _to_money(row.total_purchased),
+            "total_paid": _to_money(row.total_paid),
+            "outstanding_balance": _to_money(row.outstanding_balance),
+            "unpaid_purchases_count": int(row.unpaid_count or 0),
+        }
+        if row.supplier_id is not None:
+            summary_by_id[int(row.supplier_id)] = summary
+        if row.supplier_key:
+            summary_by_name[str(row.supplier_key)] = summary
+
+    last_payment_date_by_supplier_id = {
+        int(row.supplier_id): row.last_payment_date
+        for row in payment_date_rows
+        if row.supplier_id is not None
+    }
+
+    for supplier in suppliers:
+        summary = summary_by_id.get(supplier.id) or summary_by_name.get(supplier.name.strip().lower())
+        supplier.total_purchased = summary["total_purchased"] if summary else MONEY_ZERO
+        supplier.total_paid = summary["total_paid"] if summary else MONEY_ZERO
+        supplier.outstanding_balance = summary["outstanding_balance"] if summary else MONEY_ZERO
+        supplier.unpaid_purchases_count = int(summary["unpaid_purchases_count"]) if summary else 0
+        supplier.last_payment_date = last_payment_date_by_supplier_id.get(supplier.id)
+
+
+def _attach_supplier_payment_metadata(payments: list[SupplierPayment], db: Session) -> None:
+    if not payments:
+        return
+
+    creator_ids = sorted({payment.user_id for payment in payments})
+    creators = db.execute(select(User.id, User.name).where(User.id.in_(creator_ids))).all()
+    creator_name_by_id = {int(uid): name for uid, name in creators}
+
+    purchase_ids = sorted({payment.purchase_id for payment in payments if payment.purchase_id is not None})
+    purchases = db.scalars(select(Purchase).where(Purchase.id.in_(purchase_ids))).all() if purchase_ids else []
+    purchase_by_id = {purchase.id: purchase for purchase in purchases}
+
+    supplier_ids = sorted({payment.supplier_id for payment in payments if payment.supplier_id is not None})
+    suppliers = db.scalars(select(Supplier).where(Supplier.id.in_(supplier_ids))).all() if supplier_ids else []
+    supplier_name_by_id = {supplier.id: supplier.name for supplier in suppliers}
+
+    for payment in payments:
+        payment.created_by_name = creator_name_by_id.get(payment.user_id)
+        purchase = purchase_by_id.get(payment.purchase_id) if payment.purchase_id is not None else None
+        payment.purchase_invoice_number = purchase.invoice_number if purchase else None
+        payment.product_name = purchase.product_name if purchase else None
+        payment.supplier_name = supplier_name_by_id.get(payment.supplier_id or -1) or (purchase.supplier_name if purchase else "Supplier")
 
 
 def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
@@ -48,9 +226,10 @@ class BranchTransferCreate(BaseModel):
 def list_suppliers(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
-    return db.scalars(
+    suppliers = db.scalars(
         select(Supplier)
         .where(
             Supplier.user_id.in_(tenant_user_ids),
@@ -58,6 +237,8 @@ def list_suppliers(
         )
         .order_by(func.lower(Supplier.name), Supplier.id.asc())
     ).all()
+    _attach_supplier_financials(suppliers, db, tenant_user_ids, active_branch_id)
+    return suppliers
 
 
 @router.post("/suppliers", response_model=schemas.SupplierRead, status_code=201)
@@ -88,7 +269,7 @@ def create_supplier(
 
 @router.get("/purchases", response_model=list[schemas.PurchaseRead])
 def list_purchases(
-    limit: int = Query(default=40, ge=1, le=200),
+    limit: int = Query(default=100, ge=1, le=300),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
@@ -104,18 +285,30 @@ def list_purchases(
         .limit(limit)
     ).all()
 
-    creator_ids = sorted({p.user_id for p in purchases})
-    creators = (
-        db.execute(select(User.id, User.name).where(User.id.in_(creator_ids))).all()
-        if creator_ids
-        else []
-    )
-    creator_name_by_id = {int(uid): name for uid, name in creators}
-
-    for purchase in purchases:
-        purchase.created_by_name = creator_name_by_id.get(purchase.user_id)
-
+    _attach_purchase_creator_names(purchases, db)
     return purchases
+
+
+@router.get("/supplier-payments", response_model=list[schemas.SupplierPaymentRead])
+def list_supplier_payments(
+    limit: int = Query(default=40, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    payments = db.scalars(
+        select(SupplierPayment)
+        .where(
+            SupplierPayment.user_id.in_(tenant_user_ids),
+            SupplierPayment.branch_id == active_branch_id,
+        )
+        .order_by(SupplierPayment.payment_date.desc(), SupplierPayment.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    _attach_supplier_payment_metadata(payments, db)
+    return payments
 
 
 @router.post("/purchases", response_model=schemas.PurchaseRead, status_code=201)
@@ -154,15 +347,8 @@ def create_purchase(
         raise HTTPException(status_code=400, detail="Supplier is required")
 
     if supplier is None:
-        supplier = db.scalar(
-            select(Supplier).where(
-                func.lower(func.trim(Supplier.name)) == supplier_name.lower(),
-                Supplier.user_id.in_(tenant_user_ids),
-                Supplier.is_active.is_(True),
-            )
-        )
-        if supplier:
-            supplier_name = supplier.name
+        supplier = _ensure_supplier_record(db, current_user, tenant_user_ids, supplier_name)
+        supplier_name = supplier.name
 
     if product.expiry_date is not None and payload.expiry_date is None:
         raise HTTPException(
@@ -205,6 +391,14 @@ def create_purchase(
         product.selling_price = payload.unit_selling_price
 
     total_cost = (Decimal(payload.quantity) * Decimal(payload.unit_cost_price)).quantize(Decimal("0.01"))
+    upfront_payment = _to_money(payload.amount_paid)
+    if upfront_payment > total_cost:
+        raise HTTPException(status_code=400, detail="Amount paid cannot exceed the purchase total")
+
+    payment_method = (payload.payment_method or "").strip() or None
+    if upfront_payment > MONEY_ZERO and not payment_method:
+        raise HTTPException(status_code=400, detail="Payment method is required when recording an upfront payment")
+
     purchase = Purchase(
         user_id=current_user.id,
         branch_id=active_branch_id,
@@ -219,14 +413,108 @@ def create_purchase(
         unit_cost_price=payload.unit_cost_price,
         unit_selling_price=payload.unit_selling_price,
         total_cost=total_cost,
+        amount_paid=upfront_payment,
+        payment_method=payment_method,
         purchase_date=payload.purchase_date or date.today(),
+        due_date=payload.due_date,
         notes=(payload.notes or "").strip() or None,
     )
+    _apply_purchase_payment_state(purchase, upfront_payment)
+    if purchase.payment_status == "paid":
+        purchase.due_date = None
+
     db.add(purchase)
+    db.flush()
+
+    if upfront_payment > MONEY_ZERO:
+        db.add(
+            SupplierPayment(
+                user_id=current_user.id,
+                branch_id=active_branch_id,
+                supplier_id=supplier.id if supplier else None,
+                purchase_id=purchase.id,
+                amount=upfront_payment,
+                payment_method=payment_method or "cash",
+                payment_date=payload.purchase_date or date.today(),
+                notes="Initial purchase payment",
+            )
+        )
+
     db.commit()
     db.refresh(purchase)
     purchase.created_by_name = current_user.name
     return purchase
+
+
+@router.post("/supplier-payments", response_model=schemas.SupplierPaymentRead, status_code=201)
+def create_supplier_payment(
+    payload: schemas.SupplierPaymentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    purchase = db.scalar(
+        select(Purchase).where(
+            Purchase.id == payload.purchase_id,
+            Purchase.user_id.in_(tenant_user_ids),
+            Purchase.branch_id == active_branch_id,
+        )
+    )
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+
+    _apply_purchase_payment_state(purchase)
+    if purchase.amount_due <= MONEY_ZERO or purchase.payment_status == "paid":
+        raise HTTPException(status_code=400, detail="This purchase is already fully paid")
+
+    supplier: Supplier | None = None
+    if purchase.supplier_id is not None:
+        supplier = db.scalar(
+            select(Supplier).where(
+                Supplier.id == purchase.supplier_id,
+                Supplier.user_id.in_(tenant_user_ids),
+            )
+        )
+
+    if supplier is None:
+        supplier_name = (purchase.supplier_name or "").strip()
+        if not supplier_name:
+            raise HTTPException(status_code=400, detail="Purchase is missing supplier information")
+        supplier = _ensure_supplier_record(db, current_user, tenant_user_ids, supplier_name)
+        purchase.supplier_id = supplier.id
+        purchase.supplier_name = supplier.name
+
+    payment_amount = _to_money(payload.amount)
+    if payment_amount > purchase.amount_due:
+        raise HTTPException(status_code=400, detail="Payment amount cannot exceed the outstanding balance")
+
+    payment_method = payload.payment_method.strip()
+    payment = SupplierPayment(
+        user_id=current_user.id,
+        branch_id=active_branch_id,
+        supplier_id=supplier.id if supplier else None,
+        purchase_id=purchase.id,
+        amount=payment_amount,
+        payment_method=payment_method,
+        payment_date=payload.payment_date or date.today(),
+        notes=(payload.notes or "").strip() or None,
+    )
+    db.add(payment)
+
+    updated_paid = _to_money(purchase.amount_paid) + payment_amount
+    _apply_purchase_payment_state(purchase, updated_paid)
+    purchase.payment_method = payment_method
+    if purchase.payment_status == "paid":
+        purchase.due_date = None
+
+    db.commit()
+    db.refresh(payment)
+    payment.created_by_name = current_user.name
+    payment.supplier_name = supplier.name if supplier else purchase.supplier_name
+    payment.purchase_invoice_number = purchase.invoice_number
+    payment.product_name = purchase.product_name
+    return payment
 
 
 @router.post("/transfers")

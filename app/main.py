@@ -75,8 +75,35 @@ def _ensure_critical_purchasing_schema_sync() -> None:
     first supplier/purchase requests safe in serverless environments where full
     startup migrations are disabled by default.
     """
-    models.Supplier.__table__.create(bind=engine, checkfirst=True)
-    models.Purchase.__table__.create(bind=engine, checkfirst=True)
+    with engine.begin() as conn:
+        models.Supplier.__table__.create(bind=conn, checkfirst=True)
+        models.Purchase.__table__.create(bind=conn, checkfirst=True)
+        models.SupplierPayment.__table__.create(bind=conn, checkfirst=True)
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(12,2)"))
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_due NUMERIC(12,2)"))
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)"))
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS due_date DATE"))
+        conn.execute(
+            text(
+                """
+                UPDATE purchases
+                SET amount_paid = COALESCE(amount_paid, 0),
+                    amount_due = COALESCE(amount_due, total_cost),
+                    payment_status = COALESCE(
+                        payment_status,
+                        CASE
+                            WHEN COALESCE(amount_due, total_cost) <= 0 THEN 'paid'
+                            WHEN COALESCE(amount_paid, 0) > 0 THEN 'partial'
+                            ELSE 'unpaid'
+                        END
+                    )
+                WHERE amount_paid IS NULL
+                   OR amount_due IS NULL
+                   OR payment_status IS NULL
+                """
+            )
+        )
 
 
 def _should_run_startup_migrations() -> bool:
@@ -137,6 +164,31 @@ def _run_startup_migrations_sync() -> None:
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_cost_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS selling_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_selling_price NUMERIC(10,2)"))
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(12,2)"))
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_due NUMERIC(12,2)"))
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)"))
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS due_date DATE"))
+        conn.execute(
+            text(
+                """
+                UPDATE purchases
+                SET amount_paid = COALESCE(amount_paid, 0),
+                    amount_due = COALESCE(amount_due, total_cost),
+                    payment_status = COALESCE(
+                        payment_status,
+                        CASE
+                            WHEN COALESCE(amount_due, total_cost) <= 0 THEN 'paid'
+                            WHEN COALESCE(amount_paid, 0) > 0 THEN 'partial'
+                            ELSE 'unpaid'
+                        END
+                    )
+                WHERE amount_paid IS NULL
+                   OR amount_due IS NULL
+                   OR payment_status IS NULL
+                """
+            )
+        )
 
         # Batch/expiry tracking + sale linkage on movements
         conn.execute(text("ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS batch_number VARCHAR(100)"))

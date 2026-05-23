@@ -1,4 +1,4 @@
-import { Branch, NewMovement, NewProduct, NewPurchase, NewSale, NewSupplier, Product, Purchase, Sale, StockMovement, Supplier } from "./types";
+import { Branch, NewMovement, NewProduct, NewPurchase, NewSale, NewSupplier, NewSupplierPayment, Product, Purchase, Sale, StockMovement, Supplier, SupplierPayment } from "./types";
 
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
@@ -820,6 +820,20 @@ export async function fetchPurchases(limit = 40): Promise<Purchase[]> {
 
 export async function createPurchase(payload: NewPurchase): Promise<Purchase> {
   const result = await jsonRequest<Purchase>('/inventory/purchases', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  clearDataCache();
+  return result;
+}
+
+export async function fetchSupplierPayments(limit = 40): Promise<SupplierPayment[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?${params.toString()}`);
+}
+
+export async function createSupplierPayment(payload: NewSupplierPayment): Promise<SupplierPayment> {
+  const result = await jsonRequest<SupplierPayment>('/inventory/supplier-payments', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

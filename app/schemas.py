@@ -1,5 +1,6 @@
 from datetime import datetime, date
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -50,6 +51,11 @@ class SupplierCreate(SupplierBase):
 class SupplierRead(SupplierBase):
     id: int
     is_active: bool
+    total_purchased: Decimal = Decimal(0)
+    total_paid: Decimal = Decimal(0)
+    outstanding_balance: Decimal = Decimal(0)
+    unpaid_purchases_count: int = 0
+    last_payment_date: date | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -64,7 +70,10 @@ class PurchaseCreate(BaseModel):
     quantity: Decimal = Field(..., gt=0, decimal_places=2)
     unit_cost_price: Decimal = Field(..., ge=0, decimal_places=2)
     unit_selling_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    amount_paid: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    payment_method: str | None = Field(default=None, max_length=50)
     purchase_date: date | None = Field(default=None)
+    due_date: date | None = Field(default=None)
     expiry_date: date | None = Field(default=None)
     notes: str | None = Field(default=None, max_length=1000)
 
@@ -82,7 +91,37 @@ class PurchaseRead(BaseModel):
     unit_cost_price: Decimal
     unit_selling_price: Decimal | None = None
     total_cost: Decimal
+    payment_status: Literal["unpaid", "partial", "paid"] = "unpaid"
+    amount_paid: Decimal = Decimal(0)
+    amount_due: Decimal = Decimal(0)
+    payment_method: str | None = None
     purchase_date: date | None = None
+    due_date: date | None = None
+    notes: str | None = None
+    created_at: datetime
+    created_by_name: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SupplierPaymentCreate(BaseModel):
+    purchase_id: int = Field(..., gt=0)
+    amount: Decimal = Field(..., gt=0, decimal_places=2)
+    payment_method: str = Field(..., min_length=1, max_length=50)
+    payment_date: date | None = Field(default=None)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class SupplierPaymentRead(BaseModel):
+    id: int
+    supplier_id: int | None = None
+    supplier_name: str
+    purchase_id: int | None = None
+    purchase_invoice_number: str | None = None
+    product_name: str | None = None
+    amount: Decimal
+    payment_method: str
+    payment_date: date | None = None
     notes: str | None = None
     created_at: datetime
     created_by_name: str | None = None

@@ -152,13 +152,36 @@ class Purchase(Base):
     unit_cost_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     unit_selling_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    payment_status: Mapped[str] = mapped_column(String(20), default="unpaid")
+    amount_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    amount_due: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    payment_method: Mapped[str | None] = mapped_column(String(50), default=None)
     purchase_date: Mapped[datetime | None] = mapped_column(Date, default=None)
+    due_date: Mapped[datetime | None] = mapped_column(Date, default=None)
     notes: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     product: Mapped[Product | None] = relationship()
     supplier: Mapped[Supplier | None] = relationship()
     stock_movement: Mapped[StockMovement | None] = relationship()
+
+
+class SupplierPayment(Base):
+    __tablename__ = "supplier_payments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True, default=None)
+    purchase_id: Mapped[int | None] = mapped_column(ForeignKey("purchases.id", ondelete="SET NULL"), index=True, default=None)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    payment_method: Mapped[str] = mapped_column(String(50), default="cash")
+    payment_date: Mapped[datetime | None] = mapped_column(Date, default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    supplier: Mapped[Supplier | None] = relationship()
+    purchase: Mapped[Purchase | None] = relationship()
 
 
 class Sale(Base):

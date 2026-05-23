@@ -106,6 +106,11 @@ export type Supplier = {
   address?: string | null;
   notes?: string | null;
   is_active: boolean;
+  total_purchased?: number | null;
+  total_paid?: number | null;
+  outstanding_balance?: number | null;
+  unpaid_purchases_count?: number | null;
+  last_payment_date?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -132,7 +137,12 @@ export type Purchase = {
   unit_cost_price: number;
   unit_selling_price?: number | null;
   total_cost: number;
+  payment_status: "unpaid" | "partial" | "paid";
+  amount_paid: number;
+  amount_due: number;
+  payment_method?: string | null;
   purchase_date?: string | null;
+  due_date?: string | null;
   notes?: string | null;
   created_at: string;
   created_by_name?: string | null;
@@ -146,7 +156,33 @@ export type NewPurchase = {
   quantity: number;
   unit_cost_price: number;
   unit_selling_price?: number | null;
+  amount_paid?: number | null;
+  payment_method?: string | null;
   purchase_date?: string | null;
+  due_date?: string | null;
   expiry_date?: string | null;
+  notes?: string | null;
+};
+
+export type SupplierPayment = {
+  id: number;
+  supplier_id?: number | null;
+  supplier_name: string;
+  purchase_id?: number | null;
+  purchase_invoice_number?: string | null;
+  product_name?: string | null;
+  amount: number;
+  payment_method: string;
+  payment_date?: string | null;
+  notes?: string | null;
+  created_at: string;
+  created_by_name?: string | null;
+};
+
+export type NewSupplierPayment = {
+  purchase_id: number;
+  amount: number;
+  payment_method: string;
+  payment_date?: string | null;
   notes?: string | null;
 };
