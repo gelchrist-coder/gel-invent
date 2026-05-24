@@ -56,10 +56,12 @@ type CacheEntry<T> = {
 const dataCache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 30000; // 30 seconds - data is considered fresh
 const inflightGetRequests = new Map<string, Promise<unknown>>();
+const inflightWarmupRequests = new Map<string, Promise<void>>();
 const REQUEST_TIMEOUT_MS = 25000;
 const GET_REQUEST_TIMEOUT_MS = 35000;
 const GET_RETRY_ATTEMPTS = 1;
 const STARTUP_REQUEST_TIMEOUT_MS = GET_REQUEST_TIMEOUT_MS;
+export const TEMPORARY_SERVER_DELAY_MESSAGE = "Server is taking longer than expected. Please tap Retry.";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -67,6 +69,37 @@ function delay(ms: number): Promise<void> {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+export function isTemporaryServerDelayError(error: unknown): boolean {
+  return error instanceof Error && error.message === TEMPORARY_SERVER_DELAY_MESSAGE;
+}
+
+export function warmBackend(path: string = "/health/db", force = false): Promise<void> {
+  const separator = path.includes("?") ? "&" : "?";
+  const url = `${API_BASE}${path}${separator}ts=${Date.now()}`;
+  const existing = inflightWarmupRequests.get(path);
+
+  if (!force && existing) {
+    return existing;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+  const request = fetch(url, {
+    cache: "no-store",
+    headers: buildAuthHeaders(),
+    signal: controller.signal,
+  })
+    .then(() => undefined)
+    .catch(() => undefined)
+    .finally(() => {
+      window.clearTimeout(timeoutId);
+      inflightWarmupRequests.delete(path);
+    });
+
+  inflightWarmupRequests.set(path, request);
+  return request;
 }
 
 export async function resilientFetch(
@@ -99,7 +132,7 @@ export async function resilientFetch(
       }
 
       if (isAbortError(error)) {
-        throw new Error("Server is taking longer than expected. Please tap Retry.");
+        throw new Error(TEMPORARY_SERVER_DELAY_MESSAGE);
       }
 
       if (error instanceof TypeError) {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentProps } from "react";
-import { createBranchTransfer, createMovement, deleteProduct, fetchAllMovements, fetchBranchesCached, fetchInventoryAnalytics, fetchProductsCached, exportMovementsPdf } from "../api";
+import { createBranchTransfer, createMovement, deleteProduct, fetchAllMovements, fetchBranchesCached, fetchInventoryAnalytics, fetchProductsCached, exportMovementsPdf, isTemporaryServerDelayError, warmBackend } from "../api";
 import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
 import MovementHistory from "../components/MovementHistory";
@@ -36,6 +36,7 @@ export default function Inventory() {
   const [unitSellingPrice, setUnitSellingPrice] = useState<string>("");
   const [submittingAction, setSubmittingAction] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [warmingUp, setWarmingUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasLoadedOnce = useRef(false);
 
@@ -60,7 +61,7 @@ export default function Inventory() {
   const [exporting, setExporting] = useState(false);
   const [exportType, setExportType] = useState<string>("all");
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (allowWarmRetry = true) => {
     if (!hasLoadedOnce.current) {
       setLoading(true);
     }
@@ -87,8 +88,15 @@ export default function Inventory() {
         setSelectedProductId(null);
       }
     } catch (err) {
+      if (allowWarmRetry && isTemporaryServerDelayError(err)) {
+        setWarmingUp(true);
+        await warmBackend("/health/db", true);
+        await loadData(false);
+        return;
+      }
       setError(err instanceof Error ? err.message : "Failed to load inventory data");
     } finally {
+      setWarmingUp(false);
       setLoading(false);
       hasLoadedOnce.current = true;
     }
@@ -253,7 +261,9 @@ export default function Inventory() {
       <div className="app-shell">
         <h1 className="page-title" style={{ marginBottom: 24 }}>Inventory Tracking</h1>
         <div className="card">
-          <p style={{ margin: 0, color: "#6b7280" }}>Loading inventory data...</p>
+          <p style={{ margin: 0, color: "#6b7280" }}>
+            {warmingUp ? "Server is warming up, retrying inventory load..." : "Loading inventory data..."}
+          </p>
         </div>
       </div>
     );
