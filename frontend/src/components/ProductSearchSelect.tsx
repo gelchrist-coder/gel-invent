@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { Product } from "../types";
 
@@ -39,8 +39,12 @@ export default function ProductSearchSelect({
   emptyLabel = "No matching products",
 }: Props) {
   const [searchTerm, setSearchTerm] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const searchInputId = useId();
-  const selectId = useId();
+  const listboxId = useId();
+  const optionIdPrefix = useId();
 
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === selectedProductId) ?? null,
@@ -51,11 +55,7 @@ export default function ProductSearchSelect({
 
   const matchingProducts = useMemo(() => {
     if (!normalizedSearch) {
-      return [...products].sort((left, right) => {
-        const nameCompare = left.name.localeCompare(right.name);
-        if (nameCompare !== 0) return nameCompare;
-        return left.sku.localeCompare(right.sku);
-      });
+      return [] as Product[];
     }
 
     return products
@@ -74,17 +74,114 @@ export default function ProductSearchSelect({
   }, [normalizedSearch, products]);
 
   const visibleProducts = useMemo(() => {
-    const limitedMatches = matchingProducts.slice(0, MAX_VISIBLE_RESULTS);
-    if (!selectedProduct) {
-      return limitedMatches;
+    return matchingProducts.slice(0, MAX_VISIBLE_RESULTS);
+  }, [matchingProducts]);
+
+  const activeProduct = activeIndex >= 0 ? visibleProducts[activeIndex] ?? null : null;
+
+  useEffect(() => {
+    if (!isOpen) {
+      setActiveIndex(-1);
+      return;
     }
 
-    if (limitedMatches.some((product) => product.id === selectedProduct.id)) {
-      return limitedMatches;
+    if (visibleProducts.length === 0) {
+      setActiveIndex(-1);
+      return;
     }
 
-    return [selectedProduct, ...limitedMatches.slice(0, Math.max(MAX_VISIBLE_RESULTS - 1, 0))];
-  }, [matchingProducts, selectedProduct]);
+    setActiveIndex((previousIndex) => {
+      if (previousIndex < 0) return 0;
+      return Math.min(previousIndex, visibleProducts.length - 1);
+    });
+  }, [isOpen, visibleProducts]);
+
+  useEffect(() => {
+    if (!isOpen || activeIndex < 0) {
+      return;
+    }
+
+    const activeOption = document.getElementById(`${optionIdPrefix}-${activeIndex}`);
+    activeOption?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, isOpen, optionIdPrefix]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [isOpen]);
+
+  const selectProduct = (product: Product) => {
+    onChange(product.id);
+    setSearchTerm("");
+    setIsOpen(false);
+    setActiveIndex(-1);
+  };
+
+  const clearSearch = () => {
+    setSearchTerm("");
+    setIsOpen(false);
+    setActiveIndex(-1);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled || products.length === 0) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        return;
+      }
+      if (visibleProducts.length === 0) {
+        return;
+      }
+      setActiveIndex((previousIndex) => Math.min(previousIndex + 1, visibleProducts.length - 1));
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        return;
+      }
+      if (visibleProducts.length === 0) {
+        return;
+      }
+      setActiveIndex((previousIndex) => (previousIndex <= 0 ? 0 : previousIndex - 1));
+      return;
+    }
+
+    if (event.key === "Enter") {
+      if (!isOpen || !activeProduct) {
+        return;
+      }
+      event.preventDefault();
+      selectProduct(activeProduct);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      if (!isOpen && !searchTerm) {
+        return;
+      }
+      event.preventDefault();
+      setIsOpen(false);
+      setActiveIndex(-1);
+    }
+  };
 
   const matchSummary = (() => {
     if (products.length === 0) {
@@ -92,7 +189,7 @@ export default function ProductSearchSelect({
     }
 
     if (!normalizedSearch) {
-      return `${products.length} product${products.length === 1 ? "" : "s"} available.`;
+      return `Start typing to search ${products.length} product${products.length === 1 ? "" : "s"}. Use arrow keys and Enter to select quickly.`;
     }
 
     const totalMatches = matchingProducts.length;
@@ -108,7 +205,7 @@ export default function ProductSearchSelect({
   })();
 
   return (
-    <div style={{ display: "grid", gap: 10 }}>
+    <div ref={containerRef} style={{ display: "grid", gap: 10, position: "relative" }}>
       <div style={{ display: "grid", gap: 6 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <label htmlFor={searchInputId} style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>
@@ -117,7 +214,7 @@ export default function ProductSearchSelect({
           {searchTerm ? (
             <button
               type="button"
-              onClick={() => setSearchTerm("")}
+              onClick={clearSearch}
               style={{
                 padding: "4px 8px",
                 borderRadius: 999,
@@ -137,31 +234,122 @@ export default function ProductSearchSelect({
         <input
           id={searchInputId}
           className="input"
+          role="combobox"
+          aria-expanded={isOpen}
+          aria-controls={listboxId}
+          aria-autocomplete="list"
+          aria-activedescendant={activeIndex >= 0 ? `${optionIdPrefix}-${activeIndex}` : undefined}
           value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
+          onChange={(event) => {
+            setSearchTerm(event.target.value);
+            setIsOpen(true);
+          }}
+          onFocus={() => {
+            if (!disabled && products.length > 0) {
+              setIsOpen(true);
+            }
+          }}
+          onKeyDown={handleKeyDown}
           placeholder={searchPlaceholder}
           disabled={disabled || products.length === 0}
         />
         <div style={{ fontSize: 12, color: "#64748b" }}>{matchSummary}</div>
       </div>
 
-      <label>
-        <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>{label}</span>
-        <select
-          id={selectId}
-          className="input"
-          value={selectedProductId ?? ""}
-          onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)}
-          disabled={disabled || products.length === 0}
+      {isOpen ? (
+        <div
+          id={listboxId}
+          role="listbox"
+          aria-label={`${label} search results`}
+          style={{
+            maxHeight: 320,
+            overflowY: "auto",
+            borderRadius: 14,
+            border: "1px solid #dbe5f2",
+            background: "#ffffff",
+            boxShadow: "0 18px 30px rgba(15, 23, 42, 0.08)",
+            padding: 8,
+            display: "grid",
+            gap: 6,
+          }}
         >
-          {visibleProducts.length === 0 ? <option value="">{emptyLabel}</option> : null}
-          {visibleProducts.map((product) => (
-            <option key={product.id} value={product.id}>
-              {product.name} ({product.sku})
-            </option>
-          ))}
-        </select>
-      </label>
+          {!normalizedSearch ? (
+            <div style={{ padding: "12px 14px", borderRadius: 10, background: "#f8fafc", color: "#64748b", fontSize: 13 }}>
+              Start typing a product name, SKU, supplier, or category to narrow the list quickly.
+            </div>
+          ) : visibleProducts.length === 0 ? (
+            <div style={{ padding: "12px 14px", borderRadius: 10, background: "#f8fafc", color: "#64748b", fontSize: 13 }}>
+              {emptyLabel}
+            </div>
+          ) : (
+            visibleProducts.map((product, index) => {
+              const isActive = index === activeIndex;
+              const isSelected = product.id === selectedProductId;
+              return (
+                <button
+                  key={product.id}
+                  id={`${optionIdPrefix}-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => selectProduct(product)}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    border: isActive ? "1px solid #2563eb" : isSelected ? "1px solid #bfdbfe" : "1px solid #e2e8f0",
+                    background: isActive ? "#eff6ff" : isSelected ? "#f8fbff" : "#ffffff",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    display: "grid",
+                    gap: 4,
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{product.name}</span>
+                    <span style={{ fontSize: 12, color: "#475569", fontWeight: 700 }}>{product.sku}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#64748b" }}>
+                    <span>Stock {Number(product.current_stock || 0)}</span>
+                    {product.supplier ? <span>Supplier {product.supplier}</span> : null}
+                    {product.category ? <span>Category {product.category}</span> : null}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      ) : null}
+
+      <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{label}</div>
+        <div
+          style={{
+            padding: "12px 14px",
+            borderRadius: 12,
+            border: "1px solid #e2e8f0",
+            background: selectedProduct ? "#f8fbff" : "#f8fafc",
+            display: "grid",
+            gap: 4,
+          }}
+        >
+          {selectedProduct ? (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedProduct.name}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>{selectedProduct.sku}</div>
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#64748b" }}>
+                <span>Stock {Number(selectedProduct.current_stock || 0)}</span>
+                {selectedProduct.supplier ? <span>Supplier {selectedProduct.supplier}</span> : null}
+                {selectedProduct.category ? <span>Category {selectedProduct.category}</span> : null}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 13, color: "#64748b" }}>No product selected yet.</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
