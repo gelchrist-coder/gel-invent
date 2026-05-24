@@ -90,9 +90,15 @@ export default function Inventory() {
     } catch (err) {
       if (allowWarmRetry && isTemporaryServerDelayError(err)) {
         setWarmingUp(true);
-        await warmBackend("/health/db", true);
-        await loadData(false);
-        return;
+        const isReady = await warmBackend("/health/db", true, {
+          timeoutMs: 30000,
+          probeTimeoutMs: 10000,
+          retryIntervalMs: 1500,
+        });
+        if (isReady) {
+          await loadData(false);
+          return;
+        }
       }
       setError(err instanceof Error ? err.message : "Failed to load inventory data");
     } finally {

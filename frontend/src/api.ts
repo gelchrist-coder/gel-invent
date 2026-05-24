@@ -56,7 +56,7 @@ type CacheEntry<T> = {
 const dataCache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 30000; // 30 seconds - data is considered fresh
 const inflightGetRequests = new Map<string, Promise<unknown>>();
-const inflightWarmupRequests = new Map<string, Promise<void>>();
+const inflightWarmupRequests = new Map<string, Promise<boolean>>();
 const REQUEST_TIMEOUT_MS = 25000;
 const GET_REQUEST_TIMEOUT_MS = 35000;
 const GET_RETRY_ATTEMPTS = 1;
@@ -75,26 +75,53 @@ export function isTemporaryServerDelayError(error: unknown): boolean {
   return error instanceof Error && error.message === TEMPORARY_SERVER_DELAY_MESSAGE;
 }
 
-export function warmBackend(path: string = "/health/db", force = false): Promise<void> {
+export function warmBackend(
+  path: string = "/health/db",
+  force = false,
+  options?: { timeoutMs?: number; probeTimeoutMs?: number; retryIntervalMs?: number },
+): Promise<boolean> {
   const separator = path.includes("?") ? "&" : "?";
-  const url = `${API_BASE}${path}${separator}ts=${Date.now()}`;
   const existing = inflightWarmupRequests.get(path);
+  const timeoutMs = Math.max(1000, options?.timeoutMs ?? 30000);
+  const probeTimeoutMs = Math.max(1000, Math.min(timeoutMs, options?.probeTimeoutMs ?? 10000));
+  const retryIntervalMs = Math.max(250, options?.retryIntervalMs ?? 1500);
 
   if (!force && existing) {
     return existing;
   }
 
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 15000);
-  const request = fetch(url, {
-    cache: "no-store",
-    headers: buildAuthHeaders(),
-    signal: controller.signal,
-  })
-    .then(() => undefined)
-    .catch(() => undefined)
+  const request = (async () => {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), probeTimeoutMs);
+
+      try {
+        const response = await fetch(`${API_BASE}${path}${separator}ts=${Date.now()}`, {
+          cache: "no-store",
+          headers: buildAuthHeaders(),
+          signal: controller.signal,
+        });
+        if (response.ok) {
+          return true;
+        }
+      } catch {
+        // keep probing until the deadline expires
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+      await delay(Math.min(retryIntervalMs, remainingMs));
+    }
+
+    return false;
+  })()
     .finally(() => {
-      window.clearTimeout(timeoutId);
       inflightWarmupRequests.delete(path);
     });
 
