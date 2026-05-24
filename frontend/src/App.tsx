@@ -177,7 +177,9 @@ export default function App() {
             return;
           }
 
-          console.warn("Session revalidation skipped due to temporary error:", err);
+          if (import.meta.env.DEV) {
+            console.warn("Session revalidation skipped due to temporary error:", err);
+          }
         });
     }
   }, []);
