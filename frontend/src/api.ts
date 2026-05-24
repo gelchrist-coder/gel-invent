@@ -62,6 +62,7 @@ const GET_REQUEST_TIMEOUT_MS = 35000;
 const GET_RETRY_ATTEMPTS = 1;
 const STARTUP_REQUEST_TIMEOUT_MS = GET_REQUEST_TIMEOUT_MS;
 export const TEMPORARY_SERVER_DELAY_MESSAGE = "Server is taking longer than expected. Please tap Retry.";
+const STARTUP_RETRY_STATUS_CODES = new Set([502, 503, 504]);
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -132,16 +133,42 @@ export function warmBackend(
 export async function resilientFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
-  options?: { timeoutMs?: number; retries?: number },
+  options?: {
+    timeoutMs?: number;
+    retries?: number;
+    allowWarmupRetry?: boolean;
+    warmupPath?: string;
+    warmupTimeoutMs?: number;
+    warmupProbeTimeoutMs?: number;
+    warmupRetryIntervalMs?: number;
+  },
 ): Promise<Response> {
   const method = (init?.method || "GET").toUpperCase();
   const timeoutMs = options?.timeoutMs ?? (method === "GET" ? GET_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
   const retries = Math.max(0, options?.retries ?? 1);
   const maxAttempts = method === "GET" ? retries + 1 : 1;
+  const allowWarmupRetry = options?.allowWarmupRetry ?? method === "GET";
+  const maxTotalAttempts = maxAttempts + (allowWarmupRetry ? 1 : 0);
+  let warmupRetryAvailable = allowWarmupRetry;
 
   let response: Response | null = null;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+  const warmAndRetry = async (): Promise<boolean> => {
+    if (!warmupRetryAvailable) {
+      return false;
+    }
+
+    warmupRetryAvailable = false;
+    return warmBackend(options?.warmupPath ?? "/health/db", true, {
+      timeoutMs: options?.warmupTimeoutMs ?? 30000,
+      probeTimeoutMs: options?.warmupProbeTimeoutMs ?? 10000,
+      retryIntervalMs: options?.warmupRetryIntervalMs ?? 1500,
+    });
+  };
+
+  for (let attempt = 1; attempt <= maxTotalAttempts; attempt += 1) {
+    const canRetry = method === "GET" && attempt < maxAttempts;
+    const hasAnotherAttempt = attempt < maxTotalAttempts;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
@@ -152,7 +179,20 @@ export async function resilientFetch(
         signal: controller.signal,
       });
     } catch (error) {
-      const canRetry = method === "GET" && attempt < maxAttempts;
+      if (hasAnotherAttempt && isAbortError(error)) {
+        const isReady = await warmAndRetry();
+        if (isReady) {
+          continue;
+        }
+      }
+
+      if (hasAnotherAttempt && error instanceof TypeError && navigator.onLine) {
+        const isReady = await warmAndRetry();
+        if (isReady) {
+          continue;
+        }
+      }
+
       if (canRetry && (isAbortError(error) || error instanceof TypeError)) {
         await delay(500 * attempt);
         continue;
@@ -179,10 +219,20 @@ export async function resilientFetch(
       continue;
     }
 
-    if (method === "GET" && [502, 503, 504].includes(response.status) && attempt < maxAttempts) {
-      await delay(500 * attempt);
-      response = null;
-      continue;
+    if (method === "GET" && STARTUP_RETRY_STATUS_CODES.has(response.status)) {
+      if (hasAnotherAttempt) {
+        const isReady = await warmAndRetry();
+        if (isReady) {
+          response = null;
+          continue;
+        }
+      }
+
+      if (canRetry) {
+        await delay(500 * attempt);
+        response = null;
+        continue;
+      }
     }
 
     break;
