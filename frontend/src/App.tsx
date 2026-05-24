@@ -376,13 +376,18 @@ export default function App() {
         setProducts([]);
         setSelectedId(null);
       }
-      
-      // Fetch fresh data in background
-      const data = await fetchProductsCached((fresh) => setProducts(fresh));
-      setProducts(data);
-      setSelectedId((prev) => prev ?? (data[0]?.id ?? null));
+
+      try {
+        // Refresh in the background, but keep startup resilient to cold-start timeouts.
+        const data = await fetchProductsCached((fresh) => setProducts(fresh));
+        setProducts(data);
+        setSelectedId((prev) => prev ?? (data[0]?.id ?? null));
+      } catch {
+        // Keep whatever cached shell state we already had.
+      }
     };
-    run();
+
+    void run();
   }, [isAuthenticated, activeBranchId]);
 
   const handleLogin = (_email: string, _password: string) => {
