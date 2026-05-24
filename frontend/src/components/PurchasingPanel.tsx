@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { createPurchaseOrder, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchases, fetchSupplierDetail, fetchSupplierPayments, fetchSuppliers, updateSupplier } from "../api";
+import { createPurchaseOrder, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchasesCached, fetchSupplierDetail, fetchSupplierPaymentsCached, fetchSuppliersCached, updateSupplier } from "../api";
 import type { Product, Purchase, Supplier, SupplierDetail, SupplierPayment } from "../types";
 
 type Props = {
@@ -17,6 +17,18 @@ const emptySupplierForm = {
   email: "",
   address: "",
   notes: "",
+};
+
+type PanelDataErrors = {
+  suppliers: string | null;
+  purchases: string | null;
+  payments: string | null;
+};
+
+const panelDataLabels: Record<keyof PanelDataErrors, string> = {
+  suppliers: "Supplier directory",
+  purchases: "Purchase orders",
+  payments: "Payment history",
 };
 
 const paymentMethodOptions = [
@@ -37,6 +49,18 @@ function toISODate(date: Date): string {
 function trimOrUndefined(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function createEmptyPanelDataErrors(): PanelDataErrors {
+  return {
+    suppliers: null,
+    purchases: null,
+    payments: null,
+  };
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function formatCurrency(value: number): string {
@@ -225,25 +249,66 @@ export default function PurchasingPanel({
   const [savingSupplierDetail, setSavingSupplierDetail] = useState(false);
   const [deactivatingSupplierId, setDeactivatingSupplierId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [panelDataErrors, setPanelDataErrors] = useState<PanelDataErrors>(() => createEmptyPanelDataErrors());
 
   const loadPanelData = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      const [supplierData, purchaseData, paymentData] = await Promise.all([
-        fetchSuppliers(),
-        fetchPurchases(100),
-        fetchSupplierPayments(30),
-      ]);
-      setSuppliers(supplierData);
-      setPurchases(purchaseData);
-      setPayments(paymentData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load purchasing data");
-    } finally {
-      setLoading(false);
+    setLoadWarning(null);
+    const [supplierResult, purchaseResult, paymentResult] = await Promise.allSettled([
+      fetchSuppliersCached((fresh) => setSuppliers(fresh)),
+      fetchPurchasesCached(100, (fresh) => setPurchases(fresh)),
+      fetchSupplierPaymentsCached(30, (fresh) => setPayments(fresh)),
+    ]);
+
+    const nextPanelErrors = createEmptyPanelDataErrors();
+
+    if (supplierResult.status === "fulfilled") {
+      setSuppliers(supplierResult.value);
+    } else {
+      nextPanelErrors.suppliers = getErrorMessage(supplierResult.reason, "Failed to load supplier directory");
     }
+
+    if (purchaseResult.status === "fulfilled") {
+      setPurchases(purchaseResult.value);
+    } else {
+      nextPanelErrors.purchases = getErrorMessage(purchaseResult.reason, "Failed to load purchase orders");
+    }
+
+    if (paymentResult.status === "fulfilled") {
+      setPayments(paymentResult.value);
+    } else {
+      nextPanelErrors.payments = getErrorMessage(paymentResult.reason, "Failed to load supplier payments");
+    }
+
+    setPanelDataErrors(nextPanelErrors);
+
+    const failedSections = (Object.keys(nextPanelErrors) as Array<keyof PanelDataErrors>).filter((key) => nextPanelErrors[key]);
+    if (failedSections.length === 0) {
+      setLoadWarning(null);
+      setLoading(false);
+      return;
+    }
+
+    if (failedSections.length === 3) {
+      setLoadWarning(null);
+      setError(nextPanelErrors[failedSections[0]] ?? "Failed to load purchasing data");
+      setLoading(false);
+      return;
+    }
+
+    const failedLabels = failedSections.map((key) => panelDataLabels[key]);
+    setLoadWarning(
+      `${failedLabels.join(", ")} ${failedSections.length === 1 ? "could not be refreshed" : "could not all be refreshed"}. Showing available purchasing data.`,
+    );
+
+    if (import.meta.env.DEV) {
+      console.warn("Purchasing page partially degraded:", nextPanelErrors);
+    }
+
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -811,6 +876,11 @@ export default function PurchasingPanel({
           {error}
         </div>
       ) : null}
+      {loadWarning ? (
+        <div style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid #fcd34d", background: "#fffbeb", color: "#92400e", fontSize: 14 }}>
+          {loadWarning}
+        </div>
+      ) : null}
       {notice ? (
         <div style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#166534", fontSize: 14 }}>
           {notice}
@@ -820,20 +890,26 @@ export default function PurchasingPanel({
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
         <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
           <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Active Suppliers</div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a" }}>{suppliers.length}</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a" }}>{panelDataErrors.suppliers && suppliers.length === 0 ? "Unavailable" : suppliers.length}</div>
         </div>
         <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
           <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Purchase Value</div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a" }}>{formatCurrency(totalPurchaseValue)}</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a" }}>{panelDataErrors.purchases && purchases.length === 0 ? "Unavailable" : formatCurrency(totalPurchaseValue)}</div>
         </div>
         <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
           <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Outstanding Balance</div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: totalOutstandingBalance > 0 ? "#b45309" : "#0f172a" }}>{formatCurrency(totalOutstandingBalance)}</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: panelDataErrors.suppliers && suppliers.length === 0 ? "#0f172a" : totalOutstandingBalance > 0 ? "#b45309" : "#0f172a" }}>
+            {panelDataErrors.suppliers && suppliers.length === 0 ? "Unavailable" : formatCurrency(totalOutstandingBalance)}
+          </div>
         </div>
         <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
           <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Unpaid Invoices</div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: totalUnpaidInvoices > 0 ? "#b91c1c" : "#0f172a" }}>{totalUnpaidInvoices}</div>
-          <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>Paid so far: {formatCurrency(totalPaidToSuppliers)}</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: panelDataErrors.suppliers && suppliers.length === 0 ? "#0f172a" : totalUnpaidInvoices > 0 ? "#b91c1c" : "#0f172a" }}>
+            {panelDataErrors.suppliers && suppliers.length === 0 ? "Unavailable" : totalUnpaidInvoices}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+            Paid so far: {panelDataErrors.purchases && purchases.length === 0 ? "Unavailable" : formatCurrency(totalPaidToSuppliers)}
+          </div>
         </div>
       </div>
 
@@ -920,8 +996,29 @@ export default function PurchasingPanel({
 
           <div style={{ marginTop: 18, borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginBottom: 10 }}>Saved Suppliers</div>
-            {loading && suppliers.length === 0 ? (
+            {loading && suppliers.length === 0 && !panelDataErrors.suppliers ? (
               <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>Loading suppliers...</p>
+            ) : panelDataErrors.suppliers && suppliers.length === 0 ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <p style={{ margin: 0, color: "#92400e", fontSize: 14 }}>{panelDataErrors.suppliers}</p>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => void loadPanelData()}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "white",
+                      color: "#334155",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
             ) : suppliers.length === 0 ? (
               <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>No suppliers yet.</p>
             ) : (
@@ -1696,7 +1793,49 @@ export default function PurchasingPanel({
             </p>
           </div>
 
-          {paymentSuppliers.length === 0 ? (
+          {panelDataErrors.suppliers && suppliers.length === 0 ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.suppliers}</p>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => void loadPanelData()}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: "white",
+                    color: "#334155",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : panelDataErrors.purchases && purchaseOrders.length === 0 ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.purchases}</p>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => void loadPanelData()}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: "white",
+                    color: "#334155",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : paymentSuppliers.length === 0 ? (
             <p style={{ margin: 0, color: "#6b7280" }}>No unpaid supplier balances right now.</p>
           ) : (
             <div style={{ display: "grid", gap: 12 }}>
@@ -1868,8 +2007,29 @@ export default function PurchasingPanel({
             </p>
           </div>
 
-          {loading && payments.length === 0 ? (
+          {loading && payments.length === 0 && !panelDataErrors.payments ? (
             <p style={{ margin: 0, color: "#6b7280" }}>Loading payment history...</p>
+          ) : panelDataErrors.payments && payments.length === 0 ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.payments}</p>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => void loadPanelData()}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: "white",
+                    color: "#334155",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
           ) : payments.length === 0 ? (
             <p style={{ margin: 0, color: "#6b7280" }}>No supplier payments recorded yet.</p>
           ) : (
@@ -1914,8 +2074,29 @@ export default function PurchasingPanel({
           </p>
         </div>
 
-        {loading && purchaseOrders.length === 0 ? (
+        {loading && purchaseOrders.length === 0 && !panelDataErrors.purchases ? (
           <p style={{ margin: 0, color: "#6b7280" }}>Loading purchase history...</p>
+        ) : panelDataErrors.purchases && purchaseOrders.length === 0 ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.purchases}</p>
+            <div>
+              <button
+                type="button"
+                onClick={() => void loadPanelData()}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  color: "#334155",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          </div>
         ) : purchaseOrders.length === 0 ? (
           <p style={{ margin: 0, color: "#6b7280" }}>No purchase orders recorded yet.</p>
         ) : (

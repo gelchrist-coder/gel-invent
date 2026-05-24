@@ -913,14 +913,38 @@ export async function createBranchTransfer(payload: {
 }
 
 export async function fetchSuppliers(): Promise<Supplier[]> {
-  return jsonRequest<Supplier[]>('/inventory/suppliers');
+  const cached = getCached<Supplier[]>("suppliers");
+  if (cached && isCacheFresh("suppliers")) {
+    return cached;
+  }
+
+  const data = await jsonRequest<Supplier[]>('/inventory/suppliers');
+  setCache("suppliers", data);
+  return data;
+}
+
+export async function fetchSuppliersCached(onUpdate?: (suppliers: Supplier[]) => void): Promise<Supplier[]> {
+  const cached = getCached<Supplier[]>("suppliers");
+  if (cached) {
+    jsonRequest<Supplier[]>('/inventory/suppliers')
+      .then((fresh) => {
+        setCache("suppliers", fresh);
+        if (onUpdate) onUpdate(fresh);
+      })
+      .catch(() => {});
+    return cached;
+  }
+
+  return fetchSuppliers();
 }
 
 export async function createSupplier(payload: NewSupplier): Promise<Supplier> {
-  return jsonRequest<Supplier>('/inventory/suppliers', {
+  const result = await jsonRequest<Supplier>('/inventory/suppliers', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+  clearDataCache();
+  return result;
 }
 
 export async function fetchSupplierDetail(supplierId: number): Promise<SupplierDetail> {
@@ -945,8 +969,34 @@ export async function deactivateSupplier(supplierId: number): Promise<{ message:
 }
 
 export async function fetchPurchases(limit = 40): Promise<Purchase[]> {
+  const cacheKey = `purchases:${limit}`;
+  const cached = getCached<Purchase[]>(cacheKey);
+  if (cached && isCacheFresh(cacheKey)) {
+    return cached;
+  }
+
   const params = new URLSearchParams({ limit: String(limit) });
-  return jsonRequest<Purchase[]>(`/inventory/purchases?${params.toString()}`);
+  const data = await jsonRequest<Purchase[]>(`/inventory/purchases?${params.toString()}`);
+  setCache(cacheKey, data);
+  return data;
+}
+
+export async function fetchPurchasesCached(limit = 40, onUpdate?: (purchases: Purchase[]) => void): Promise<Purchase[]> {
+  const cacheKey = `purchases:${limit}`;
+  const cached = getCached<Purchase[]>(cacheKey);
+  const params = new URLSearchParams({ limit: String(limit) });
+
+  if (cached) {
+    jsonRequest<Purchase[]>(`/inventory/purchases?${params.toString()}`)
+      .then((fresh) => {
+        setCache(cacheKey, fresh);
+        if (onUpdate) onUpdate(fresh);
+      })
+      .catch(() => {});
+    return cached;
+  }
+
+  return fetchPurchases(limit);
 }
 
 export async function createPurchase(payload: NewPurchase): Promise<Purchase> {
@@ -968,8 +1018,37 @@ export async function createPurchaseOrder(payload: NewPurchaseOrder): Promise<Pu
 }
 
 export async function fetchSupplierPayments(limit = 40): Promise<SupplierPayment[]> {
+  const cacheKey = `supplierPayments:${limit}`;
+  const cached = getCached<SupplierPayment[]>(cacheKey);
+  if (cached && isCacheFresh(cacheKey)) {
+    return cached;
+  }
+
   const params = new URLSearchParams({ limit: String(limit) });
-  return jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?${params.toString()}`);
+  const data = await jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?${params.toString()}`);
+  setCache(cacheKey, data);
+  return data;
+}
+
+export async function fetchSupplierPaymentsCached(
+  limit = 40,
+  onUpdate?: (payments: SupplierPayment[]) => void,
+): Promise<SupplierPayment[]> {
+  const cacheKey = `supplierPayments:${limit}`;
+  const cached = getCached<SupplierPayment[]>(cacheKey);
+  const params = new URLSearchParams({ limit: String(limit) });
+
+  if (cached) {
+    jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?${params.toString()}`)
+      .then((fresh) => {
+        setCache(cacheKey, fresh);
+        if (onUpdate) onUpdate(fresh);
+      })
+      .catch(() => {});
+    return cached;
+  }
+
+  return fetchSupplierPayments(limit);
 }
 
 export async function createSupplierPayment(payload: NewSupplierPayment): Promise<SupplierPayment> {
