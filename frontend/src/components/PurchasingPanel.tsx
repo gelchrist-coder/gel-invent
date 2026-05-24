@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { createPurchaseOrder, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchasesCached, fetchSupplierDetail, fetchSupplierPaymentsCached, fetchSuppliersCached, updateSupplier } from "../api";
+import ProductSearchSelect from "./ProductSearchSelect";
 import type { Product, Purchase, Supplier, SupplierDetail, SupplierPayment } from "../types";
 
 type Props = {
@@ -1321,22 +1322,17 @@ export default function PurchasingPanel({
                 <p style={helperTextStyle}>Pick a product, confirm the buying price, and add it to the current order.</p>
               </div>
 
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Product</span>
-                <select
-                  className="input"
-                  value={selectedProductId ?? ""}
-                  onChange={(e) => setSelectedProductId(e.target.value ? Number(e.target.value) : null)}
-                  disabled={products.length === 0 || submittingPurchase}
-                >
-                  {products.length === 0 ? <option value="">No products available</option> : null}
-                  {products.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.name} ({product.sku})
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div style={{ maxWidth: 720 }}>
+                <ProductSearchSelect
+                  label="Product"
+                  products={products}
+                  selectedProductId={selectedProductId}
+                  onChange={setSelectedProductId}
+                  disabled={submittingPurchase}
+                  searchPlaceholder="Search products for this purchase order"
+                  emptyLabel="No matching products found"
+                />
+              </div>
 
               {selectedProduct ? (
                 <div style={metricGridStyle}>

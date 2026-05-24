@@ -5,6 +5,7 @@ import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
 import MovementHistory from "../components/MovementHistory";
 import PurchasingPanel from "../components/PurchasingPanel";
+import ProductSearchSelect from "../components/ProductSearchSelect";
 import { useExpiryTracking } from "../settings";
 import type { Branch, Product } from "../types";
 
@@ -506,22 +507,17 @@ export default function Inventory() {
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-          <label>
-            <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Product</span>
-            <select
-              value={selectedProductId ?? ""}
-              onChange={(e) => setSelectedProductId(e.target.value ? Number(e.target.value) : null)}
-              style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
-              disabled={submittingAction || products.length === 0}
-            >
-              {products.length === 0 ? <option value="">No products available</option> : null}
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.name} ({product.sku})
-                </option>
-              ))}
-            </select>
-          </label>
+          <div style={{ gridColumn: "1 / -1", maxWidth: 720 }}>
+            <ProductSearchSelect
+              label="Product"
+              products={products}
+              selectedProductId={selectedProductId}
+              onChange={setSelectedProductId}
+              disabled={submittingAction}
+              searchPlaceholder="Search products for quick adjustments"
+              emptyLabel="No matching products found"
+            />
+          </div>
 
           <div>
             <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Action</span>
