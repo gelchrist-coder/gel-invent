@@ -144,6 +144,7 @@ class Purchase(Base):
     stock_movement_id: Mapped[int | None] = mapped_column(
         ForeignKey("stock_movements.id", ondelete="SET NULL"), index=True, default=None
     )
+    order_number: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
     supplier_name: Mapped[str] = mapped_column(String(255))
     product_name: Mapped[str] = mapped_column(String(255))
     product_sku: Mapped[str] = mapped_column(String(64))
@@ -174,6 +175,7 @@ class SupplierPayment(Base):
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True, default=None)
     purchase_id: Mapped[int | None] = mapped_column(ForeignKey("purchases.id", ondelete="SET NULL"), index=True, default=None)
+    order_number: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     payment_method: Mapped[str] = mapped_column(String(50), default="cash")
     payment_date: Mapped[datetime | None] = mapped_column(Date, default=None)

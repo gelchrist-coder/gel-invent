@@ -135,6 +135,7 @@ export type SupplierUpdate = {
 
 export type Purchase = {
   id: number;
+  order_number?: string | null;
   supplier_id?: number | null;
   supplier_name: string;
   product_id?: number | null;
@@ -173,11 +174,51 @@ export type NewPurchase = {
   notes?: string | null;
 };
 
+export type NewPurchaseOrderItem = {
+  product_id: number;
+  quantity: number;
+  unit_cost_price: number;
+  unit_selling_price?: number | null;
+  expiry_date?: string | null;
+};
+
+export type NewPurchaseOrder = {
+  supplier_id?: number | null;
+  supplier_name?: string | null;
+  invoice_number?: string | null;
+  amount_paid?: number | null;
+  payment_method?: string | null;
+  purchase_date?: string | null;
+  due_date?: string | null;
+  notes?: string | null;
+  items: NewPurchaseOrderItem[];
+};
+
+export type PurchaseOrder = {
+  order_number: string;
+  supplier_id?: number | null;
+  supplier_name: string;
+  invoice_number?: string | null;
+  line_count: number;
+  total_cost: number;
+  amount_paid: number;
+  amount_due: number;
+  payment_status: "unpaid" | "partial" | "paid";
+  payment_method?: string | null;
+  purchase_date?: string | null;
+  due_date?: string | null;
+  notes?: string | null;
+  created_at: string;
+  created_by_name?: string | null;
+  items: Purchase[];
+};
+
 export type SupplierPayment = {
   id: number;
   supplier_id?: number | null;
   supplier_name: string;
   purchase_id?: number | null;
+  order_number?: string | null;
   purchase_invoice_number?: string | null;
   product_name?: string | null;
   amount: number;

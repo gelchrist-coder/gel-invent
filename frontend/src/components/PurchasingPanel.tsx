@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { createPurchase, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchases, fetchSupplierDetail, fetchSupplierPayments, fetchSuppliers, updateSupplier } from "../api";
+import { createPurchaseOrder, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchases, fetchSupplierDetail, fetchSupplierPayments, fetchSuppliers, updateSupplier } from "../api";
 import type { Product, Purchase, Supplier, SupplierDetail, SupplierPayment } from "../types";
 
 type Props = {
@@ -76,6 +76,105 @@ function getSupplierFormValues(supplier: Supplier) {
   };
 }
 
+type PurchaseOrderLine = {
+  id: string;
+  product_id: number;
+  product_name: string;
+  product_sku: string;
+  current_stock: number;
+  quantity: number;
+  unit_cost_price: number;
+  unit_selling_price?: number | null;
+  expiry_date?: string | null;
+  is_perishable: boolean;
+  line_total: number;
+};
+
+type PurchaseOrderGroup = {
+  key: string;
+  order_number: string;
+  supplier_id?: number | null;
+  supplier_name: string;
+  invoice_number?: string | null;
+  line_count: number;
+  total_cost: number;
+  amount_paid: number;
+  amount_due: number;
+  payment_status: Purchase["payment_status"];
+  payment_method?: string | null;
+  purchase_date?: string | null;
+  due_date?: string | null;
+  notes?: string | null;
+  created_at: string;
+  created_by_name?: string | null;
+  items: Purchase[];
+  nextPaymentPurchase: Purchase | null;
+};
+
+function createOrderLineId(productId: number): string {
+  return `${productId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildPurchaseOrderGroups(purchases: Purchase[]): PurchaseOrderGroup[] {
+  const groupedOrders = new Map<string, Purchase[]>();
+
+  for (const purchase of purchases) {
+    const key = purchase.order_number?.trim() || `legacy-${purchase.id}`;
+    const existingItems = groupedOrders.get(key);
+    if (existingItems) {
+      existingItems.push(purchase);
+    } else {
+      groupedOrders.set(key, [purchase]);
+    }
+  }
+
+  return Array.from(groupedOrders.entries())
+    .map(([key, items]) => {
+      const sortedItems = [...items].sort((left, right) => getPurchaseDateValue(right) - getPurchaseDateValue(left));
+      const paymentOrderedItems = [...items].sort((left, right) => getPurchaseDateValue(left) - getPurchaseDateValue(right));
+      const referencePurchase = sortedItems[0];
+      const totalCost = items.reduce((sum, purchase) => sum + Number(purchase.total_cost || 0), 0);
+      const amountPaid = items.reduce((sum, purchase) => sum + Number(purchase.amount_paid || 0), 0);
+      const amountDue = items.reduce((sum, purchase) => sum + Number(purchase.amount_due || 0), 0);
+      const nextPaymentPurchase = paymentOrderedItems.find((purchase) => Number(purchase.amount_due || 0) > 0) ?? null;
+
+      let paymentStatus: Purchase["payment_status"] = "unpaid";
+      if (amountDue <= 0 && totalCost > 0) {
+        paymentStatus = "paid";
+      } else if (amountPaid > 0) {
+        paymentStatus = "partial";
+      }
+
+      return {
+        key,
+        order_number: referencePurchase.order_number || `PURCHASE-${referencePurchase.id}`,
+        supplier_id: referencePurchase.supplier_id,
+        supplier_name: referencePurchase.supplier_name,
+        invoice_number: referencePurchase.invoice_number,
+        line_count: items.length,
+        total_cost: totalCost,
+        amount_paid: amountPaid,
+        amount_due: amountDue,
+        payment_status: paymentStatus,
+        payment_method: referencePurchase.payment_method,
+        purchase_date: referencePurchase.purchase_date,
+        due_date: paymentStatus === "paid" ? null : referencePurchase.due_date,
+        notes: referencePurchase.notes,
+        created_at: referencePurchase.created_at,
+        created_by_name: referencePurchase.created_by_name,
+        items: sortedItems,
+        nextPaymentPurchase,
+      };
+    })
+    .sort((left, right) => {
+      const leftTimestamp = new Date(left.purchase_date || left.created_at).getTime();
+      const rightTimestamp = new Date(right.purchase_date || right.created_at).getTime();
+      const safeLeft = Number.isFinite(leftTimestamp) ? leftTimestamp : 0;
+      const safeRight = Number.isFinite(rightTimestamp) ? rightTimestamp : 0;
+      return safeRight - safeLeft;
+    });
+}
+
 export default function PurchasingPanel({
   products,
   initialProductId = null,
@@ -90,6 +189,7 @@ export default function PurchasingPanel({
   const [editingSupplierId, setEditingSupplierId] = useState<number | null>(null);
   const [supplierEditForm, setSupplierEditForm] = useState(emptySupplierForm);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
+  const [orderItems, setOrderItems] = useState<PurchaseOrderLine[]>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [manualSupplierName, setManualSupplierName] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
@@ -176,9 +276,14 @@ export default function PurchasingPanel({
     () => purchases.reduce((sum, purchase) => sum + Number(purchase.amount_paid || 0), 0),
     [purchases],
   );
-  const estimatedTotal = useMemo(
+  const purchaseOrders = useMemo(() => buildPurchaseOrderGroups(purchases), [purchases]);
+  const draftLineTotal = useMemo(
     () => (Number(quantity || 0) || 0) * (Number(unitCostPrice || 0) || 0),
     [quantity, unitCostPrice],
+  );
+  const estimatedTotal = useMemo(
+    () => orderItems.reduce((sum, item) => sum + Number(item.line_total || 0), 0),
+    [orderItems],
   );
   const amountPaidNow = useMemo(() => {
     if (amountPaid.trim() === "") return 0;
@@ -208,6 +313,10 @@ export default function PurchasingPanel({
     setUnitSellingPrice(selectedProduct.selling_price != null ? String(selectedProduct.selling_price) : "");
     setExpiryDate("");
 
+    if (selectedSupplierId != null || manualSupplierName.trim() || orderItems.length > 0) {
+      return;
+    }
+
     if (selectedProduct.supplier) {
       const matchedSupplier = suppliers.find(
         (supplier) => supplier.name.toLowerCase() === selectedProduct.supplier?.toLowerCase(),
@@ -223,7 +332,7 @@ export default function PurchasingPanel({
       setSelectedSupplierId(null);
       setManualSupplierName("");
     }
-  }, [selectedProduct?.id, suppliers]);
+  }, [manualSupplierName, orderItems.length, selectedProduct, selectedSupplierId, suppliers]);
 
   const resolveSupplierIdForPurchase = useCallback(
     (purchase: Purchase) => {
@@ -286,7 +395,7 @@ export default function PurchasingPanel({
       }
       return previousValue;
     });
-  }, [selectedPaymentPurchase?.id, selectedPaymentPurchase?.amount_due]);
+  }, [selectedPaymentPurchase]);
 
   const resetPaymentForm = () => {
     setPaymentSupplierId(null);
@@ -320,7 +429,66 @@ export default function PurchasingPanel({
   const focusPurchaseSupplier = (supplier: Supplier) => {
     setSelectedSupplierId(supplier.id);
     setManualSupplierName("");
-    setNotice(`Supplier ${supplier.name} selected for the purchase form`);
+    setNotice(`Supplier ${supplier.name} selected for the purchase order form`);
+  };
+
+  const handleAddOrderItem = () => {
+    if (!selectedProductId || !selectedProduct) {
+      setError("Select a product first");
+      return;
+    }
+
+    const quantityValue = Number(quantity);
+    const unitCostValue = Number(unitCostPrice);
+    const unitSellingValue = unitSellingPrice.trim() === "" ? null : Number(unitSellingPrice);
+
+    if (!Number.isFinite(quantityValue) || quantityValue <= 0) {
+      setError("Enter a valid purchase quantity");
+      return;
+    }
+
+    if (!Number.isFinite(unitCostValue) || unitCostValue < 0) {
+      setError("Enter a valid unit cost price");
+      return;
+    }
+
+    if (unitSellingValue != null && (!Number.isFinite(unitSellingValue) || unitSellingValue < 0)) {
+      setError("Enter a valid unit selling price");
+      return;
+    }
+
+    if (isPerishableProduct && !expiryDate) {
+      setError("Expiry date is required for this perishable product");
+      return;
+    }
+
+    const lineTotal = Number((quantityValue * unitCostValue).toFixed(2));
+    setOrderItems((previousItems) => [
+      ...previousItems,
+      {
+        id: createOrderLineId(selectedProduct.id),
+        product_id: selectedProduct.id,
+        product_name: selectedProduct.name,
+        product_sku: selectedProduct.sku,
+        current_stock: Number(selectedProduct.current_stock || 0),
+        quantity: quantityValue,
+        unit_cost_price: unitCostValue,
+        unit_selling_price: unitSellingValue,
+        expiry_date: isPerishableProduct ? expiryDate : null,
+        is_perishable: isPerishableProduct,
+        line_total: lineTotal,
+      },
+    ]);
+    setError(null);
+    setNotice(`${selectedProduct.name} added to the purchase order`);
+    setQuantity("1");
+    setUnitCostPrice(selectedProduct.cost_price != null ? String(selectedProduct.cost_price) : "");
+    setUnitSellingPrice(selectedProduct.selling_price != null ? String(selectedProduct.selling_price) : "");
+    setExpiryDate("");
+  };
+
+  const handleRemoveOrderItem = (lineId: string) => {
+    setOrderItems((previousItems) => previousItems.filter((item) => item.id !== lineId));
   };
 
   const openPaymentForPurchase = (purchase: Purchase) => {
@@ -422,30 +590,12 @@ export default function PurchasingPanel({
   };
 
   const handleRecordPurchase = async () => {
-    if (!selectedProductId) {
-      setError("Select a product first");
+    if (orderItems.length === 0) {
+      setError("Add at least one item to the purchase order");
       return;
     }
 
-    const quantityValue = Number(quantity);
-    const unitCostValue = Number(unitCostPrice);
-    const unitSellingValue = unitSellingPrice.trim() === "" ? null : Number(unitSellingPrice);
     const amountPaidValue = amountPaid.trim() === "" ? 0 : Number(amountPaid);
-
-    if (!Number.isFinite(quantityValue) || quantityValue <= 0) {
-      setError("Enter a valid purchase quantity");
-      return;
-    }
-
-    if (!Number.isFinite(unitCostValue) || unitCostValue < 0) {
-      setError("Enter a valid unit cost price");
-      return;
-    }
-
-    if (unitSellingValue != null && (!Number.isFinite(unitSellingValue) || unitSellingValue < 0)) {
-      setError("Enter a valid unit selling price");
-      return;
-    }
 
     if (!Number.isFinite(amountPaidValue) || amountPaidValue < 0) {
       setError("Enter a valid amount paid");
@@ -462,11 +612,6 @@ export default function PurchasingPanel({
       return;
     }
 
-    if (isPerishableProduct && !expiryDate) {
-      setError("Expiry date is required for this perishable product");
-      return;
-    }
-
     if (selectedSupplierId == null && !manualSupplierName.trim()) {
       setError("Select a supplier or type a supplier name");
       return;
@@ -476,32 +621,37 @@ export default function PurchasingPanel({
     setError(null);
     setNotice(null);
     try {
-      const purchase = await createPurchase({
-        product_id: selectedProductId,
+      const purchaseOrder = await createPurchaseOrder({
         supplier_id: selectedSupplierId ?? undefined,
         supplier_name: selectedSupplierId == null ? manualSupplierName.trim() : undefined,
         invoice_number: trimOrUndefined(invoiceNumber),
-        quantity: quantityValue,
-        unit_cost_price: unitCostValue,
-        unit_selling_price: unitSellingValue ?? undefined,
         amount_paid: amountPaidValue || undefined,
         payment_method: amountPaidValue > 0 ? purchasePaymentMethod : undefined,
         purchase_date: purchaseDate || undefined,
         due_date: dueDate || undefined,
-        expiry_date: isPerishableProduct ? (expiryDate || undefined) : undefined,
         notes: trimOrUndefined(notes),
+        items: orderItems.map((item) => ({
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_cost_price: item.unit_cost_price,
+          unit_selling_price: item.unit_selling_price ?? undefined,
+          expiry_date: item.expiry_date || undefined,
+        })),
       });
 
+      setOrderItems([]);
       setInvoiceNumber("");
       setQuantity("1");
+      setSelectedSupplierId(null);
+      setManualSupplierName("");
       setAmountPaid("");
       setPurchasePaymentMethod("cash");
       setDueDate("");
       setNotes("");
       setExpiryDate("");
-      setNotice(`Purchase recorded for ${purchase.product_name} with status ${getStatusMeta(purchase.payment_status).label.toLowerCase()}`);
+      setNotice(`Purchase order ${purchaseOrder.order_number} recorded with ${purchaseOrder.line_count} item${purchaseOrder.line_count === 1 ? "" : "s"} and status ${getStatusMeta(purchaseOrder.payment_status).label.toLowerCase()}`);
       await loadPanelData();
-      await refreshOpenSupplierDetail(purchase.supplier_id ?? selectedSupplierId);
+      await refreshOpenSupplierDetail(purchaseOrder.supplier_id ?? selectedSupplierId);
       if (onPurchaseRecorded) {
         await onPurchaseRecorded();
       }
@@ -844,80 +994,44 @@ export default function PurchasingPanel({
 
         <div className="card" style={{ marginBottom: 0 }}>
           <div style={{ marginBottom: 16 }}>
-            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Record Purchase</h3>
+            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Build Purchase Order</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-              Use this for supplier-backed restocks so stock-in stays linked to supplier, invoice, and cost details.
+              Create one supplier order with multiple product lines, then track payment status against the combined order value.
             </p>
           </div>
 
-          <div style={{ display: "grid", gap: 12 }}>
-            <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Product</span>
-              <select
-                className="input"
-                value={selectedProductId ?? ""}
-                onChange={(e) => setSelectedProductId(e.target.value ? Number(e.target.value) : null)}
-                disabled={products.length === 0 || submittingPurchase}
-              >
-                {products.length === 0 ? <option value="">No products available</option> : null}
-                {products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.name} ({product.sku})
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {selectedProduct ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, padding: 12, border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: 10 }}>
-                <div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current Stock</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{Number(selectedProduct.current_stock || 0)}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current Supplier</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedProduct.supplier || "Not set"}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Perishability</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: isPerishableProduct ? "#b45309" : "#334155" }}>
-                    {isPerishableProduct ? "Perishable" : "Non-perishable"}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier</span>
-              <select
-                className="input"
-                value={selectedSupplierId ?? ""}
-                onChange={(e) => setSelectedSupplierId(e.target.value ? Number(e.target.value) : null)}
-                disabled={submittingPurchase}
-              >
-                <option value="">Type supplier name manually</option>
-                {suppliers.map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {selectedSupplierId == null ? (
+          <div style={{ display: "grid", gap: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
               <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier Name</span>
-                <input
+                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier</span>
+                <select
                   className="input"
-                  value={manualSupplierName}
-                  onChange={(e) => setManualSupplierName(e.target.value)}
-                  placeholder="Type a supplier name"
+                  value={selectedSupplierId ?? ""}
+                  onChange={(e) => setSelectedSupplierId(e.target.value ? Number(e.target.value) : null)}
                   disabled={submittingPurchase}
-                />
+                >
+                  <option value="">Type supplier name manually</option>
+                  {suppliers.map((supplier) => (
+                    <option key={supplier.id} value={supplier.id}>
+                      {supplier.name}
+                    </option>
+                  ))}
+                </select>
               </label>
-            ) : null}
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+              {selectedSupplierId == null ? (
+                <label>
+                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier Name</span>
+                  <input
+                    className="input"
+                    value={manualSupplierName}
+                    onChange={(e) => setManualSupplierName(e.target.value)}
+                    placeholder="Type a supplier name"
+                    disabled={submittingPurchase}
+                  />
+                </label>
+              ) : null}
+
               <label>
                 <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Invoice Number</span>
                 <input
@@ -928,6 +1042,7 @@ export default function PurchasingPanel({
                   disabled={submittingPurchase}
                 />
               </label>
+
               <label>
                 <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Purchase Date</span>
                 <input
@@ -940,43 +1055,188 @@ export default function PurchasingPanel({
               </label>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+            <div style={{ padding: 16, borderRadius: 14, border: "1px solid #dbe5f2", background: "#f8fbff", display: "grid", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Add Line Item</div>
+                <div style={{ fontSize: 13, color: "#64748b" }}>Pick a product, confirm pricing, then add it to the order before submitting.</div>
+              </div>
+
               <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Quantity</span>
-                <input
+                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Product</span>
+                <select
                   className="input"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  disabled={submittingPurchase}
-                />
+                  value={selectedProductId ?? ""}
+                  onChange={(e) => setSelectedProductId(e.target.value ? Number(e.target.value) : null)}
+                  disabled={products.length === 0 || submittingPurchase}
+                >
+                  {products.length === 0 ? <option value="">No products available</option> : null}
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.name} ({product.sku})
+                    </option>
+                  ))}
+                </select>
               </label>
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Cost Price</span>
-                <input
-                  className="input"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={unitCostPrice}
-                  onChange={(e) => setUnitCostPrice(e.target.value)}
-                  disabled={submittingPurchase}
-                />
-              </label>
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Selling Price</span>
-                <input
-                  className="input"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={unitSellingPrice}
-                  onChange={(e) => setUnitSellingPrice(e.target.value)}
-                  disabled={submittingPurchase}
-                />
-              </label>
+
+              {selectedProduct ? (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, padding: 12, border: "1px solid #dbe5f2", background: "white", borderRadius: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current Stock</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{Number(selectedProduct.current_stock || 0)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current Supplier</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedProduct.supplier || "Not set"}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Perishability</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: isPerishableProduct ? "#b45309" : "#334155" }}>
+                      {isPerishableProduct ? "Perishable" : "Non-perishable"}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Draft Line Total</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(draftLineTotal)}</div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+                <label>
+                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Quantity</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    disabled={submittingPurchase}
+                  />
+                </label>
+                <label>
+                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Cost Price</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={unitCostPrice}
+                    onChange={(e) => setUnitCostPrice(e.target.value)}
+                    disabled={submittingPurchase}
+                  />
+                </label>
+                <label>
+                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Selling Price</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={unitSellingPrice}
+                    onChange={(e) => setUnitSellingPrice(e.target.value)}
+                    disabled={submittingPurchase}
+                  />
+                </label>
+              </div>
+
+              {isPerishableProduct ? (
+                <label>
+                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Batch Expiry Date</span>
+                  <input
+                    className="input"
+                    type="date"
+                    value={expiryDate}
+                    onChange={(e) => setExpiryDate(e.target.value)}
+                    disabled={submittingPurchase}
+                  />
+                </label>
+              ) : null}
+
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={handleAddOrderItem}
+                  disabled={submittingPurchase || products.length === 0}
+                >
+                  Add Item to Order
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Order Items</div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>{orderItems.length} line{orderItems.length === 1 ? "" : "s"} added</div>
+              </div>
+
+              {orderItems.length === 0 ? (
+                <div style={{ padding: 14, borderRadius: 12, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 14 }}>
+                  No items added yet. Add at least one product line before creating the order.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {orderItems.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        display: "grid",
+                        gap: 10,
+                        padding: 14,
+                        borderRadius: 12,
+                        border: "1px solid #e2e8f0",
+                        background: "white",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{item.product_name}</div>
+                          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                            {item.product_sku} · Stock {item.current_stock.toFixed(2)}
+                            {item.expiry_date ? ` · Exp ${formatDate(item.expiry_date)}` : ""}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveOrderItem(item.id)}
+                          style={{
+                            padding: "7px 10px",
+                            borderRadius: 8,
+                            border: "1px solid #fecaca",
+                            background: "#fff1f2",
+                            color: "#b91c1c",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+                        <div>
+                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Quantity</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{item.quantity.toFixed(2)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Unit Cost</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(item.unit_cost_price)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Unit Selling</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(Number(item.unit_selling_price || 0))}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Line Total</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(item.line_total)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
@@ -1020,8 +1280,12 @@ export default function PurchasingPanel({
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, padding: 12, border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: 10 }}>
               <div>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Estimated Total</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Order Total</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(estimatedTotal)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Lines</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{orderItems.length}</div>
               </div>
               <div>
                 <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Paid Now</div>
@@ -1053,19 +1317,6 @@ export default function PurchasingPanel({
               </div>
             </div>
 
-            {isPerishableProduct ? (
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Batch Expiry Date</span>
-                <input
-                  className="input"
-                  type="date"
-                  value={expiryDate}
-                  onChange={(e) => setExpiryDate(e.target.value)}
-                  disabled={submittingPurchase}
-                />
-              </label>
-            ) : null}
-
             <label>
               <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Notes</span>
               <textarea
@@ -1073,22 +1324,22 @@ export default function PurchasingPanel({
                 rows={3}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Optional purchase note"
+                placeholder="Optional order note"
                 disabled={submittingPurchase}
               />
             </label>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <div style={{ fontSize: 13, color: "#475569" }}>
-                Every purchase now records payment status and remaining supplier balance.
+                Payments are still tracked against supplier balances, while the order groups all its product lines under one order number.
               </div>
               <button
                 type="button"
                 className="button"
                 onClick={() => void handleRecordPurchase()}
-                disabled={submittingPurchase || products.length === 0}
+                disabled={submittingPurchase || products.length === 0 || orderItems.length === 0}
               >
-                {submittingPurchase ? "Recording..." : "Record Purchase"}
+                {submittingPurchase ? "Recording..." : "Create Purchase Order"}
               </button>
             </div>
           </div>
@@ -1337,7 +1588,11 @@ export default function PurchasingPanel({
                             <td style={{ padding: 12, fontSize: 14 }}>{formatDate(purchase.purchase_date || purchase.created_at)}</td>
                             <td style={{ padding: 12, fontSize: 14 }}>
                               <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchase.product_name}</div>
-                              <div style={{ fontSize: 12, color: "#64748b" }}>{purchase.invoice_number || purchase.product_sku}</div>
+                              <div style={{ fontSize: 12, color: "#64748b" }}>
+                                {purchase.order_number
+                                  ? `${purchase.order_number} · ${purchase.invoice_number || purchase.product_sku}`
+                                  : purchase.invoice_number || purchase.product_sku}
+                              </div>
                             </td>
                             <td style={{ padding: 12, fontSize: 14 }}>
                               <span
@@ -1384,7 +1639,7 @@ export default function PurchasingPanel({
                         <tr key={payment.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
                           <td style={{ padding: 12, fontSize: 14 }}>{formatDate(payment.payment_date || payment.created_at)}</td>
                           <td style={{ padding: 12, fontSize: 14 }}>
-                            <div style={{ fontWeight: 700, color: "#0f172a" }}>{payment.purchase_invoice_number || "-"}</div>
+                            <div style={{ fontWeight: 700, color: "#0f172a" }}>{payment.purchase_invoice_number || payment.order_number || "-"}</div>
                             <div style={{ fontSize: 12, color: "#64748b" }}>{payment.product_name || "Payment record"}</div>
                           </td>
                           <td style={{ padding: 12, fontSize: 14, textTransform: "capitalize" }}>{payment.payment_method.replace(/_/g, " ")}</td>
@@ -1441,7 +1696,7 @@ export default function PurchasingPanel({
                   <option value="">Select unpaid purchase</option>
                   {paymentPurchasesForSupplier.map((purchase) => (
                     <option key={purchase.id} value={purchase.id}>
-                      {purchase.product_name} - {purchase.invoice_number || "No invoice"} - {formatCurrency(Number(purchase.amount_due || 0))} due
+                      {purchase.product_name} - {purchase.order_number || purchase.invoice_number || "No invoice"} - {formatCurrency(Number(purchase.amount_due || 0))} due
                     </option>
                   ))}
                 </select>
@@ -1450,8 +1705,8 @@ export default function PurchasingPanel({
               {selectedPaymentPurchase ? (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, padding: 12, border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: 10 }}>
                   <div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Invoice</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedPaymentPurchase.invoice_number || "-"}</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Order / Invoice</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedPaymentPurchase.order_number || selectedPaymentPurchase.invoice_number || "-"}</div>
                   </div>
                   <div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Total</div>
@@ -1602,7 +1857,7 @@ export default function PurchasingPanel({
                         <div style={{ fontWeight: 700, color: "#0f172a" }}>{payment.supplier_name}</div>
                         <div style={{ color: "#6b7280", fontSize: 12 }}>{payment.product_name || "Payment record"}</div>
                       </td>
-                      <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{payment.purchase_invoice_number || "-"}</td>
+                      <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{payment.purchase_invoice_number || payment.order_number || "-"}</td>
                       <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(payment.amount || 0))}</td>
                       <td style={{ padding: 12, fontSize: 14, textTransform: "capitalize" }}>{payment.payment_method.replace(/_/g, " ")}</td>
                       <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{payment.created_by_name || "System"}</td>
@@ -1617,94 +1872,140 @@ export default function PurchasingPanel({
 
       <div className="card" style={{ marginBottom: 0 }}>
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Recent Purchases</h3>
+          <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Recent Purchase Orders</h3>
           <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-            Review recent stock purchases and supplier activity for this branch.
+            Review grouped supplier orders, the items inside each order, and the next outstanding line ready for payment.
           </p>
         </div>
 
-        {loading && purchases.length === 0 ? (
+        {loading && purchaseOrders.length === 0 ? (
           <p style={{ margin: 0, color: "#6b7280" }}>Loading purchase history...</p>
-        ) : purchases.length === 0 ? (
-          <p style={{ margin: 0, color: "#6b7280" }}>No purchases recorded yet.</p>
+        ) : purchaseOrders.length === 0 ? (
+          <p style={{ margin: 0, color: "#6b7280" }}>No purchase orders recorded yet.</p>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
-              <thead>
-                <tr style={{ background: "#f8fafc" }}>
-                  <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
-                  <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Supplier</th>
-                  <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Product</th>
-                  <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Status</th>
-                  <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Total</th>
-                  <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Paid</th>
-                  <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Balance</th>
-                  <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Invoice</th>
-                  <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {purchases.map((purchase) => {
-                  const statusMeta = getStatusMeta(purchase.payment_status);
-                  const balanceDue = Number(purchase.amount_due || 0);
-                  return (
-                  <tr key={purchase.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                    <td style={{ padding: 12, fontSize: 14 }}>{formatDate(purchase.purchase_date || purchase.created_at)}</td>
-                    <td style={{ padding: 12, fontSize: 14 }}>
-                      <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchase.supplier_name}</div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>{purchase.created_by_name || "System"}</div>
-                    </td>
-                    <td style={{ padding: 12, fontSize: 14 }}>
-                      <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchase.product_name}</div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>{purchase.product_sku} · Qty {Number(purchase.quantity).toFixed(2)}</div>
-                    </td>
-                    <td style={{ padding: 12, fontSize: 14 }}>
-                      <span
+          <div style={{ display: "grid", gap: 12 }}>
+            {purchaseOrders.map((order) => {
+              const statusMeta = getStatusMeta(order.payment_status);
+              return (
+                <div
+                  key={order.key}
+                  style={{
+                    display: "grid",
+                    gap: 14,
+                    padding: 16,
+                    borderRadius: 14,
+                    border: "1px solid #e2e8f0",
+                    background: "white",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>{order.order_number}</div>
+                      <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+                        {order.supplier_name} · {formatDate(order.purchase_date || order.created_at)}
+                        {order.invoice_number ? ` · Invoice ${order.invoice_number}` : ""}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        padding: "4px 8px",
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        border: `1px solid ${statusMeta.border}`,
+                        background: statusMeta.background,
+                        color: statusMeta.color,
+                      }}
+                    >
+                      {statusMeta.label}
+                    </span>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Items</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{order.line_count}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Order Total</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(order.total_cost)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Paid</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#1d4ed8" }}>{formatCurrency(order.amount_paid)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Balance Due</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: order.amount_due > 0 ? "#b45309" : "#166534" }}>{formatCurrency(order.amount_due)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Due Date</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatDate(order.due_date)}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {order.items.map((item) => (
+                      <div
+                        key={item.id}
                         style={{
-                          display: "inline-flex",
+                          display: "grid",
+                          gridTemplateColumns: "minmax(0, 1.6fr) minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 0.9fr)",
+                          gap: 12,
+                          padding: 12,
+                          borderRadius: 10,
+                          border: "1px solid #f1f5f9",
+                          background: "#f8fafc",
                           alignItems: "center",
-                          padding: "4px 8px",
-                          borderRadius: 999,
-                          fontSize: 12,
-                          fontWeight: 700,
-                          border: `1px solid ${statusMeta.border}`,
-                          background: statusMeta.background,
-                          color: statusMeta.color,
                         }}
                       >
-                        {statusMeta.label}
-                      </span>
-                      {purchase.due_date ? (
-                        <div style={{ color: "#6b7280", fontSize: 12, marginTop: 6 }}>Due {formatDate(purchase.due_date)}</div>
-                      ) : null}
-                    </td>
-                    <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(purchase.total_cost || 0))}</td>
-                    <td style={{ padding: 12, fontSize: 14, textAlign: "right", color: "#1d4ed8", fontWeight: 700 }}>{formatCurrency(Number(purchase.amount_paid || 0))}</td>
-                    <td style={{ padding: 12, fontSize: 14, textAlign: "right", color: balanceDue > 0 ? "#b45309" : "#166534", fontWeight: 700 }}>{formatCurrency(balanceDue)}</td>
-                    <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{purchase.invoice_number || "-"}</td>
-                    <td style={{ padding: 12, fontSize: 14 }}>
-                      <button
-                        type="button"
-                        onClick={() => openPaymentForPurchase(purchase)}
-                        disabled={balanceDue <= 0}
-                        style={{
-                          padding: "7px 10px",
-                          borderRadius: 8,
-                          border: "1px solid #2563eb",
-                          background: balanceDue <= 0 ? "#e5e7eb" : "#2563eb",
-                          color: balanceDue <= 0 ? "#6b7280" : "#ffffff",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: balanceDue <= 0 ? "not-allowed" : "pointer",
-                        }}
-                      >
-                        Record Payment
-                      </button>
-                    </td>
-                  </tr>
-                )})}
-              </tbody>
-            </table>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{item.product_name}</div>
+                          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                            {item.product_sku} · Qty {Number(item.quantity).toFixed(2)}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Line Total</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(Number(item.total_cost || 0))}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Paid</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#1d4ed8" }}>{formatCurrency(Number(item.amount_paid || 0))}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Balance</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: Number(item.amount_due || 0) > 0 ? "#b45309" : "#166534" }}>{formatCurrency(Number(item.amount_due || 0))}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                    <div style={{ fontSize: 12, color: "#64748b" }}>{order.created_by_name || "System"}</div>
+                    <button
+                      type="button"
+                      onClick={() => order.nextPaymentPurchase && openPaymentForPurchase(order.nextPaymentPurchase)}
+                      disabled={!order.nextPaymentPurchase}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #2563eb",
+                        background: order.nextPaymentPurchase ? "#2563eb" : "#e5e7eb",
+                        color: order.nextPaymentPurchase ? "#ffffff" : "#6b7280",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: order.nextPaymentPurchase ? "pointer" : "not-allowed",
+                      }}
+                    >
+                      {order.nextPaymentPurchase ? "Record Payment" : "Fully Paid"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

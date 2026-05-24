@@ -77,6 +77,14 @@ class SupplierDetailRead(BaseModel):
     payments: list["SupplierPaymentRead"]
 
 
+class PurchaseOrderItemCreate(BaseModel):
+    product_id: int = Field(..., gt=0)
+    quantity: Decimal = Field(..., gt=0, decimal_places=2)
+    unit_cost_price: Decimal = Field(..., ge=0, decimal_places=2)
+    unit_selling_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    expiry_date: date | None = Field(default=None)
+
+
 class PurchaseCreate(BaseModel):
     product_id: int = Field(..., gt=0)
     supplier_id: int | None = Field(default=None, gt=0)
@@ -93,8 +101,21 @@ class PurchaseCreate(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class PurchaseOrderCreate(BaseModel):
+    supplier_id: int | None = Field(default=None, gt=0)
+    supplier_name: str | None = Field(default=None, max_length=255)
+    invoice_number: str | None = Field(default=None, max_length=100)
+    amount_paid: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    payment_method: str | None = Field(default=None, max_length=50)
+    purchase_date: date | None = Field(default=None)
+    due_date: date | None = Field(default=None)
+    notes: str | None = Field(default=None, max_length=1000)
+    items: list[PurchaseOrderItemCreate] = Field(..., min_length=1)
+
+
 class PurchaseRead(BaseModel):
     id: int
+    order_number: str | None = None
     supplier_id: int | None = None
     supplier_name: str
     product_id: int | None = None
@@ -119,6 +140,25 @@ class PurchaseRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class PurchaseOrderRead(BaseModel):
+    order_number: str
+    supplier_id: int | None = None
+    supplier_name: str
+    invoice_number: str | None = None
+    line_count: int
+    total_cost: Decimal
+    amount_paid: Decimal = Decimal(0)
+    amount_due: Decimal = Decimal(0)
+    payment_status: Literal["unpaid", "partial", "paid"] = "unpaid"
+    payment_method: str | None = None
+    purchase_date: date | None = None
+    due_date: date | None = None
+    notes: str | None = None
+    created_at: datetime
+    created_by_name: str | None = None
+    items: list[PurchaseRead]
+
+
 class SupplierPaymentCreate(BaseModel):
     purchase_id: int = Field(..., gt=0)
     amount: Decimal = Field(..., gt=0, decimal_places=2)
@@ -132,6 +172,7 @@ class SupplierPaymentRead(BaseModel):
     supplier_id: int | None = None
     supplier_name: str
     purchase_id: int | None = None
+    order_number: str | None = None
     purchase_invoice_number: str | None = None
     product_name: str | None = None
     amount: Decimal

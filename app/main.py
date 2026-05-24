@@ -79,11 +79,15 @@ def _ensure_critical_purchasing_schema_sync() -> None:
         models.Supplier.__table__.create(bind=conn, checkfirst=True)
         models.Purchase.__table__.create(bind=conn, checkfirst=True)
         models.SupplierPayment.__table__.create(bind=conn, checkfirst=True)
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS order_number VARCHAR(80)"))
         conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20)"))
         conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(12,2)"))
         conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_due NUMERIC(12,2)"))
         conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)"))
         conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS due_date DATE"))
+        conn.execute(text("ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS order_number VARCHAR(80)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_purchases_order_number ON purchases (order_number)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_supplier_payments_order_number ON supplier_payments (order_number)"))
         conn.execute(
             text(
                 """
@@ -164,11 +168,13 @@ def _run_startup_migrations_sync() -> None:
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_cost_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS selling_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_selling_price NUMERIC(10,2)"))
+        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS order_number VARCHAR(80)"))
         conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20)"))
         conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(12,2)"))
         conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_due NUMERIC(12,2)"))
         conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)"))
         conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS due_date DATE"))
+        conn.execute(text("ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS order_number VARCHAR(80)"))
         conn.execute(
             text(
                 """
@@ -258,6 +264,8 @@ def _run_startup_migrations_sync() -> None:
                 "ON products (branch_id, user_id, created_at DESC)"
             )
         )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_purchases_order_number ON purchases (order_number)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_supplier_payments_order_number ON supplier_payments (order_number)"))
         conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS idx_credit_transactions_branch_creditor_created_at "

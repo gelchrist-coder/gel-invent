@@ -59,6 +59,240 @@ def _apply_purchase_payment_state(purchase: Purchase, amount_paid: Decimal | Non
         purchase.amount_due = total_cost
 
 
+def _generate_purchase_order_number() -> str:
+    return f"PO-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
+def _resolve_supplier_for_purchase(
+    db: Session,
+    current_user: User,
+    tenant_user_ids: list[int],
+    supplier_id: int | None,
+    supplier_name: str | None,
+) -> tuple[Supplier, str]:
+    supplier: Supplier | None = None
+    if supplier_id is not None:
+        supplier = db.scalar(
+            select(Supplier).where(
+                Supplier.id == supplier_id,
+                Supplier.user_id.in_(tenant_user_ids),
+                Supplier.is_active.is_(True),
+            )
+        )
+        if not supplier:
+            raise HTTPException(status_code=404, detail="Supplier not found")
+
+    resolved_name = supplier.name if supplier else (supplier_name or "").strip()
+    if not resolved_name:
+        raise HTTPException(status_code=400, detail="Supplier is required")
+
+    if supplier is None:
+        supplier = _ensure_supplier_record(db, current_user, tenant_user_ids, resolved_name)
+        resolved_name = supplier.name
+
+    return supplier, resolved_name
+
+
+def _create_purchase_records(
+    db: Session,
+    current_user: User,
+    tenant_user_ids: list[int],
+    active_branch_id: int,
+    items: list[schemas.PurchaseOrderItemCreate],
+    supplier_id: int | None,
+    supplier_name: str | None,
+    invoice_number: str | None,
+    amount_paid: Decimal | None,
+    payment_method: str | None,
+    purchase_date: date | None,
+    due_date: date | None,
+    notes: str | None,
+) -> list[Purchase]:
+    if not items:
+        raise HTTPException(status_code=400, detail="Add at least one item to the purchase order")
+
+    supplier, resolved_supplier_name = _resolve_supplier_for_purchase(
+        db,
+        current_user,
+        tenant_user_ids,
+        supplier_id,
+        supplier_name,
+    )
+
+    product_ids = sorted({item.product_id for item in items})
+    products = db.scalars(
+        select(Product).where(
+            Product.id.in_(product_ids),
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        )
+    ).all()
+    product_by_id = {product.id: product for product in products}
+
+    missing_product_ids = [str(product_id) for product_id in product_ids if product_id not in product_by_id]
+    if missing_product_ids:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    prepared_items: list[tuple[int, Product, schemas.PurchaseOrderItemCreate, Decimal, Decimal]] = []
+    order_total = MONEY_ZERO
+    for index, item in enumerate(items, start=1):
+        product = product_by_id[item.product_id]
+        if product.expiry_date is not None and item.expiry_date is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Expiry date is required when purchasing stock for {product.name}",
+            )
+
+        quantity = _to_money(item.quantity)
+        rule_error = validate_reason_and_change("Restock", quantity)
+        if rule_error:
+            raise HTTPException(status_code=400, detail=rule_error)
+
+        unit_cost = _to_money(item.unit_cost_price)
+        line_total = (quantity * unit_cost).quantize(MONEY_SCALE)
+        prepared_items.append((index, product, item, quantity, line_total))
+        order_total += line_total
+
+    upfront_payment = _to_money(amount_paid)
+    if upfront_payment > order_total:
+        raise HTTPException(status_code=400, detail="Amount paid cannot exceed the purchase total")
+
+    normalized_payment_method = (payment_method or "").strip() or None
+    if upfront_payment > MONEY_ZERO and not normalized_payment_method:
+        raise HTTPException(status_code=400, detail="Payment method is required when recording an upfront payment")
+
+    order_number = _generate_purchase_order_number()
+    invoice_number_value = (invoice_number or "").strip() or None
+    notes_value = (notes or "").strip() or None
+    purchase_date_value = purchase_date or date.today()
+
+    remaining_payment = upfront_payment
+    created_purchases: list[Purchase] = []
+    for index, product, item, quantity, line_total in prepared_items:
+        existing_movements = db.scalar(
+            select(func.count(StockMovement.id)).where(
+                StockMovement.product_id == product.id,
+                StockMovement.user_id.in_(tenant_user_ids),
+                StockMovement.branch_id == active_branch_id,
+            )
+        )
+        movement_reason = "Restock" if int(existing_movements or 0) > 0 else "New Stock"
+        batch_number = f"{order_number}-{index:02d}"
+        movement = StockMovement(
+            product_id=product.id,
+            user_id=current_user.id,
+            branch_id=active_branch_id,
+            change=quantity,
+            reason=movement_reason,
+            batch_number=batch_number,
+            expiry_date=item.expiry_date,
+            unit_cost_price=item.unit_cost_price,
+            unit_selling_price=item.unit_selling_price if item.unit_selling_price is not None else product.selling_price,
+        )
+        db.add(movement)
+        db.flush()
+
+        product.supplier = resolved_supplier_name
+        product.cost_price = item.unit_cost_price
+        if item.unit_selling_price is not None:
+            product.selling_price = item.unit_selling_price
+
+        line_payment = min(remaining_payment, line_total)
+        remaining_payment = (remaining_payment - line_payment).quantize(MONEY_SCALE)
+        purchase = Purchase(
+            user_id=current_user.id,
+            branch_id=active_branch_id,
+            supplier_id=supplier.id,
+            product_id=product.id,
+            stock_movement_id=movement.id,
+            order_number=order_number,
+            supplier_name=resolved_supplier_name,
+            product_name=product.name,
+            product_sku=product.sku,
+            invoice_number=invoice_number_value,
+            quantity=quantity,
+            unit_cost_price=item.unit_cost_price,
+            unit_selling_price=item.unit_selling_price,
+            total_cost=line_total,
+            amount_paid=line_payment,
+            payment_method=normalized_payment_method if line_payment > MONEY_ZERO else None,
+            purchase_date=purchase_date_value,
+            due_date=due_date,
+            notes=notes_value,
+        )
+        _apply_purchase_payment_state(purchase, line_payment)
+        if purchase.payment_status == "paid":
+            purchase.due_date = None
+
+        db.add(purchase)
+        db.flush()
+        created_purchases.append(purchase)
+
+    if upfront_payment > MONEY_ZERO:
+        db.add(
+            SupplierPayment(
+                user_id=current_user.id,
+                branch_id=active_branch_id,
+                supplier_id=supplier.id,
+                purchase_id=created_purchases[0].id if len(created_purchases) == 1 else None,
+                order_number=order_number,
+                amount=upfront_payment,
+                payment_method=normalized_payment_method or "cash",
+                payment_date=purchase_date_value,
+                notes="Initial purchase payment" if len(created_purchases) == 1 else f"Initial payment for purchase order {order_number}",
+            )
+        )
+
+    return created_purchases
+
+
+def _build_purchase_order_response(purchases: list[Purchase]) -> schemas.PurchaseOrderRead:
+    if not purchases:
+        raise HTTPException(status_code=400, detail="Purchase order has no items")
+
+    ordered_purchases = sorted(purchases, key=lambda purchase: purchase.id)
+    first_purchase = ordered_purchases[0]
+    total_cost = sum((_to_money(purchase.total_cost) for purchase in ordered_purchases), MONEY_ZERO)
+    amount_paid = sum((_to_money(purchase.amount_paid) for purchase in ordered_purchases), MONEY_ZERO)
+    amount_due = sum(
+        (_to_money(purchase.amount_due if purchase.amount_due is not None else purchase.total_cost) for purchase in ordered_purchases),
+        MONEY_ZERO,
+    )
+
+    if amount_due <= MONEY_ZERO and total_cost > MONEY_ZERO:
+        payment_status = "paid"
+        amount_due = MONEY_ZERO
+    elif amount_paid > MONEY_ZERO:
+        payment_status = "partial"
+    else:
+        payment_status = "unpaid"
+
+    purchase_date = next((purchase.purchase_date for purchase in ordered_purchases if purchase.purchase_date is not None), first_purchase.purchase_date)
+    due_date_value = None if payment_status == "paid" else next(
+        (purchase.due_date for purchase in ordered_purchases if purchase.due_date is not None),
+        first_purchase.due_date,
+    )
+
+    return schemas.PurchaseOrderRead(
+        order_number=first_purchase.order_number or f"PURCHASE-{first_purchase.id}",
+        supplier_id=first_purchase.supplier_id,
+        supplier_name=first_purchase.supplier_name,
+        invoice_number=first_purchase.invoice_number,
+        line_count=len(ordered_purchases),
+        total_cost=total_cost,
+        amount_paid=amount_paid,
+        amount_due=amount_due,
+        payment_status=payment_status,
+        payment_method=first_purchase.payment_method,
+        purchase_date=purchase_date,
+        due_date=due_date_value,
+        notes=first_purchase.notes,
+        created_at=first_purchase.created_at,
+        created_by_name=getattr(first_purchase, "created_by_name", None),
+        items=ordered_purchases,
+    )
+
+
 def _find_supplier_by_name(db: Session, tenant_user_ids: list[int], supplier_name: str) -> Supplier | None:
     normalized_name = supplier_name.strip().lower()
     if not normalized_name:
@@ -215,6 +449,14 @@ def _attach_supplier_payment_metadata(payments: list[SupplierPayment], db: Sessi
     purchases = db.scalars(select(Purchase).where(Purchase.id.in_(purchase_ids))).all() if purchase_ids else []
     purchase_by_id = {purchase.id: purchase for purchase in purchases}
 
+    order_numbers = sorted({payment.order_number for payment in payments if payment.order_number})
+    order_purchases = db.scalars(select(Purchase).where(Purchase.order_number.in_(order_numbers))).all() if order_numbers else []
+    purchases_by_order_number: dict[str, list[Purchase]] = {}
+    for purchase in order_purchases:
+        if not purchase.order_number:
+            continue
+        purchases_by_order_number.setdefault(purchase.order_number, []).append(purchase)
+
     supplier_ids = sorted({payment.supplier_id for payment in payments if payment.supplier_id is not None})
     suppliers = db.scalars(select(Supplier).where(Supplier.id.in_(supplier_ids))).all() if supplier_ids else []
     supplier_name_by_id = {supplier.id: supplier.name for supplier in suppliers}
@@ -222,9 +464,17 @@ def _attach_supplier_payment_metadata(payments: list[SupplierPayment], db: Sessi
     for payment in payments:
         payment.created_by_name = creator_name_by_id.get(payment.user_id)
         purchase = purchase_by_id.get(payment.purchase_id) if payment.purchase_id is not None else None
-        payment.purchase_invoice_number = purchase.invoice_number if purchase else None
-        payment.product_name = purchase.product_name if purchase else None
-        payment.supplier_name = supplier_name_by_id.get(payment.supplier_id or -1) or (purchase.supplier_name if purchase else "Supplier")
+        order_purchase_rows = purchases_by_order_number.get(payment.order_number or "")
+        reference_purchase = purchase or (order_purchase_rows[0] if order_purchase_rows else None)
+        payment.order_number = payment.order_number or (purchase.order_number if purchase else None)
+        payment.purchase_invoice_number = purchase.invoice_number if purchase else (reference_purchase.invoice_number if reference_purchase else None)
+        if purchase:
+            payment.product_name = purchase.product_name
+        elif order_purchase_rows:
+            payment.product_name = f"{len(order_purchase_rows)} item order" if len(order_purchase_rows) > 1 else reference_purchase.product_name
+        else:
+            payment.product_name = None
+        payment.supplier_name = supplier_name_by_id.get(payment.supplier_id or -1) or (reference_purchase.supplier_name if reference_purchase else "Supplier")
 
 
 def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
@@ -483,6 +733,39 @@ def list_supplier_payments(
     return payments
 
 
+@router.post("/purchase-orders", response_model=schemas.PurchaseOrderRead, status_code=201)
+def create_purchase_order(
+    payload: schemas.PurchaseOrderCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+
+    purchases = _create_purchase_records(
+        db=db,
+        current_user=current_user,
+        tenant_user_ids=tenant_user_ids,
+        active_branch_id=active_branch_id,
+        items=payload.items,
+        supplier_id=payload.supplier_id,
+        supplier_name=payload.supplier_name,
+        invoice_number=payload.invoice_number,
+        amount_paid=payload.amount_paid,
+        payment_method=payload.payment_method,
+        purchase_date=payload.purchase_date,
+        due_date=payload.due_date,
+        notes=payload.notes,
+    )
+
+    db.commit()
+    for purchase in purchases:
+        db.refresh(purchase)
+        purchase.created_by_name = current_user.name
+
+    return _build_purchase_order_response(purchases)
+
+
 @router.post("/purchases", response_model=schemas.PurchaseRead, status_code=201)
 def create_purchase(
     payload: schemas.PurchaseCreate,
@@ -492,125 +775,30 @@ def create_purchase(
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
-    product = db.scalar(
-        select(Product).where(
-            Product.id == payload.product_id,
-            Product.user_id.in_(tenant_user_ids),
-            Product.branch_id == active_branch_id,
-        )
-    )
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-
-    supplier: Supplier | None = None
-    if payload.supplier_id is not None:
-        supplier = db.scalar(
-            select(Supplier).where(
-                Supplier.id == payload.supplier_id,
-                Supplier.user_id.in_(tenant_user_ids),
-                Supplier.is_active.is_(True),
+    purchases = _create_purchase_records(
+        db=db,
+        current_user=current_user,
+        tenant_user_ids=tenant_user_ids,
+        active_branch_id=active_branch_id,
+        items=[
+            schemas.PurchaseOrderItemCreate(
+                product_id=payload.product_id,
+                quantity=payload.quantity,
+                unit_cost_price=payload.unit_cost_price,
+                unit_selling_price=payload.unit_selling_price,
+                expiry_date=payload.expiry_date,
             )
-        )
-        if not supplier:
-            raise HTTPException(status_code=404, detail="Supplier not found")
-
-    supplier_name = supplier.name if supplier else (payload.supplier_name or "").strip()
-    if not supplier_name:
-        raise HTTPException(status_code=400, detail="Supplier is required")
-
-    if supplier is None:
-        supplier = _ensure_supplier_record(db, current_user, tenant_user_ids, supplier_name)
-        supplier_name = supplier.name
-
-    if product.expiry_date is not None and payload.expiry_date is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Expiry date is required when purchasing stock for a perishable product",
-        )
-
-    existing_movements = db.scalar(
-        select(func.count(StockMovement.id)).where(
-            StockMovement.product_id == product.id,
-            StockMovement.user_id.in_(tenant_user_ids),
-            StockMovement.branch_id == active_branch_id,
-        )
-    )
-    movement_reason = "Restock" if int(existing_movements or 0) > 0 else "New Stock"
-    quantity = Decimal(payload.quantity)
-    rule_error = validate_reason_and_change(movement_reason, quantity)
-    if rule_error:
-        raise HTTPException(status_code=400, detail=rule_error)
-
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    batch_number = f"BATCH-{product.sku}-{timestamp}"
-    movement = StockMovement(
-        product_id=product.id,
-        user_id=current_user.id,
-        branch_id=active_branch_id,
-        change=quantity,
-        reason=movement_reason,
-        batch_number=batch_number,
-        expiry_date=payload.expiry_date,
-        unit_cost_price=payload.unit_cost_price,
-        unit_selling_price=payload.unit_selling_price if payload.unit_selling_price is not None else product.selling_price,
-    )
-    db.add(movement)
-    db.flush()
-
-    product.supplier = supplier_name
-    product.cost_price = payload.unit_cost_price
-    if payload.unit_selling_price is not None:
-        product.selling_price = payload.unit_selling_price
-
-    total_cost = (Decimal(payload.quantity) * Decimal(payload.unit_cost_price)).quantize(Decimal("0.01"))
-    upfront_payment = _to_money(payload.amount_paid)
-    if upfront_payment > total_cost:
-        raise HTTPException(status_code=400, detail="Amount paid cannot exceed the purchase total")
-
-    payment_method = (payload.payment_method or "").strip() or None
-    if upfront_payment > MONEY_ZERO and not payment_method:
-        raise HTTPException(status_code=400, detail="Payment method is required when recording an upfront payment")
-
-    purchase = Purchase(
-        user_id=current_user.id,
-        branch_id=active_branch_id,
-        supplier_id=supplier.id if supplier else None,
-        product_id=product.id,
-        stock_movement_id=movement.id,
-        supplier_name=supplier_name,
-        product_name=product.name,
-        product_sku=product.sku,
-        invoice_number=(payload.invoice_number or "").strip() or None,
-        quantity=payload.quantity,
-        unit_cost_price=payload.unit_cost_price,
-        unit_selling_price=payload.unit_selling_price,
-        total_cost=total_cost,
-        amount_paid=upfront_payment,
-        payment_method=payment_method,
-        purchase_date=payload.purchase_date or date.today(),
+        ],
+        supplier_id=payload.supplier_id,
+        supplier_name=payload.supplier_name,
+        invoice_number=payload.invoice_number,
+        amount_paid=payload.amount_paid,
+        payment_method=payload.payment_method,
+        purchase_date=payload.purchase_date,
         due_date=payload.due_date,
-        notes=(payload.notes or "").strip() or None,
+        notes=payload.notes,
     )
-    _apply_purchase_payment_state(purchase, upfront_payment)
-    if purchase.payment_status == "paid":
-        purchase.due_date = None
-
-    db.add(purchase)
-    db.flush()
-
-    if upfront_payment > MONEY_ZERO:
-        db.add(
-            SupplierPayment(
-                user_id=current_user.id,
-                branch_id=active_branch_id,
-                supplier_id=supplier.id if supplier else None,
-                purchase_id=purchase.id,
-                amount=upfront_payment,
-                payment_method=payment_method or "cash",
-                payment_date=payload.purchase_date or date.today(),
-                notes="Initial purchase payment",
-            )
-        )
+    purchase = purchases[0]
 
     db.commit()
     db.refresh(purchase)
@@ -667,6 +855,7 @@ def create_supplier_payment(
         branch_id=active_branch_id,
         supplier_id=supplier.id if supplier else None,
         purchase_id=purchase.id,
+        order_number=purchase.order_number,
         amount=payment_amount,
         payment_method=payment_method,
         payment_date=payload.payment_date or date.today(),
@@ -684,6 +873,7 @@ def create_supplier_payment(
     db.refresh(payment)
     payment.created_by_name = current_user.name
     payment.supplier_name = supplier.name if supplier else purchase.supplier_name
+    payment.order_number = purchase.order_number
     payment.purchase_invoice_number = purchase.invoice_number
     payment.product_name = purchase.product_name
     return payment
