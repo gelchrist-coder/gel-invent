@@ -93,6 +93,7 @@ type PurchaseOrderLine = {
 type PurchaseOrderGroup = {
   key: string;
   order_number: string;
+  payment_target_order_number?: string | null;
   supplier_id?: number | null;
   supplier_name: string;
   invoice_number?: string | null;
@@ -133,6 +134,7 @@ function buildPurchaseOrderGroups(purchases: Purchase[]): PurchaseOrderGroup[] {
       const sortedItems = [...items].sort((left, right) => getPurchaseDateValue(right) - getPurchaseDateValue(left));
       const paymentOrderedItems = [...items].sort((left, right) => getPurchaseDateValue(left) - getPurchaseDateValue(right));
       const referencePurchase = sortedItems[0];
+      const paymentTargetOrderNumber = referencePurchase.order_number?.trim() || null;
       const totalCost = items.reduce((sum, purchase) => sum + Number(purchase.total_cost || 0), 0);
       const amountPaid = items.reduce((sum, purchase) => sum + Number(purchase.amount_paid || 0), 0);
       const amountDue = items.reduce((sum, purchase) => sum + Number(purchase.amount_due || 0), 0);
@@ -147,7 +149,8 @@ function buildPurchaseOrderGroups(purchases: Purchase[]): PurchaseOrderGroup[] {
 
       return {
         key,
-        order_number: referencePurchase.order_number || `PURCHASE-${referencePurchase.id}`,
+        order_number: paymentTargetOrderNumber || `PURCHASE-${referencePurchase.id}`,
+        payment_target_order_number: paymentTargetOrderNumber,
         supplier_id: referencePurchase.supplier_id,
         supplier_name: referencePurchase.supplier_name,
         invoice_number: referencePurchase.invoice_number,
@@ -299,10 +302,6 @@ export default function PurchasingPanel({
     if (amountPaidNow > 0) return "partial";
     return "unpaid";
   }, [amountPaidNow, estimatedBalanceDue, estimatedTotal]);
-  const unpaidPurchases = useMemo(
-    () => purchases.filter((purchase) => Number(purchase.amount_due || 0) > 0).sort((left, right) => getPurchaseDateValue(left) - getPurchaseDateValue(right)),
-    [purchases],
-  );
 
   useEffect(() => {
     if (!selectedProduct) {
@@ -334,18 +333,18 @@ export default function PurchasingPanel({
     }
   }, [manualSupplierName, orderItems.length, selectedProduct, selectedSupplierId, suppliers]);
 
-  const resolveSupplierIdForPurchase = useCallback(
-    (purchase: Purchase) => {
-      if (purchase.supplier_id != null) {
-        return purchase.supplier_id;
-      }
-      return suppliers.find((supplier) => supplier.name.toLowerCase() === purchase.supplier_name.toLowerCase())?.id ?? null;
-    },
+  const paymentSuppliers = useMemo(
+    () => suppliers.filter((supplier) => Number(supplier.outstanding_balance || 0) > 0 || Number(supplier.unpaid_purchases_count || 0) > 0),
     [suppliers],
   );
 
-  const paymentSuppliers = useMemo(
-    () => suppliers.filter((supplier) => Number(supplier.outstanding_balance || 0) > 0 || Number(supplier.unpaid_purchases_count || 0) > 0),
+  const resolveSupplierIdForOrder = useCallback(
+    (order: PurchaseOrderGroup) => {
+      if (order.supplier_id != null) {
+        return order.supplier_id;
+      }
+      return suppliers.find((supplier) => supplier.name.toLowerCase() === order.supplier_name.toLowerCase())?.id ?? null;
+    },
     [suppliers],
   );
 
@@ -354,14 +353,14 @@ export default function PurchasingPanel({
     [supplierDetail, suppliers],
   );
 
-  const paymentPurchasesForSupplier = useMemo(
-    () => unpaidPurchases.filter((purchase) => paymentSupplierId == null || resolveSupplierIdForPurchase(purchase) === paymentSupplierId),
-    [paymentSupplierId, resolveSupplierIdForPurchase, unpaidPurchases],
+  const paymentOrdersForSupplier = useMemo(
+    () => purchaseOrders.filter((order) => Number(order.amount_due || 0) > 0 && (paymentSupplierId == null || resolveSupplierIdForOrder(order) === paymentSupplierId)),
+    [paymentSupplierId, purchaseOrders, resolveSupplierIdForOrder],
   );
 
-  const selectedPaymentPurchase = useMemo(
-    () => purchases.find((purchase) => purchase.id === paymentPurchaseId) ?? null,
-    [paymentPurchaseId, purchases],
+  const selectedPaymentOrder = useMemo(
+    () => paymentPurchaseId == null ? null : purchaseOrders.find((order) => order.items.some((purchase) => purchase.id === paymentPurchaseId)) ?? null,
+    [paymentPurchaseId, purchaseOrders],
   );
 
   useEffect(() => {
@@ -369,33 +368,33 @@ export default function PurchasingPanel({
       return;
     }
 
-    if (paymentPurchasesForSupplier.length === 0) {
+    if (paymentOrdersForSupplier.length === 0) {
       setPaymentPurchaseId(null);
       setPaymentAmount("");
       return;
     }
 
     setPaymentPurchaseId((prev) => (
-      prev != null && paymentPurchasesForSupplier.some((purchase) => purchase.id === prev)
+      prev != null && paymentOrdersForSupplier.some((order) => order.items.some((purchase) => purchase.id === prev))
         ? prev
-        : paymentPurchasesForSupplier[0].id
+        : paymentOrdersForSupplier[0].nextPaymentPurchase?.id ?? paymentOrdersForSupplier[0].items[0]?.id ?? null
     ));
-  }, [paymentPurchasesForSupplier, paymentSupplierId]);
+  }, [paymentOrdersForSupplier, paymentSupplierId]);
 
   useEffect(() => {
-    if (!selectedPaymentPurchase) {
+    if (!selectedPaymentOrder) {
       return;
     }
 
     setPaymentAmount((previousValue) => {
       const numericPrevious = Number(previousValue);
-      const currentDue = Number(selectedPaymentPurchase.amount_due || 0);
+      const currentDue = Number(selectedPaymentOrder.amount_due || 0);
       if (!Number.isFinite(numericPrevious) || numericPrevious <= 0 || numericPrevious > currentDue) {
         return String(currentDue);
       }
       return previousValue;
     });
-  }, [selectedPaymentPurchase]);
+  }, [selectedPaymentOrder]);
 
   const resetPaymentForm = () => {
     setPaymentSupplierId(null);
@@ -492,34 +491,40 @@ export default function PurchasingPanel({
   };
 
   const openPaymentForPurchase = (purchase: Purchase) => {
-    const resolvedSupplierId = resolveSupplierIdForPurchase(purchase);
+    const targetOrder = purchaseOrders.find((order) => order.items.some((item) => item.id === purchase.id)) ?? null;
+    if (!targetOrder) {
+      setError("This purchase could not be grouped. Refresh and try again.");
+      return;
+    }
+
+    const resolvedSupplierId = resolveSupplierIdForOrder(targetOrder);
     if (resolvedSupplierId == null) {
       setError("This purchase is missing a supplier record. Refresh and try again.");
       return;
     }
 
-    if (Number(purchase.amount_due || 0) <= 0) {
-      setNotice(`Purchase ${purchase.invoice_number || purchase.product_name} is already fully paid`);
+    if (Number(targetOrder.amount_due || 0) <= 0) {
+      setNotice(`Purchase order ${targetOrder.order_number} is already fully paid`);
       return;
     }
 
     setError(null);
-    setNotice(`Ready to record a payment for ${purchase.supplier_name}`);
+    setNotice(`Ready to record a payment for ${targetOrder.supplier_name}`);
     setPaymentSupplierId(resolvedSupplierId);
-    setPaymentPurchaseId(purchase.id);
-    setPaymentAmount(String(Number(purchase.amount_due || 0)));
-    setPaymentMethod(purchase.payment_method || "cash");
+    setPaymentPurchaseId(targetOrder.nextPaymentPurchase?.id ?? purchase.id);
+    setPaymentAmount(String(Number(targetOrder.amount_due || 0)));
+    setPaymentMethod(targetOrder.payment_method || purchase.payment_method || "cash");
     setPaymentDate(toISODate(new Date()));
     setPaymentNotes("");
   };
 
   const openPaymentForSupplier = (supplier: Supplier) => {
-    const targetPurchase = unpaidPurchases.find((purchase) => resolveSupplierIdForPurchase(purchase) === supplier.id);
-    if (!targetPurchase) {
+    const targetOrder = purchaseOrders.find((order) => Number(order.amount_due || 0) > 0 && resolveSupplierIdForOrder(order) === supplier.id);
+    if (!targetOrder || !targetOrder.nextPaymentPurchase) {
       setNotice(`No unpaid purchases found for ${supplier.name}`);
       return;
     }
-    openPaymentForPurchase(targetPurchase);
+    openPaymentForPurchase(targetOrder.nextPaymentPurchase);
   };
 
   const openSupplierDetail = async (supplier: Supplier) => {
@@ -541,21 +546,21 @@ export default function PurchasingPanel({
       return;
     }
 
-    const firstOutstandingPurchase = unpaidPurchases.find((purchase) => resolveSupplierIdForPurchase(purchase) === supplierId) ?? null;
-    setPaymentPurchaseId(firstOutstandingPurchase?.id ?? null);
-    setPaymentAmount(firstOutstandingPurchase ? String(Number(firstOutstandingPurchase.amount_due || 0)) : "");
+    const firstOutstandingOrder = purchaseOrders.find((order) => Number(order.amount_due || 0) > 0 && resolveSupplierIdForOrder(order) === supplierId) ?? null;
+    setPaymentPurchaseId(firstOutstandingOrder?.nextPaymentPurchase?.id ?? firstOutstandingOrder?.items[0]?.id ?? null);
+    setPaymentAmount(firstOutstandingOrder ? String(Number(firstOutstandingOrder.amount_due || 0)) : "");
   };
 
   const handlePaymentPurchaseChange = (purchaseId: number | null) => {
     setPaymentPurchaseId(purchaseId);
-    const purchase = purchases.find((item) => item.id === purchaseId) ?? null;
-    if (!purchase) {
+    const order = purchaseId == null ? null : purchaseOrders.find((item) => item.items.some((purchase) => purchase.id === purchaseId)) ?? null;
+    if (!order) {
       setPaymentAmount("");
       return;
     }
 
-    setPaymentAmount(String(Number(purchase.amount_due || 0)));
-    setPaymentSupplierId(resolveSupplierIdForPurchase(purchase));
+    setPaymentAmount(String(Number(order.amount_due || 0)));
+    setPaymentSupplierId(resolveSupplierIdForOrder(order));
   };
 
   const handleCreateSupplier = async () => {
@@ -663,8 +668,8 @@ export default function PurchasingPanel({
   };
 
   const handleRecordPayment = async () => {
-    if (!selectedPaymentPurchase) {
-      setError("Select an unpaid purchase to pay");
+    if (!selectedPaymentOrder) {
+      setError("Select an unpaid purchase order to pay");
       return;
     }
 
@@ -674,7 +679,7 @@ export default function PurchasingPanel({
       return;
     }
 
-    const outstandingAmount = Number(selectedPaymentPurchase.amount_due || 0);
+    const outstandingAmount = Number(selectedPaymentOrder.amount_due || 0);
     if (amountValue > outstandingAmount) {
       setError("Payment amount cannot exceed the outstanding balance");
       return;
@@ -690,13 +695,14 @@ export default function PurchasingPanel({
     setNotice(null);
     try {
       const payment = await createSupplierPayment({
-        purchase_id: selectedPaymentPurchase.id,
+        purchase_id: selectedPaymentOrder.payment_target_order_number ? undefined : selectedPaymentOrder.nextPaymentPurchase?.id,
+        order_number: selectedPaymentOrder.payment_target_order_number ?? undefined,
         amount: amountValue,
         payment_method: paymentMethod,
         payment_date: paymentDate || undefined,
         notes: trimOrUndefined(paymentNotes),
       });
-      setNotice(`Recorded ${formatCurrency(Number(payment.amount || 0))} payment for ${payment.supplier_name}`);
+      setNotice(`Recorded ${formatCurrency(Number(payment.amount || 0))} payment for ${payment.supplier_name}${payment.order_number ? ` on ${payment.order_number}` : ""}`);
       resetPaymentForm();
       await loadPanelData();
       await refreshOpenSupplierDetail(payment.supplier_id);
@@ -1686,39 +1692,39 @@ export default function PurchasingPanel({
               </label>
 
               <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Purchase / Invoice</span>
+                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Purchase Order</span>
                 <select
                   className="input"
                   value={paymentPurchaseId ?? ""}
                   onChange={(e) => handlePaymentPurchaseChange(e.target.value ? Number(e.target.value) : null)}
                   disabled={submittingPayment || paymentSupplierId == null}
                 >
-                  <option value="">Select unpaid purchase</option>
-                  {paymentPurchasesForSupplier.map((purchase) => (
-                    <option key={purchase.id} value={purchase.id}>
-                      {purchase.product_name} - {purchase.order_number || purchase.invoice_number || "No invoice"} - {formatCurrency(Number(purchase.amount_due || 0))} due
+                  <option value="">Select unpaid purchase order</option>
+                  {paymentOrdersForSupplier.map((order) => (
+                    <option key={order.key} value={order.nextPaymentPurchase?.id ?? order.items[0]?.id ?? ""}>
+                      {order.order_number} - {order.line_count} item{order.line_count === 1 ? "" : "s"} - {formatCurrency(Number(order.amount_due || 0))} due
                     </option>
                   ))}
                 </select>
               </label>
 
-              {selectedPaymentPurchase ? (
+              {selectedPaymentOrder ? (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, padding: 12, border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: 10 }}>
                   <div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Order / Invoice</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedPaymentPurchase.order_number || selectedPaymentPurchase.invoice_number || "-"}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedPaymentOrder.order_number || selectedPaymentOrder.invoice_number || "-"}</div>
                   </div>
                   <div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Total</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(Number(selectedPaymentPurchase.total_cost || 0))}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(Number(selectedPaymentOrder.total_cost || 0))}</div>
                   </div>
                   <div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Paid</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#1d4ed8" }}>{formatCurrency(Number(selectedPaymentPurchase.amount_paid || 0))}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#1d4ed8" }}>{formatCurrency(Number(selectedPaymentOrder.amount_paid || 0))}</div>
                   </div>
                   <div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Balance Due</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#b45309" }}>{formatCurrency(Number(selectedPaymentPurchase.amount_due || 0))}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#b45309" }}>{formatCurrency(Number(selectedPaymentOrder.amount_due || 0))}</div>
                   </div>
                   <div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Status</div>
@@ -1730,17 +1736,21 @@ export default function PurchasingPanel({
                         borderRadius: 999,
                         fontSize: 12,
                         fontWeight: 700,
-                        border: `1px solid ${getStatusMeta(selectedPaymentPurchase.payment_status).border}`,
-                        background: getStatusMeta(selectedPaymentPurchase.payment_status).background,
-                        color: getStatusMeta(selectedPaymentPurchase.payment_status).color,
+                        border: `1px solid ${getStatusMeta(selectedPaymentOrder.payment_status).border}`,
+                        background: getStatusMeta(selectedPaymentOrder.payment_status).background,
+                        color: getStatusMeta(selectedPaymentOrder.payment_status).color,
                       }}
                     >
-                      {getStatusMeta(selectedPaymentPurchase.payment_status).label}
+                      {getStatusMeta(selectedPaymentOrder.payment_status).label}
                     </span>
                   </div>
                   <div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Due Date</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatDate(selectedPaymentPurchase.due_date)}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatDate(selectedPaymentOrder.due_date)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Items</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedPaymentOrder.line_count}</div>
                   </div>
                 </div>
               ) : null}
@@ -1755,7 +1765,7 @@ export default function PurchasingPanel({
                     step="0.01"
                     value={paymentAmount}
                     onChange={(e) => setPaymentAmount(e.target.value)}
-                    disabled={submittingPayment || paymentPurchaseId == null}
+                    disabled={submittingPayment || selectedPaymentOrder == null}
                   />
                 </label>
                 <label>
@@ -1815,7 +1825,7 @@ export default function PurchasingPanel({
                   type="button"
                   className="button"
                   onClick={() => void handleRecordPayment()}
-                  disabled={submittingPayment || paymentPurchaseId == null}
+                  disabled={submittingPayment || selectedPaymentOrder == null}
                 >
                   {submittingPayment ? "Saving..." : "Record Payment"}
                 </button>
@@ -1874,7 +1884,7 @@ export default function PurchasingPanel({
         <div style={{ marginBottom: 16 }}>
           <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Recent Purchase Orders</h3>
           <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-            Review grouped supplier orders, the items inside each order, and the next outstanding line ready for payment.
+            Review grouped supplier orders, the items inside each order, and the remaining balance available for order-level payments.
           </p>
         </div>
 

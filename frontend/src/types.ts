@@ -236,7 +236,8 @@ export type SupplierDetail = {
 };
 
 export type NewSupplierPayment = {
-  purchase_id: number;
+  purchase_id?: number | null;
+  order_number?: string | null;
   amount: number;
   payment_method: string;
   payment_date?: string | null;

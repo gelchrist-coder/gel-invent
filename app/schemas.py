@@ -160,7 +160,8 @@ class PurchaseOrderRead(BaseModel):
 
 
 class SupplierPaymentCreate(BaseModel):
-    purchase_id: int = Field(..., gt=0)
+    purchase_id: int | None = Field(default=None, gt=0)
+    order_number: str | None = Field(default=None, max_length=80)
     amount: Decimal = Field(..., gt=0, decimal_places=2)
     payment_method: str = Field(..., min_length=1, max_length=50)
     payment_date: date | None = Field(default=None)

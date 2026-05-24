@@ -63,6 +63,60 @@ def _generate_purchase_order_number() -> str:
     return f"PO-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
 
 
+def _get_purchase_order_rows(
+    db: Session,
+    tenant_user_ids: list[int],
+    active_branch_id: int,
+    order_number: str,
+) -> list[Purchase]:
+    normalized_order_number = order_number.strip()
+    if not normalized_order_number:
+        raise HTTPException(status_code=400, detail="Order number is required")
+
+    purchases = db.scalars(
+        select(Purchase)
+        .where(
+            Purchase.order_number == normalized_order_number,
+            Purchase.user_id.in_(tenant_user_ids),
+            Purchase.branch_id == active_branch_id,
+        )
+        .order_by(Purchase.purchase_date.asc(), Purchase.created_at.asc(), Purchase.id.asc())
+    ).all()
+
+    if not purchases:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+
+    return purchases
+
+
+def _resolve_supplier_for_existing_purchases(
+    db: Session,
+    current_user: User,
+    tenant_user_ids: list[int],
+    purchases: list[Purchase],
+) -> Supplier:
+    primary_purchase = purchases[0]
+    supplier: Supplier | None = None
+    if primary_purchase.supplier_id is not None:
+        supplier = db.scalar(
+            select(Supplier).where(
+                Supplier.id == primary_purchase.supplier_id,
+                Supplier.user_id.in_(tenant_user_ids),
+            )
+        )
+
+    if supplier is None:
+        supplier_name = (primary_purchase.supplier_name or "").strip()
+        if not supplier_name:
+            raise HTTPException(status_code=400, detail="Purchase is missing supplier information")
+        supplier = _ensure_supplier_record(db, current_user, tenant_user_ids, supplier_name)
+        for purchase in purchases:
+            purchase.supplier_id = supplier.id
+            purchase.supplier_name = supplier.name
+
+    return supplier
+
+
 def _resolve_supplier_for_purchase(
     db: Session,
     current_user: User,
@@ -814,68 +868,93 @@ def create_supplier_payment(
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     tenant_user_ids = get_tenant_user_ids(current_user, db)
-    purchase = db.scalar(
-        select(Purchase).where(
-            Purchase.id == payload.purchase_id,
-            Purchase.user_id.in_(tenant_user_ids),
-            Purchase.branch_id == active_branch_id,
-        )
-    )
-    if not purchase:
-        raise HTTPException(status_code=404, detail="Purchase not found")
-
-    _apply_purchase_payment_state(purchase)
-    if purchase.amount_due <= MONEY_ZERO or purchase.payment_status == "paid":
-        raise HTTPException(status_code=400, detail="This purchase is already fully paid")
-
-    supplier: Supplier | None = None
-    if purchase.supplier_id is not None:
-        supplier = db.scalar(
-            select(Supplier).where(
-                Supplier.id == purchase.supplier_id,
-                Supplier.user_id.in_(tenant_user_ids),
-            )
-        )
-
-    if supplier is None:
-        supplier_name = (purchase.supplier_name or "").strip()
-        if not supplier_name:
-            raise HTTPException(status_code=400, detail="Purchase is missing supplier information")
-        supplier = _ensure_supplier_record(db, current_user, tenant_user_ids, supplier_name)
-        purchase.supplier_id = supplier.id
-        purchase.supplier_name = supplier.name
+    if payload.purchase_id is None and not (payload.order_number or "").strip():
+        raise HTTPException(status_code=400, detail="Select a purchase or purchase order to pay")
 
     payment_amount = _to_money(payload.amount)
-    if payment_amount > purchase.amount_due:
-        raise HTTPException(status_code=400, detail="Payment amount cannot exceed the outstanding balance")
-
     payment_method = payload.payment_method.strip()
-    payment = SupplierPayment(
-        user_id=current_user.id,
-        branch_id=active_branch_id,
-        supplier_id=supplier.id if supplier else None,
-        purchase_id=purchase.id,
-        order_number=purchase.order_number,
-        amount=payment_amount,
-        payment_method=payment_method,
-        payment_date=payload.payment_date or date.today(),
-        notes=(payload.notes or "").strip() or None,
-    )
-    db.add(payment)
 
-    updated_paid = _to_money(purchase.amount_paid) + payment_amount
-    _apply_purchase_payment_state(purchase, updated_paid)
-    purchase.payment_method = payment_method
-    if purchase.payment_status == "paid":
-        purchase.due_date = None
+    payment: SupplierPayment
+    if (payload.order_number or "").strip():
+        purchases = _get_purchase_order_rows(db, tenant_user_ids, active_branch_id, payload.order_number or "")
+        for purchase in purchases:
+            _apply_purchase_payment_state(purchase)
+
+        outstanding_purchases = [purchase for purchase in purchases if _to_money(purchase.amount_due) > MONEY_ZERO]
+        if not outstanding_purchases:
+            raise HTTPException(status_code=400, detail="This purchase order is already fully paid")
+
+        outstanding_total = sum((_to_money(purchase.amount_due) for purchase in outstanding_purchases), MONEY_ZERO)
+        if payment_amount > outstanding_total:
+            raise HTTPException(status_code=400, detail="Payment amount cannot exceed the outstanding order balance")
+
+        supplier = _resolve_supplier_for_existing_purchases(db, current_user, tenant_user_ids, purchases)
+        payment = SupplierPayment(
+            user_id=current_user.id,
+            branch_id=active_branch_id,
+            supplier_id=supplier.id,
+            purchase_id=None,
+            order_number=(payload.order_number or "").strip(),
+            amount=payment_amount,
+            payment_method=payment_method,
+            payment_date=payload.payment_date or date.today(),
+            notes=(payload.notes or "").strip() or None,
+        )
+        db.add(payment)
+
+        remaining_payment = payment_amount
+        for purchase in outstanding_purchases:
+            purchase_due = _to_money(purchase.amount_due)
+            applied_amount = min(remaining_payment, purchase_due)
+            updated_paid = _to_money(purchase.amount_paid) + applied_amount
+            _apply_purchase_payment_state(purchase, updated_paid)
+            purchase.payment_method = payment_method
+            if purchase.payment_status == "paid":
+                purchase.due_date = None
+            remaining_payment = (remaining_payment - applied_amount).quantize(MONEY_SCALE)
+            if remaining_payment <= MONEY_ZERO:
+                break
+    else:
+        purchase = db.scalar(
+            select(Purchase).where(
+                Purchase.id == payload.purchase_id,
+                Purchase.user_id.in_(tenant_user_ids),
+                Purchase.branch_id == active_branch_id,
+            )
+        )
+        if not purchase:
+            raise HTTPException(status_code=404, detail="Purchase not found")
+
+        _apply_purchase_payment_state(purchase)
+        if purchase.amount_due <= MONEY_ZERO or purchase.payment_status == "paid":
+            raise HTTPException(status_code=400, detail="This purchase is already fully paid")
+
+        if payment_amount > purchase.amount_due:
+            raise HTTPException(status_code=400, detail="Payment amount cannot exceed the outstanding balance")
+
+        supplier = _resolve_supplier_for_existing_purchases(db, current_user, tenant_user_ids, [purchase])
+        payment = SupplierPayment(
+            user_id=current_user.id,
+            branch_id=active_branch_id,
+            supplier_id=supplier.id,
+            purchase_id=purchase.id,
+            order_number=purchase.order_number,
+            amount=payment_amount,
+            payment_method=payment_method,
+            payment_date=payload.payment_date or date.today(),
+            notes=(payload.notes or "").strip() or None,
+        )
+        db.add(payment)
+
+        updated_paid = _to_money(purchase.amount_paid) + payment_amount
+        _apply_purchase_payment_state(purchase, updated_paid)
+        purchase.payment_method = payment_method
+        if purchase.payment_status == "paid":
+            purchase.due_date = None
 
     db.commit()
     db.refresh(payment)
-    payment.created_by_name = current_user.name
-    payment.supplier_name = supplier.name if supplier else purchase.supplier_name
-    payment.order_number = purchase.order_number
-    payment.purchase_invoice_number = purchase.invoice_number
-    payment.product_name = purchase.product_name
+    _attach_supplier_payment_metadata([payment], db)
     return payment
 
 
