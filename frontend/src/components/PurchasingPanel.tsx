@@ -65,6 +65,12 @@ function getPurchaseDateValue(purchase: Purchase): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function getPaymentDateValue(payment: SupplierPayment): number {
+  const raw = payment.payment_date || payment.created_at;
+  const timestamp = new Date(raw).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function getSupplierFormValues(supplier: Supplier) {
   return {
     name: supplier.name || "",
@@ -357,6 +363,26 @@ export default function PurchasingPanel({
     () => purchaseOrders.filter((order) => Number(order.amount_due || 0) > 0 && (paymentSupplierId == null || resolveSupplierIdForOrder(order) === paymentSupplierId)),
     [paymentSupplierId, purchaseOrders, resolveSupplierIdForOrder],
   );
+
+  const orderPaymentsByKey = useMemo(() => {
+    const paymentsByOrderKey = new Map<string, SupplierPayment[]>();
+
+    for (const order of purchaseOrders) {
+      const purchaseIds = new Set(order.items.map((item) => item.id));
+      const matchedPayments = payments
+        .filter((payment) => {
+          if (order.payment_target_order_number) {
+            return (payment.order_number || "").trim() === order.payment_target_order_number;
+          }
+          return payment.purchase_id != null && purchaseIds.has(payment.purchase_id);
+        })
+        .sort((left, right) => getPaymentDateValue(right) - getPaymentDateValue(left));
+
+      paymentsByOrderKey.set(order.key, matchedPayments);
+    }
+
+    return paymentsByOrderKey;
+  }, [payments, purchaseOrders]);
 
   const selectedPaymentOrder = useMemo(
     () => paymentPurchaseId == null ? null : purchaseOrders.find((order) => order.items.some((purchase) => purchase.id === paymentPurchaseId)) ?? null,
@@ -1896,6 +1922,7 @@ export default function PurchasingPanel({
           <div style={{ display: "grid", gap: 12 }}>
             {purchaseOrders.map((order) => {
               const statusMeta = getStatusMeta(order.payment_status);
+              const orderPayments = orderPaymentsByKey.get(order.key) ?? [];
               return (
                 <div
                   key={order.key}
@@ -1991,6 +2018,54 @@ export default function PurchasingPanel({
                         </div>
                       </div>
                     ))}
+                  </div>
+
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Order Payment Timeline</div>
+                      <div style={{ fontSize: 12, color: "#64748b" }}>{orderPayments.length} payment{orderPayments.length === 1 ? "" : "s"}</div>
+                    </div>
+
+                    {orderPayments.length === 0 ? (
+                      <div style={{ padding: 12, borderRadius: 10, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 13 }}>
+                        No payments recorded for this order yet.
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 8 }}>
+                        {orderPayments.map((payment) => (
+                          <div
+                            key={payment.id}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 1fr)",
+                              gap: 12,
+                              padding: 12,
+                              borderRadius: 10,
+                              border: "1px solid #e2e8f0",
+                              background: "#ffffff",
+                              alignItems: "center",
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatDate(payment.payment_date || payment.created_at)}</div>
+                              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{payment.purchase_invoice_number || payment.order_number || "Order payment"}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Method</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", textTransform: "capitalize" }}>{payment.payment_method.replace(/_/g, " ")}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Amount</div>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: "#1d4ed8" }}>{formatCurrency(Number(payment.amount || 0))}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Recorded By</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{payment.created_by_name || "System"}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
