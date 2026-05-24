@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 
 import { createPurchaseOrder, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchasesCached, fetchSupplierDetail, fetchSupplierPaymentsCached, fetchSuppliersCached, updateSupplier } from "../api";
 import type { Product, Purchase, Supplier, SupplierDetail, SupplierPayment } from "../types";
@@ -869,8 +870,117 @@ export default function PurchasingPanel({
     }
   };
 
+  const rootLayoutStyle: CSSProperties = {
+    display: "grid",
+    gap: 28,
+  };
+
+  const statsGridStyle: CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 18,
+  };
+
+  const statCardStyle: CSSProperties = {
+    background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+    border: "1px solid #dbe5f2",
+    borderRadius: 18,
+    padding: 20,
+    boxShadow: "0 12px 28px rgba(15, 23, 42, 0.04)",
+  };
+
+  const topSectionGridStyle: CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
+    gap: 24,
+    alignItems: "start",
+  };
+
+  const primaryPanelStyle: CSSProperties = {
+    marginBottom: 0,
+    padding: 24,
+    border: "1px solid #dbe5f2",
+    borderRadius: 20,
+    background: "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
+    boxShadow: "0 18px 36px rgba(15, 23, 42, 0.05)",
+  };
+
+  const emphasisSectionStyle: CSSProperties = {
+    display: "grid",
+    gap: 14,
+    padding: 18,
+    borderRadius: 16,
+    border: "1px solid #dbe5f2",
+    background: "linear-gradient(180deg, #fbfdff 0%, #f6faff 100%)",
+  };
+
+  const plainSectionStyle: CSSProperties = {
+    display: "grid",
+    gap: 14,
+    padding: 18,
+    borderRadius: 16,
+    border: "1px solid #e2e8f0",
+    background: "#ffffff",
+  };
+
+  const subSectionLabelStyle: CSSProperties = {
+    fontSize: 12,
+    fontWeight: 800,
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
+    color: "#475569",
+  };
+
+  const helperTextStyle: CSSProperties = {
+    margin: 0,
+    fontSize: 13,
+    color: "#64748b",
+    lineHeight: 1.55,
+  };
+
+  const wideFieldGridStyle: CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: 14,
+  };
+
+  const compactFieldGridStyle: CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+    gap: 14,
+  };
+
+  const metricGridStyle: CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: 12,
+    padding: 14,
+    border: "1px solid #e2e8f0",
+    background: "#f8fafc",
+    borderRadius: 12,
+  };
+
+  const listStackStyle: CSSProperties = {
+    display: "grid",
+    gap: 12,
+    maxHeight: 360,
+    overflowY: "auto",
+    paddingRight: 4,
+  };
+
+  const countPillStyle: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "6px 10px",
+    borderRadius: 999,
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: 12,
+    fontWeight: 800,
+  };
+
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div style={rootLayoutStyle}>
       {error ? (
         <div style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid #fecaca", background: "#fef2f2", color: "#991b1b", fontSize: 14 }}>
           {error}
@@ -887,22 +997,22 @@ export default function PurchasingPanel({
         </div>
       ) : null}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
-        <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+      <div style={statsGridStyle}>
+        <div style={statCardStyle}>
           <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Active Suppliers</div>
           <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a" }}>{panelDataErrors.suppliers && suppliers.length === 0 ? "Unavailable" : suppliers.length}</div>
         </div>
-        <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+        <div style={statCardStyle}>
           <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Purchase Value</div>
           <div style={{ fontSize: 28, fontWeight: 800, color: "#0f172a" }}>{panelDataErrors.purchases && purchases.length === 0 ? "Unavailable" : formatCurrency(totalPurchaseValue)}</div>
         </div>
-        <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+        <div style={statCardStyle}>
           <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Outstanding Balance</div>
           <div style={{ fontSize: 28, fontWeight: 800, color: panelDataErrors.suppliers && suppliers.length === 0 ? "#0f172a" : totalOutstandingBalance > 0 ? "#b45309" : "#0f172a" }}>
             {panelDataErrors.suppliers && suppliers.length === 0 ? "Unavailable" : formatCurrency(totalOutstandingBalance)}
           </div>
         </div>
-        <div style={{ background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
+        <div style={statCardStyle}>
           <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Unpaid Invoices</div>
           <div style={{ fontSize: 28, fontWeight: 800, color: panelDataErrors.suppliers && suppliers.length === 0 ? "#0f172a" : totalUnpaidInvoices > 0 ? "#b91c1c" : "#0f172a" }}>
             {panelDataErrors.suppliers && suppliers.length === 0 ? "Unavailable" : totalUnpaidInvoices}
@@ -913,16 +1023,21 @@ export default function PurchasingPanel({
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20, alignItems: "start" }}>
-        <div className="card" style={{ marginBottom: 0 }}>
-          <div style={{ marginBottom: 16 }}>
+      <div style={topSectionGridStyle}>
+        <div className="card" style={primaryPanelStyle}>
+          <div style={{ marginBottom: 20 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Supplier Directory</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
               Save suppliers once, then reuse them when recording purchases.
             </p>
           </div>
 
-          <div style={{ display: "grid", gap: 12 }}>
+          <div style={emphasisSectionStyle}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <div style={subSectionLabelStyle}>Add Supplier</div>
+              <p style={helperTextStyle}>Capture the supplier once so future orders and payments need fewer manual fields.</p>
+            </div>
+
             <label>
               <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier Name</span>
               <input
@@ -933,7 +1048,7 @@ export default function PurchasingPanel({
               />
             </label>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+            <div style={wideFieldGridStyle}>
               <label>
                 <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Contact Person</span>
                 <input
@@ -994,8 +1109,17 @@ export default function PurchasingPanel({
             </div>
           </div>
 
-          <div style={{ marginTop: 18, borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginBottom: 10 }}>Saved Suppliers</div>
+          <div style={{ ...plainSectionStyle, marginTop: 22 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={subSectionLabelStyle}>Saved Suppliers</div>
+                <p style={helperTextStyle}>Use an existing supplier for purchases, payments, or deeper account review.</p>
+              </div>
+              <span style={countPillStyle}>
+                {panelDataErrors.suppliers && suppliers.length === 0 ? "Unavailable" : `${suppliers.length} saved`}
+              </span>
+            </div>
+
             {loading && suppliers.length === 0 && !panelDataErrors.suppliers ? (
               <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>Loading suppliers...</p>
             ) : panelDataErrors.suppliers && suppliers.length === 0 ? (
@@ -1022,17 +1146,17 @@ export default function PurchasingPanel({
             ) : suppliers.length === 0 ? (
               <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>No suppliers yet.</p>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={listStackStyle}>
                 {suppliers.map((supplier) => (
                   <div
                     key={supplier.id}
                     style={{
-                      padding: "10px 12px",
-                      borderRadius: 10,
+                      padding: "14px 16px",
+                      borderRadius: 14,
                       border: supplier.id === supplierDetail?.supplier.id ? "1px solid #0f172a" : supplier.id === selectedSupplierId ? "1px solid #2563eb" : "1px solid #e2e8f0",
                       background: supplier.id === supplierDetail?.supplier.id ? "#f8fafc" : supplier.id === selectedSupplierId ? "#eff6ff" : "#ffffff",
                       display: "grid",
-                      gap: 10,
+                      gap: 12,
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -1121,16 +1245,22 @@ export default function PurchasingPanel({
           </div>
         </div>
 
-        <div className="card" style={{ marginBottom: 0 }}>
-          <div style={{ marginBottom: 16 }}>
+        <div className="card" style={primaryPanelStyle}>
+          <div style={{ marginBottom: 20 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Build Purchase Order</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
               Create one supplier order with multiple product lines, then track payment status against the combined order value.
             </p>
           </div>
 
-          <div style={{ display: "grid", gap: 16 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gap: 18 }}>
+            <div style={emphasisSectionStyle}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={subSectionLabelStyle}>Order Details</div>
+                <p style={helperTextStyle}>Start with the supplier, invoice reference, and purchase date before adding line items.</p>
+              </div>
+
+              <div style={wideFieldGridStyle}>
               <label>
                 <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier</span>
                 <select
@@ -1182,12 +1312,13 @@ export default function PurchasingPanel({
                   disabled={submittingPurchase}
                 />
               </label>
+              </div>
             </div>
 
-            <div style={{ padding: 16, borderRadius: 14, border: "1px solid #dbe5f2", background: "#f8fbff", display: "grid", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Add Line Item</div>
-                <div style={{ fontSize: 13, color: "#64748b" }}>Pick a product, confirm pricing, then add it to the order before submitting.</div>
+            <div style={emphasisSectionStyle}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={subSectionLabelStyle}>Add Line Item</div>
+                <p style={helperTextStyle}>Pick a product, confirm the buying price, and add it to the current order.</p>
               </div>
 
               <label>
@@ -1208,7 +1339,7 @@ export default function PurchasingPanel({
               </label>
 
               {selectedProduct ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, padding: 12, border: "1px solid #dbe5f2", background: "white", borderRadius: 10 }}>
+                <div style={metricGridStyle}>
                   <div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current Stock</div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{Number(selectedProduct.current_stock || 0)}</div>
@@ -1230,7 +1361,7 @@ export default function PurchasingPanel({
                 </div>
               ) : null}
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+              <div style={compactFieldGridStyle}>
                 <label>
                   <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Quantity</span>
                   <input
@@ -1294,7 +1425,12 @@ export default function PurchasingPanel({
               </div>
             </div>
 
-            <div style={{ display: "grid", gap: 10 }}>
+            <div style={plainSectionStyle}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={subSectionLabelStyle}>Current Order</div>
+                <p style={helperTextStyle}>Review the products already added before you create the purchase order.</p>
+              </div>
+
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Order Items</div>
                 <div style={{ fontSize: 12, color: "#64748b" }}>{orderItems.length} line{orderItems.length === 1 ? "" : "s"} added</div>
@@ -1368,7 +1504,13 @@ export default function PurchasingPanel({
               )}
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+            <div style={plainSectionStyle}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={subSectionLabelStyle}>Payment and Notes</div>
+                <p style={helperTextStyle}>Record any upfront payment and confirm the remaining balance before submitting the order.</p>
+              </div>
+
+              <div style={compactFieldGridStyle}>
               <label>
                 <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Amount Paid Now</span>
                 <input
@@ -1405,9 +1547,9 @@ export default function PurchasingPanel({
                   disabled={submittingPurchase}
                 />
               </label>
-            </div>
+              </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, padding: 12, border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: 10 }}>
+              <div style={metricGridStyle}>
               <div>
                 <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Order Total</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(estimatedTotal)}</div>
@@ -1444,32 +1586,33 @@ export default function PurchasingPanel({
                   {getStatusMeta(estimatedPaymentStatus).label}
                 </span>
               </div>
-            </div>
-
-            <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Notes</span>
-              <textarea
-                className="textarea"
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Optional order note"
-                disabled={submittingPurchase}
-              />
-            </label>
-
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 13, color: "#475569" }}>
-                Payments are still tracked against supplier balances, while the order groups all its product lines under one order number.
               </div>
-              <button
-                type="button"
-                className="button"
-                onClick={() => void handleRecordPurchase()}
-                disabled={submittingPurchase || products.length === 0 || orderItems.length === 0}
-              >
-                {submittingPurchase ? "Recording..." : "Create Purchase Order"}
-              </button>
+
+              <label>
+                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Notes</span>
+                <textarea
+                  className="textarea"
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Optional order note"
+                  disabled={submittingPurchase}
+                />
+              </label>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 13, color: "#475569", maxWidth: 480 }}>
+                  Payments are still tracked against supplier balances, while the order groups all its product lines under one order number.
+                </div>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => void handleRecordPurchase()}
+                  disabled={submittingPurchase || products.length === 0 || orderItems.length === 0}
+                >
+                  {submittingPurchase ? "Recording..." : "Create Purchase Order"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
