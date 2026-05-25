@@ -62,7 +62,10 @@ const GET_REQUEST_TIMEOUT_MS = 35000;
 const GET_RETRY_ATTEMPTS = 1;
 const STARTUP_REQUEST_TIMEOUT_MS = GET_REQUEST_TIMEOUT_MS;
 export const TEMPORARY_SERVER_DELAY_MESSAGE = "Server is taking longer than expected. Please tap Retry.";
+export const PURCHASE_RETURNS_NOT_SUPPORTED_MESSAGE = "Purchase returns are not available on this deployment yet.";
 const STARTUP_RETRY_STATUS_CODES = new Set([502, 503, 504]);
+let purchaseReturnsSupportCache: boolean | null = null;
+let purchaseReturnsSupportPromise: Promise<boolean> | null = null;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -365,6 +368,9 @@ export type SystemSettings = {
 
 type JsonObject = Record<string, unknown>;
 type JsonArray = Record<string, unknown>[];
+type OpenApiDocument = {
+  paths?: Record<string, unknown>;
+};
 
 type StockMovementResponse = Omit<StockMovement, "change"> & { change: string | number };
 
@@ -1060,8 +1066,57 @@ export async function createSupplierPayment(payload: NewSupplierPayment): Promis
   return result;
 }
 
+export async function supportsPurchaseReturns(force = false): Promise<boolean> {
+  if (!force && purchaseReturnsSupportCache != null) {
+    return purchaseReturnsSupportCache;
+  }
+
+  if (!force && purchaseReturnsSupportPromise) {
+    return purchaseReturnsSupportPromise;
+  }
+
+  const request = (async () => {
+    try {
+      const response = await resilientFetch(`${API_BASE}/openapi.json`, {
+        method: "GET",
+        headers: buildAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        purchaseReturnsSupportCache = false;
+        return false;
+      }
+
+      const text = await response.text();
+      if (!text) {
+        purchaseReturnsSupportCache = false;
+        return false;
+      }
+
+      const openApi = JSON.parse(text) as OpenApiDocument;
+      const supported = Object.prototype.hasOwnProperty.call(openApi.paths ?? {}, "/inventory/purchase-returns");
+      purchaseReturnsSupportCache = supported;
+      return supported;
+    } catch {
+      purchaseReturnsSupportCache = false;
+      return false;
+    } finally {
+      purchaseReturnsSupportPromise = null;
+    }
+  })();
+
+  purchaseReturnsSupportPromise = request;
+  return request;
+}
+
 export async function fetchPurchaseReturns(limit = 40): Promise<PurchaseReturn[]> {
   const cacheKey = `purchaseReturns:${limit}`;
+  const supported = await supportsPurchaseReturns();
+  if (!supported) {
+    setCache(cacheKey, []);
+    return [];
+  }
+
   const cached = getCached<PurchaseReturn[]>(cacheKey);
   if (cached && isCacheFresh(cacheKey)) {
     return cached;
@@ -1078,6 +1133,13 @@ export async function fetchPurchaseReturnsCached(
   onUpdate?: (purchaseReturns: PurchaseReturn[]) => void,
 ): Promise<PurchaseReturn[]> {
   const cacheKey = `purchaseReturns:${limit}`;
+  const supported = await supportsPurchaseReturns();
+  if (!supported) {
+    setCache(cacheKey, []);
+    if (onUpdate) onUpdate([]);
+    return [];
+  }
+
   const cached = getCached<PurchaseReturn[]>(cacheKey);
   const params = new URLSearchParams({ limit: String(limit) });
 
@@ -1095,6 +1157,11 @@ export async function fetchPurchaseReturnsCached(
 }
 
 export async function createPurchaseReturn(payload: NewPurchaseReturn): Promise<PurchaseReturn> {
+  const supported = await supportsPurchaseReturns();
+  if (!supported) {
+    throw new Error(PURCHASE_RETURNS_NOT_SUPPORTED_MESSAGE);
+  }
+
   const result = await jsonRequest<PurchaseReturn>('/inventory/purchase-returns', {
     method: 'POST',
     body: JSON.stringify(payload),

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
-import { createPurchaseOrder, createPurchaseReturn, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchaseReturnsCached, fetchPurchasesCached, fetchSupplierDetail, fetchSupplierPaymentsCached, fetchSuppliersCached, updateSupplier } from "../api";
+import { createPurchaseOrder, createPurchaseReturn, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchaseReturnsCached, fetchPurchasesCached, fetchSupplierDetail, fetchSupplierPaymentsCached, fetchSuppliersCached, supportsPurchaseReturns, updateSupplier } from "../api";
 import ProductSearchSelect from "./ProductSearchSelect";
 import type { Product, Purchase, PurchaseReturn, Supplier, SupplierDetail, SupplierPayment } from "../types";
 
@@ -587,6 +587,7 @@ export default function PurchasingPanel({
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [payments, setPayments] = useState<SupplierPayment[]>([]);
   const [purchaseReturns, setPurchaseReturns] = useState<PurchaseReturn[]>([]);
+  const [purchaseReturnsSupported, setPurchaseReturnsSupported] = useState(false);
   const [supplierDetail, setSupplierDetail] = useState<SupplierDetail | null>(null);
   const [loadingSupplierDetail, setLoadingSupplierDetail] = useState(false);
   const [editingSupplierId, setEditingSupplierId] = useState<number | null>(null);
@@ -649,10 +650,11 @@ export default function PurchasingPanel({
     setLoading(true);
     setError(null);
     setLoadWarning(null);
-    const [supplierResult, purchaseResult, paymentResult, returnResult] = await Promise.allSettled([
+    const [supplierResult, purchaseResult, paymentResult, purchaseReturnsSupportResult, returnResult] = await Promise.allSettled([
       fetchSuppliersCached((fresh) => setSuppliers(fresh)),
       fetchPurchasesCached(100, (fresh) => setPurchases(fresh)),
       fetchSupplierPaymentsCached(30, (fresh) => setPayments(fresh)),
+      supportsPurchaseReturns(),
       fetchPurchaseReturnsCached(40, (fresh) => setPurchaseReturns(fresh)),
     ]);
 
@@ -676,9 +678,15 @@ export default function PurchasingPanel({
       nextPanelErrors.payments = getErrorMessage(paymentResult.reason, "Failed to load supplier payments");
     }
 
+    if (purchaseReturnsSupportResult.status === "fulfilled") {
+      setPurchaseReturnsSupported(purchaseReturnsSupportResult.value);
+    } else {
+      setPurchaseReturnsSupported(false);
+    }
+
     if (returnResult.status === "fulfilled") {
       setPurchaseReturns(returnResult.value);
-    } else {
+    } else if (purchaseReturnsSupportResult.status !== "fulfilled" || purchaseReturnsSupportResult.value) {
       nextPanelErrors.returns = getErrorMessage(returnResult.reason, "Failed to load supplier returns");
     }
 
@@ -1411,6 +1419,11 @@ export default function PurchasingPanel({
   };
 
   const handleRecordReturn = async () => {
+    if (!purchaseReturnsSupported) {
+      setError("Purchase returns are not available on this deployment yet.");
+      return;
+    }
+
     if (!selectedReturnPurchase) {
       setError("Select a purchase line to return");
       return;
@@ -1670,15 +1683,17 @@ export default function PurchasingPanel({
             Paid so far: {panelDataErrors.purchases && purchases.length === 0 ? "Unavailable" : formatCurrency(totalPaidToSuppliers)}
           </div>
         </div>
-        <div style={statCardStyle}>
-          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Returned to Suppliers</div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: panelDataErrors.returns && purchaseReturns.length === 0 ? "#0f172a" : totalReturnedToSuppliers > 0 ? "#b45309" : "#0f172a" }}>
-            {panelDataErrors.returns && purchaseReturns.length === 0 ? "Unavailable" : formatCurrency(totalReturnedToSuppliers)}
+        {purchaseReturnsSupported ? (
+          <div style={statCardStyle}>
+            <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Returned to Suppliers</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: panelDataErrors.returns && purchaseReturns.length === 0 ? "#0f172a" : totalReturnedToSuppliers > 0 ? "#b45309" : "#0f172a" }}>
+              {panelDataErrors.returns && purchaseReturns.length === 0 ? "Unavailable" : formatCurrency(totalReturnedToSuppliers)}
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+              {panelDataErrors.returns && purchaseReturns.length === 0 ? "Retry return history to refresh this value" : `${purchaseReturns.length} return record${purchaseReturns.length === 1 ? "" : "s"}`}
+            </div>
           </div>
-          <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
-            {panelDataErrors.returns && purchaseReturns.length === 0 ? "Retry return history to refresh this value" : `${purchaseReturns.length} return record${purchaseReturns.length === 1 ? "" : "s"}`}
-          </div>
-        </div>
+        ) : null}
       </div>
 
       <div style={topSectionGridStyle}>
@@ -2414,22 +2429,24 @@ export default function PurchasingPanel({
                 >
                   Record Payment
                 </button>
-                <button
-                  type="button"
-                  onClick={() => openReturnForSupplier(selectedSupplierRecord)}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #b45309",
-                    background: "white",
-                    color: "#9a3412",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  Return to Supplier
-                </button>
+                {purchaseReturnsSupported ? (
+                  <button
+                    type="button"
+                    onClick={() => openReturnForSupplier(selectedSupplierRecord)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #b45309",
+                      background: "white",
+                      color: "#9a3412",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Return to Supplier
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {
@@ -2664,38 +2681,40 @@ export default function PurchasingPanel({
                 )}
               </div>
 
-              <div style={{ overflowX: "auto" }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Supplier Returns</div>
-                {panelDataErrors.returns && supplierReturnsForDetail.length === 0 ? (
-                  <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.returns}</p>
-                ) : supplierReturnsForDetail.length === 0 ? (
-                  <p style={{ margin: 0, color: "#6b7280" }}>No returns recorded for this supplier yet.</p>
-                ) : (
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
-                    <thead>
-                      <tr style={{ background: "#f8fafc" }}>
-                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
-                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Product</th>
-                        <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Qty</th>
-                        <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Value</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {supplierReturnsForDetail.map((purchaseReturn) => (
-                        <tr key={purchaseReturn.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                          <td style={{ padding: 12, fontSize: 14 }}>{formatDate(purchaseReturn.return_date || purchaseReturn.created_at)}</td>
-                          <td style={{ padding: 12, fontSize: 14 }}>
-                            <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchaseReturn.product_name || "Purchase return"}</div>
-                            <div style={{ fontSize: 12, color: "#64748b" }}>{purchaseReturn.purchase_invoice_number || purchaseReturn.order_number || "-"}</div>
-                          </td>
-                          <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{Number(purchaseReturn.quantity_returned || 0).toFixed(2)}</td>
-                          <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}</td>
+              {purchaseReturnsSupported ? (
+                <div style={{ overflowX: "auto" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Supplier Returns</div>
+                  {panelDataErrors.returns && supplierReturnsForDetail.length === 0 ? (
+                    <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.returns}</p>
+                  ) : supplierReturnsForDetail.length === 0 ? (
+                    <p style={{ margin: 0, color: "#6b7280" }}>No returns recorded for this supplier yet.</p>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+                      <thead>
+                        <tr style={{ background: "#f8fafc" }}>
+                          <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
+                          <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Product</th>
+                          <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Qty</th>
+                          <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Value</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+                      </thead>
+                      <tbody>
+                        {supplierReturnsForDetail.map((purchaseReturn) => (
+                          <tr key={purchaseReturn.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                            <td style={{ padding: 12, fontSize: 14 }}>{formatDate(purchaseReturn.return_date || purchaseReturn.created_at)}</td>
+                            <td style={{ padding: 12, fontSize: 14 }}>
+                              <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchaseReturn.product_name || "Purchase return"}</div>
+                              <div style={{ fontSize: 12, color: "#64748b" }}>{purchaseReturn.purchase_invoice_number || purchaseReturn.order_number || "-"}</div>
+                            </td>
+                            <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{Number(purchaseReturn.quantity_returned || 0).toFixed(2)}</td>
+                            <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         )}
@@ -2916,7 +2935,8 @@ export default function PurchasingPanel({
           )}
         </div>
 
-        <div className="card" style={{ marginBottom: 0 }} ref={returnSectionRef}>
+        {purchaseReturnsSupported ? (
+          <div className="card" style={{ marginBottom: 0 }} ref={returnSectionRef}>
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Return to Supplier</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
@@ -3100,9 +3120,11 @@ export default function PurchasingPanel({
               </div>
             </div>
           )}
-        </div>
+          </div>
+        ) : null}
 
-        <div className="card" style={{ marginBottom: 0 }}>
+        {purchaseReturnsSupported ? (
+          <div className="card" style={{ marginBottom: 0 }}>
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Recent Supplier Returns</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
@@ -3168,7 +3190,8 @@ export default function PurchasingPanel({
               </table>
             </div>
           )}
-        </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="card" style={{ marginBottom: 0 }}>
@@ -3355,74 +3378,78 @@ export default function PurchasingPanel({
                     )}
                   </div>
 
-                  <div style={{ display: "grid", gap: 8 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Return Timeline</div>
-                      <div style={{ fontSize: 12, color: "#64748b" }}>{orderReturns.length} return{orderReturns.length === 1 ? "" : "s"}</div>
-                    </div>
+                  {purchaseReturnsSupported ? (
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Return Timeline</div>
+                        <div style={{ fontSize: 12, color: "#64748b" }}>{orderReturns.length} return{orderReturns.length === 1 ? "" : "s"}</div>
+                      </div>
 
-                    {orderReturns.length === 0 ? (
-                      <div style={{ padding: 12, borderRadius: 10, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 13 }}>
-                        No supplier returns recorded for this order yet.
-                      </div>
-                    ) : (
-                      <div style={{ display: "grid", gap: 8 }}>
-                        {orderReturns.map((purchaseReturn) => (
-                          <div
-                            key={purchaseReturn.id}
-                            style={{
-                              display: "grid",
-                              gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1fr)",
-                              gap: 12,
-                              padding: 12,
-                              borderRadius: 10,
-                              border: "1px solid #e2e8f0",
-                              background: "#ffffff",
-                              alignItems: "center",
-                            }}
-                          >
-                            <div>
-                              <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatDate(purchaseReturn.return_date || purchaseReturn.created_at)}</div>
-                              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{purchaseReturn.product_name || "Purchase return"}</div>
+                      {orderReturns.length === 0 ? (
+                        <div style={{ padding: 12, borderRadius: 10, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 13 }}>
+                          No supplier returns recorded for this order yet.
+                        </div>
+                      ) : (
+                        <div style={{ display: "grid", gap: 8 }}>
+                          {orderReturns.map((purchaseReturn) => (
+                            <div
+                              key={purchaseReturn.id}
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1fr)",
+                                gap: 12,
+                                padding: 12,
+                                borderRadius: 10,
+                                border: "1px solid #e2e8f0",
+                                background: "#ffffff",
+                                alignItems: "center",
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatDate(purchaseReturn.return_date || purchaseReturn.created_at)}</div>
+                                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{purchaseReturn.product_name || "Purchase return"}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Quantity</div>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#9a3412" }}>{Number(purchaseReturn.quantity_returned || 0).toFixed(2)}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Value</div>
+                                <div style={{ fontSize: 14, fontWeight: 700, color: "#9a3412" }}>{formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}</div>
+                              </div>
+                              <div>
+                                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Recorded By</div>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{purchaseReturn.created_by_name || "System"}</div>
+                              </div>
                             </div>
-                            <div>
-                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Quantity</div>
-                              <div style={{ fontSize: 13, fontWeight: 700, color: "#9a3412" }}>{Number(purchaseReturn.quantity_returned || 0).toFixed(2)}</div>
-                            </div>
-                            <div>
-                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Value</div>
-                              <div style={{ fontSize: 14, fontWeight: 700, color: "#9a3412" }}>{formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}</div>
-                            </div>
-                            <div>
-                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Recorded By</div>
-                              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{purchaseReturn.created_by_name || "System"}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
 
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                     <div style={{ fontSize: 12, color: "#64748b" }}>{order.created_by_name || "System"}</div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        onClick={() => order.nextReturnPurchase && openReturnForPurchase(order.nextReturnPurchase)}
-                        disabled={!order.nextReturnPurchase}
-                        style={{
-                          padding: "8px 12px",
-                          borderRadius: 8,
-                          border: "1px solid #b45309",
-                          background: order.nextReturnPurchase ? "#fff7ed" : "#e5e7eb",
-                          color: order.nextReturnPurchase ? "#9a3412" : "#6b7280",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: order.nextReturnPurchase ? "pointer" : "not-allowed",
-                        }}
-                      >
-                        {order.nextReturnPurchase ? "Return to Supplier" : "No Returnable Items"}
-                      </button>
+                      {purchaseReturnsSupported ? (
+                        <button
+                          type="button"
+                          onClick={() => order.nextReturnPurchase && openReturnForPurchase(order.nextReturnPurchase)}
+                          disabled={!order.nextReturnPurchase}
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: 8,
+                            border: "1px solid #b45309",
+                            background: order.nextReturnPurchase ? "#fff7ed" : "#e5e7eb",
+                            color: order.nextReturnPurchase ? "#9a3412" : "#6b7280",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: order.nextReturnPurchase ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          {order.nextReturnPurchase ? "Return to Supplier" : "No Returnable Items"}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => order.nextPaymentPurchase && openPaymentForPurchase(order.nextPaymentPurchase)}
