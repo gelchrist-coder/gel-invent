@@ -77,6 +77,14 @@ class SupplierDetailRead(BaseModel):
     payments: list["SupplierPaymentRead"]
 
 
+class PurchaseReturnCreate(BaseModel):
+    purchase_id: int = Field(..., gt=0)
+    quantity_returned: Decimal = Field(..., gt=0, decimal_places=2)
+    return_date: date | None = Field(default=None)
+    reason: str | None = Field(default=None, max_length=255)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
 class PurchaseOrderItemCreate(BaseModel):
     product_id: int = Field(..., gt=0)
     quantity: Decimal = Field(..., gt=0, decimal_places=2)
@@ -179,6 +187,27 @@ class SupplierPaymentRead(BaseModel):
     amount: Decimal
     payment_method: str
     payment_date: date | None = None
+    notes: str | None = None
+    created_at: datetime
+    created_by_name: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PurchaseReturnRead(BaseModel):
+    id: int
+    supplier_id: int | None = None
+    supplier_name: str
+    purchase_id: int
+    product_id: int | None = None
+    order_number: str | None = None
+    purchase_invoice_number: str | None = None
+    product_name: str | None = None
+    quantity_returned: Decimal
+    unit_cost_price: Decimal
+    total_cost_returned: Decimal
+    return_date: date | None = None
+    reason: str | None = None
     notes: str | None = None
     created_at: datetime
     created_by_name: str | None = None

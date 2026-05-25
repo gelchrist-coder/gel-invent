@@ -1,4 +1,4 @@
-import { Branch, NewMovement, NewProduct, NewPurchase, NewPurchaseOrder, NewSale, NewSupplier, NewSupplierPayment, Product, Purchase, PurchaseOrder, Sale, StockMovement, Supplier, SupplierDetail, SupplierPayment, SupplierUpdate } from "./types";
+import { Branch, NewMovement, NewProduct, NewPurchase, NewPurchaseOrder, NewPurchaseReturn, NewSale, NewSupplier, NewSupplierPayment, Product, Purchase, PurchaseOrder, PurchaseReturn, Sale, StockMovement, Supplier, SupplierDetail, SupplierPayment, SupplierUpdate } from "./types";
 
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
@@ -1053,6 +1053,49 @@ export async function fetchSupplierPaymentsCached(
 
 export async function createSupplierPayment(payload: NewSupplierPayment): Promise<SupplierPayment> {
   const result = await jsonRequest<SupplierPayment>('/inventory/supplier-payments', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  clearDataCache();
+  return result;
+}
+
+export async function fetchPurchaseReturns(limit = 40): Promise<PurchaseReturn[]> {
+  const cacheKey = `purchaseReturns:${limit}`;
+  const cached = getCached<PurchaseReturn[]>(cacheKey);
+  if (cached && isCacheFresh(cacheKey)) {
+    return cached;
+  }
+
+  const params = new URLSearchParams({ limit: String(limit) });
+  const data = await jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?${params.toString()}`);
+  setCache(cacheKey, data);
+  return data;
+}
+
+export async function fetchPurchaseReturnsCached(
+  limit = 40,
+  onUpdate?: (purchaseReturns: PurchaseReturn[]) => void,
+): Promise<PurchaseReturn[]> {
+  const cacheKey = `purchaseReturns:${limit}`;
+  const cached = getCached<PurchaseReturn[]>(cacheKey);
+  const params = new URLSearchParams({ limit: String(limit) });
+
+  if (cached) {
+    jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?${params.toString()}`)
+      .then((fresh) => {
+        setCache(cacheKey, fresh);
+        if (onUpdate) onUpdate(fresh);
+      })
+      .catch(() => {});
+    return cached;
+  }
+
+  return fetchPurchaseReturns(limit);
+}
+
+export async function createPurchaseReturn(payload: NewPurchaseReturn): Promise<PurchaseReturn> {
+  const result = await jsonRequest<PurchaseReturn>('/inventory/purchase-returns', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

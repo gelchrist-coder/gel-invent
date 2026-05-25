@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
-import { createPurchaseOrder, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchasesCached, fetchSupplierDetail, fetchSupplierPaymentsCached, fetchSuppliersCached, updateSupplier } from "../api";
+import { createPurchaseOrder, createPurchaseReturn, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchaseReturnsCached, fetchPurchasesCached, fetchSupplierDetail, fetchSupplierPaymentsCached, fetchSuppliersCached, updateSupplier } from "../api";
 import ProductSearchSelect from "./ProductSearchSelect";
-import type { Product, Purchase, Supplier, SupplierDetail, SupplierPayment } from "../types";
+import type { Product, Purchase, PurchaseReturn, Supplier, SupplierDetail, SupplierPayment } from "../types";
 
 type Props = {
   products: Product[];
@@ -25,12 +25,14 @@ type PanelDataErrors = {
   suppliers: string | null;
   purchases: string | null;
   payments: string | null;
+  returns: string | null;
 };
 
 const panelDataLabels: Record<keyof PanelDataErrors, string> = {
   suppliers: "Supplier directory",
   purchases: "Purchase orders",
   payments: "Payment history",
+  returns: "Purchase returns",
 };
 
 const paymentMethodOptions = [
@@ -58,6 +60,7 @@ function createEmptyPanelDataErrors(): PanelDataErrors {
     suppliers: null,
     purchases: null,
     payments: null,
+    returns: null,
   };
 }
 
@@ -93,6 +96,12 @@ function getPurchaseDateValue(purchase: Purchase): number {
 
 function getPaymentDateValue(payment: SupplierPayment): number {
   const raw = payment.payment_date || payment.created_at;
+  const timestamp = new Date(raw).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function getPurchaseReturnDateValue(purchaseReturn: PurchaseReturn): number {
+  const raw = purchaseReturn.return_date || purchaseReturn.created_at;
   const timestamp = new Date(raw).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
@@ -142,6 +151,7 @@ type PurchaseOrderGroup = {
   created_by_name?: string | null;
   items: Purchase[];
   nextPaymentPurchase: Purchase | null;
+  nextReturnPurchase: Purchase | null;
 };
 
 function createOrderLineId(productId: number): string {
@@ -171,9 +181,12 @@ function buildPurchaseOrderGroups(purchases: Purchase[]): PurchaseOrderGroup[] {
       const amountPaid = items.reduce((sum, purchase) => sum + Number(purchase.amount_paid || 0), 0);
       const amountDue = items.reduce((sum, purchase) => sum + Number(purchase.amount_due || 0), 0);
       const nextPaymentPurchase = paymentOrderedItems.find((purchase) => Number(purchase.amount_due || 0) > 0) ?? null;
+      const nextReturnPurchase = sortedItems.find(
+        (purchase) => Number(purchase.quantity || 0) > 0 && Number(purchase.total_cost || 0) > 0,
+      ) ?? null;
 
       let paymentStatus: Purchase["payment_status"] = "unpaid";
-      if (amountDue <= 0 && totalCost > 0) {
+      if (amountDue <= 0) {
         paymentStatus = "paid";
       } else if (amountPaid > 0) {
         paymentStatus = "partial";
@@ -199,6 +212,7 @@ function buildPurchaseOrderGroups(purchases: Purchase[]): PurchaseOrderGroup[] {
         created_by_name: referencePurchase.created_by_name,
         items: sortedItems,
         nextPaymentPurchase,
+        nextReturnPurchase,
       };
     })
     .sort((left, right) => {
@@ -216,9 +230,12 @@ export default function PurchasingPanel({
   usesExpiryTracking = true,
   onPurchaseRecorded,
 }: Props) {
+  const paymentSectionRef = useRef<HTMLDivElement | null>(null);
+  const returnSectionRef = useRef<HTMLDivElement | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [payments, setPayments] = useState<SupplierPayment[]>([]);
+  const [purchaseReturns, setPurchaseReturns] = useState<PurchaseReturn[]>([]);
   const [supplierDetail, setSupplierDetail] = useState<SupplierDetail | null>(null);
   const [loadingSupplierDetail, setLoadingSupplierDetail] = useState(false);
   const [editingSupplierId, setEditingSupplierId] = useState<number | null>(null);
@@ -243,11 +260,18 @@ export default function PurchasingPanel({
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paymentDate, setPaymentDate] = useState(() => toISODate(new Date()));
   const [paymentNotes, setPaymentNotes] = useState("");
+  const [returnSupplierId, setReturnSupplierId] = useState<number | null>(null);
+  const [returnPurchaseId, setReturnPurchaseId] = useState<number | null>(null);
+  const [returnQuantity, setReturnQuantity] = useState("");
+  const [returnDate, setReturnDate] = useState(() => toISODate(new Date()));
+  const [returnReason, setReturnReason] = useState("");
+  const [returnNotes, setReturnNotes] = useState("");
   const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
   const [loading, setLoading] = useState(true);
   const [submittingPurchase, setSubmittingPurchase] = useState(false);
   const [submittingSupplier, setSubmittingSupplier] = useState(false);
   const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [submittingReturn, setSubmittingReturn] = useState(false);
   const [savingSupplierDetail, setSavingSupplierDetail] = useState(false);
   const [deactivatingSupplierId, setDeactivatingSupplierId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -259,10 +283,11 @@ export default function PurchasingPanel({
     setLoading(true);
     setError(null);
     setLoadWarning(null);
-    const [supplierResult, purchaseResult, paymentResult] = await Promise.allSettled([
+    const [supplierResult, purchaseResult, paymentResult, returnResult] = await Promise.allSettled([
       fetchSuppliersCached((fresh) => setSuppliers(fresh)),
       fetchPurchasesCached(100, (fresh) => setPurchases(fresh)),
       fetchSupplierPaymentsCached(30, (fresh) => setPayments(fresh)),
+      fetchPurchaseReturnsCached(40, (fresh) => setPurchaseReturns(fresh)),
     ]);
 
     const nextPanelErrors = createEmptyPanelDataErrors();
@@ -283,6 +308,12 @@ export default function PurchasingPanel({
       setPayments(paymentResult.value);
     } else {
       nextPanelErrors.payments = getErrorMessage(paymentResult.reason, "Failed to load supplier payments");
+    }
+
+    if (returnResult.status === "fulfilled") {
+      setPurchaseReturns(returnResult.value);
+    } else {
+      nextPanelErrors.returns = getErrorMessage(returnResult.reason, "Failed to load supplier returns");
     }
 
     setPanelDataErrors(nextPanelErrors);
@@ -352,7 +383,15 @@ export default function PurchasingPanel({
     () => purchases.reduce((sum, purchase) => sum + Number(purchase.amount_paid || 0), 0),
     [purchases],
   );
+  const totalReturnedToSuppliers = useMemo(
+    () => purchaseReturns.reduce((sum, purchaseReturn) => sum + Number(purchaseReturn.total_cost_returned || 0), 0),
+    [purchaseReturns],
+  );
   const purchaseOrders = useMemo(() => buildPurchaseOrderGroups(purchases), [purchases]);
+  const returnableOrders = useMemo(
+    () => purchaseOrders.filter((order) => order.nextReturnPurchase != null),
+    [purchaseOrders],
+  );
   const draftLineTotal = useMemo(
     () => (Number(quantity || 0) || 0) * (Number(unitCostPrice || 0) || 0),
     [quantity, unitCostPrice],
@@ -430,6 +469,14 @@ export default function PurchasingPanel({
     () => purchaseOrders.filter((order) => Number(order.amount_due || 0) > 0 && (paymentSupplierId == null || resolveSupplierIdForOrder(order) === paymentSupplierId)),
     [paymentSupplierId, purchaseOrders, resolveSupplierIdForOrder],
   );
+  const returnSuppliers = useMemo(
+    () => suppliers.filter((supplier) => returnableOrders.some((order) => resolveSupplierIdForOrder(order) === supplier.id)),
+    [resolveSupplierIdForOrder, returnableOrders, suppliers],
+  );
+  const returnOrdersForSupplier = useMemo(
+    () => returnableOrders.filter((order) => returnSupplierId == null || resolveSupplierIdForOrder(order) === returnSupplierId),
+    [resolveSupplierIdForOrder, returnSupplierId, returnableOrders],
+  );
 
   const orderPaymentsByKey = useMemo(() => {
     const paymentsByOrderKey = new Map<string, SupplierPayment[]>();
@@ -451,10 +498,68 @@ export default function PurchasingPanel({
     return paymentsByOrderKey;
   }, [payments, purchaseOrders]);
 
+  const orderReturnsByKey = useMemo(() => {
+    const returnsByOrderKey = new Map<string, PurchaseReturn[]>();
+
+    for (const order of purchaseOrders) {
+      const purchaseIds = new Set(order.items.map((item) => item.id));
+      const matchedReturns = purchaseReturns
+        .filter((purchaseReturn) => {
+          if (order.payment_target_order_number) {
+            return (purchaseReturn.order_number || "").trim() === order.payment_target_order_number;
+          }
+          return purchaseIds.has(purchaseReturn.purchase_id);
+        })
+        .sort((left, right) => getPurchaseReturnDateValue(right) - getPurchaseReturnDateValue(left));
+
+      returnsByOrderKey.set(order.key, matchedReturns);
+    }
+
+    return returnsByOrderKey;
+  }, [purchaseOrders, purchaseReturns]);
+
   const selectedPaymentOrder = useMemo(
     () => paymentPurchaseId == null ? null : purchaseOrders.find((order) => order.items.some((purchase) => purchase.id === paymentPurchaseId)) ?? null,
     [paymentPurchaseId, purchaseOrders],
   );
+  const selectedReturnOrder = useMemo(
+    () => returnPurchaseId == null ? null : returnableOrders.find((order) => order.items.some((purchase) => purchase.id === returnPurchaseId)) ?? null,
+    [returnPurchaseId, returnableOrders],
+  );
+  const selectedReturnPurchase = useMemo(
+    () => selectedReturnOrder?.items.find((purchase) => purchase.id === returnPurchaseId) ?? null,
+    [returnPurchaseId, selectedReturnOrder],
+  );
+  const selectedReturnableItems = useMemo(
+    () => selectedReturnOrder?.items.filter((purchase) => Number(purchase.quantity || 0) > 0 && Number(purchase.total_cost || 0) > 0) ?? [],
+    [selectedReturnOrder],
+  );
+  const returnQuantityValue = useMemo(() => {
+    if (returnQuantity.trim() === "") return 0;
+    const numericValue = Number(returnQuantity);
+    return Number.isFinite(numericValue) ? numericValue : NaN;
+  }, [returnQuantity]);
+  const estimatedReturnValue = useMemo(
+    () => {
+      if (!selectedReturnPurchase || !Number.isFinite(returnQuantityValue)) {
+        return 0;
+      }
+      return Number((returnQuantityValue * Number(selectedReturnPurchase.unit_cost_price || 0)).toFixed(2));
+    },
+    [returnQuantityValue, selectedReturnPurchase],
+  );
+  const supplierReturnsForDetail = useMemo(() => {
+    if (!selectedSupplierRecord) {
+      return [];
+    }
+
+    return purchaseReturns.filter((purchaseReturn) => {
+      if (purchaseReturn.supplier_id != null && purchaseReturn.supplier_id === selectedSupplierRecord.id) {
+        return true;
+      }
+      return purchaseReturn.supplier_name.toLowerCase() === selectedSupplierRecord.name.toLowerCase();
+    });
+  }, [purchaseReturns, selectedSupplierRecord]);
 
   useEffect(() => {
     if (paymentSupplierId == null) {
@@ -489,6 +594,37 @@ export default function PurchasingPanel({
     });
   }, [selectedPaymentOrder]);
 
+  useEffect(() => {
+    if (returnOrdersForSupplier.length === 0) {
+      setReturnPurchaseId(null);
+      setReturnQuantity("");
+      return;
+    }
+
+    setReturnPurchaseId((prev) => (
+      prev != null && returnOrdersForSupplier.some((order) => order.items.some((purchase) => purchase.id === prev))
+        ? prev
+        : returnOrdersForSupplier[0].nextReturnPurchase?.id ?? null
+    ));
+  }, [returnOrdersForSupplier]);
+
+  useEffect(() => {
+    if (!selectedReturnPurchase) {
+      setReturnQuantity("");
+      return;
+    }
+
+    setReturnQuantity((previousValue) => {
+      const numericPrevious = Number(previousValue);
+      const maxQuantity = Number(selectedReturnPurchase.quantity || 0);
+      if (!Number.isFinite(numericPrevious) || numericPrevious <= 0 || numericPrevious > maxQuantity) {
+        const suggestedQuantity = maxQuantity >= 1 ? 1 : maxQuantity;
+        return suggestedQuantity > 0 ? String(suggestedQuantity) : "";
+      }
+      return previousValue;
+    });
+  }, [selectedReturnPurchase]);
+
   const resetPaymentForm = () => {
     setPaymentSupplierId(null);
     setPaymentPurchaseId(null);
@@ -496,6 +632,21 @@ export default function PurchasingPanel({
     setPaymentMethod("cash");
     setPaymentDate(toISODate(new Date()));
     setPaymentNotes("");
+  };
+
+  const resetReturnForm = () => {
+    setReturnSupplierId(null);
+    setReturnPurchaseId(null);
+    setReturnQuantity("");
+    setReturnDate(toISODate(new Date()));
+    setReturnReason("");
+    setReturnNotes("");
+  };
+
+  const scrollSectionIntoView = (sectionRef: React.RefObject<HTMLDivElement | null>) => {
+    window.requestAnimationFrame(() => {
+      sectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   };
 
   const loadSupplierDetail = useCallback(async (supplierId: number) => {
@@ -609,6 +760,7 @@ export default function PurchasingPanel({
     setPaymentMethod(targetOrder.payment_method || purchase.payment_method || "cash");
     setPaymentDate(toISODate(new Date()));
     setPaymentNotes("");
+    scrollSectionIntoView(paymentSectionRef);
   };
 
   const openPaymentForSupplier = (supplier: Supplier) => {
@@ -618,6 +770,40 @@ export default function PurchasingPanel({
       return;
     }
     openPaymentForPurchase(targetOrder.nextPaymentPurchase);
+  };
+
+  const openReturnForPurchase = (purchase: Purchase) => {
+    const targetOrder = purchaseOrders.find((order) => order.items.some((item) => item.id === purchase.id)) ?? null;
+    if (!targetOrder) {
+      setError("This purchase could not be grouped. Refresh and try again.");
+      return;
+    }
+
+    if (Number(purchase.quantity || 0) <= 0 || Number(purchase.total_cost || 0) <= 0) {
+      setNotice(`Purchase order ${targetOrder.order_number} has no returnable quantity left`);
+      return;
+    }
+
+    setError(null);
+    setNotice(`Ready to return ${purchase.product_name} to ${targetOrder.supplier_name}`);
+    setReturnSupplierId(resolveSupplierIdForOrder(targetOrder));
+    setReturnPurchaseId(purchase.id);
+    const availableQuantity = Number(purchase.quantity || 0);
+    const suggestedQuantity = availableQuantity >= 1 ? 1 : availableQuantity;
+    setReturnQuantity(suggestedQuantity > 0 ? String(suggestedQuantity) : "");
+    setReturnDate(toISODate(new Date()));
+    setReturnReason("");
+    setReturnNotes("");
+    scrollSectionIntoView(returnSectionRef);
+  };
+
+  const openReturnForSupplier = (supplier: Supplier) => {
+    const targetOrder = returnableOrders.find((order) => resolveSupplierIdForOrder(order) === supplier.id);
+    if (!targetOrder || !targetOrder.nextReturnPurchase) {
+      setNotice(`No returnable purchases found for ${supplier.name}`);
+      return;
+    }
+    openReturnForPurchase(targetOrder.nextReturnPurchase);
   };
 
   const openSupplierDetail = async (supplier: Supplier) => {
@@ -654,6 +840,35 @@ export default function PurchasingPanel({
 
     setPaymentAmount(String(Number(order.amount_due || 0)));
     setPaymentSupplierId(resolveSupplierIdForOrder(order));
+  };
+
+  const handleReturnSupplierChange = (supplierId: number | null) => {
+    setReturnSupplierId(supplierId);
+
+    const matchingOrder = returnableOrders.find((order) => supplierId == null || resolveSupplierIdForOrder(order) === supplierId) ?? null;
+    setReturnPurchaseId(matchingOrder?.nextReturnPurchase?.id ?? null);
+  };
+
+  const handleReturnOrderChange = (purchaseId: number | null) => {
+    if (purchaseId == null) {
+      setReturnPurchaseId(null);
+      setReturnQuantity("");
+      return;
+    }
+
+    const order = returnableOrders.find((item) => item.items.some((purchase) => purchase.id === purchaseId)) ?? null;
+    setReturnPurchaseId(order?.nextReturnPurchase?.id ?? purchaseId);
+    if (order) {
+      setReturnSupplierId(resolveSupplierIdForOrder(order));
+    }
+  };
+
+  const handleReturnPurchaseChange = (purchaseId: number | null) => {
+    setReturnPurchaseId(purchaseId);
+    const order = purchaseId == null ? null : returnableOrders.find((item) => item.items.some((purchase) => purchase.id === purchaseId)) ?? null;
+    if (order) {
+      setReturnSupplierId(resolveSupplierIdForOrder(order));
+    }
   };
 
   const handleCreateSupplier = async () => {
@@ -803,6 +1018,50 @@ export default function PurchasingPanel({
       setError(err instanceof Error ? err.message : "Failed to record supplier payment");
     } finally {
       setSubmittingPayment(false);
+    }
+  };
+
+  const handleRecordReturn = async () => {
+    if (!selectedReturnPurchase) {
+      setError("Select a purchase line to return");
+      return;
+    }
+
+    if (!Number.isFinite(returnQuantityValue) || returnQuantityValue <= 0) {
+      setError("Enter a valid quantity to return");
+      return;
+    }
+
+    const availableQuantity = Number(selectedReturnPurchase.quantity || 0);
+    if (returnQuantityValue > availableQuantity) {
+      setError("Return quantity cannot exceed the remaining purchase quantity");
+      return;
+    }
+
+    setSubmittingReturn(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const purchaseReturn = await createPurchaseReturn({
+        purchase_id: selectedReturnPurchase.id,
+        quantity_returned: returnQuantityValue,
+        return_date: returnDate || undefined,
+        reason: trimOrUndefined(returnReason),
+        notes: trimOrUndefined(returnNotes),
+      });
+      setNotice(
+        `Returned ${Number(purchaseReturn.quantity_returned || 0).toFixed(2)} of ${purchaseReturn.product_name || selectedReturnPurchase.product_name} for ${formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}`,
+      );
+      resetReturnForm();
+      await loadPanelData();
+      await refreshOpenSupplierDetail(purchaseReturn.supplier_id);
+      if (onPurchaseRecorded) {
+        await onPurchaseRecorded();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to record supplier return");
+    } finally {
+      setSubmittingReturn(false);
     }
   };
 
@@ -1020,6 +1279,15 @@ export default function PurchasingPanel({
           </div>
           <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
             Paid so far: {panelDataErrors.purchases && purchases.length === 0 ? "Unavailable" : formatCurrency(totalPaidToSuppliers)}
+          </div>
+        </div>
+        <div style={statCardStyle}>
+          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Returned to Suppliers</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: panelDataErrors.returns && purchaseReturns.length === 0 ? "#0f172a" : totalReturnedToSuppliers > 0 ? "#b45309" : "#0f172a" }}>
+            {panelDataErrors.returns && purchaseReturns.length === 0 ? "Unavailable" : formatCurrency(totalReturnedToSuppliers)}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>
+            {panelDataErrors.returns && purchaseReturns.length === 0 ? "Retry return history to refresh this value" : `${purchaseReturns.length} return record${purchaseReturns.length === 1 ? "" : "s"}`}
           </div>
         </div>
       </div>
@@ -1687,6 +1955,22 @@ export default function PurchasingPanel({
                 </button>
                 <button
                   type="button"
+                  onClick={() => openReturnForSupplier(selectedSupplierRecord)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #b45309",
+                    background: "white",
+                    color: "#9a3412",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Return to Supplier
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     if (editingSupplierId === selectedSupplierRecord.id) {
                       setEditingSupplierId(null);
@@ -1833,7 +2117,7 @@ export default function PurchasingPanel({
               </div>
             )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20, alignItems: "start" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 20, alignItems: "start" }}>
               <div style={{ overflowX: "auto" }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Supplier Purchases</div>
                 {supplierDetail.purchases.length === 0 ? (
@@ -1918,13 +2202,46 @@ export default function PurchasingPanel({
                   </table>
                 )}
               </div>
+
+              <div style={{ overflowX: "auto" }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Supplier Returns</div>
+                {panelDataErrors.returns && supplierReturnsForDetail.length === 0 ? (
+                  <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.returns}</p>
+                ) : supplierReturnsForDetail.length === 0 ? (
+                  <p style={{ margin: 0, color: "#6b7280" }}>No returns recorded for this supplier yet.</p>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc" }}>
+                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
+                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Product</th>
+                        <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Qty</th>
+                        <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {supplierReturnsForDetail.map((purchaseReturn) => (
+                        <tr key={purchaseReturn.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                          <td style={{ padding: 12, fontSize: 14 }}>{formatDate(purchaseReturn.return_date || purchaseReturn.created_at)}</td>
+                          <td style={{ padding: 12, fontSize: 14 }}>
+                            <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchaseReturn.product_name || "Purchase return"}</div>
+                            <div style={{ fontSize: 12, color: "#64748b" }}>{purchaseReturn.purchase_invoice_number || purchaseReturn.order_number || "-"}</div>
+                          </td>
+                          <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{Number(purchaseReturn.quantity_returned || 0).toFixed(2)}</td>
+                          <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </div>
           </div>
         )}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20, alignItems: "start" }}>
-        <div className="card" style={{ marginBottom: 0 }}>
+        <div className="card" style={{ marginBottom: 0 }} ref={paymentSectionRef}>
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Record Supplier Payment</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
@@ -2138,19 +2455,17 @@ export default function PurchasingPanel({
           )}
         </div>
 
-        <div className="card" style={{ marginBottom: 0 }}>
+        <div className="card" style={{ marginBottom: 0 }} ref={returnSectionRef}>
           <div style={{ marginBottom: 16 }}>
-            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Recent Supplier Payments</h3>
+            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Return to Supplier</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-              Keep a clean audit trail of payments made against supplier invoices.
+              Return stock against a specific purchase line so inventory, supplier balances, and order history stay aligned.
             </p>
           </div>
 
-          {loading && payments.length === 0 && !panelDataErrors.payments ? (
-            <p style={{ margin: 0, color: "#6b7280" }}>Loading payment history...</p>
-          ) : panelDataErrors.payments && payments.length === 0 ? (
+          {panelDataErrors.purchases && returnableOrders.length === 0 ? (
             <div style={{ display: "grid", gap: 10 }}>
-              <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.payments}</p>
+              <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.purchases}</p>
               <div>
                 <button
                   type="button"
@@ -2169,8 +2484,196 @@ export default function PurchasingPanel({
                 </button>
               </div>
             </div>
-          ) : payments.length === 0 ? (
-            <p style={{ margin: 0, color: "#6b7280" }}>No supplier payments recorded yet.</p>
+          ) : returnableOrders.length === 0 ? (
+            <p style={{ margin: 0, color: "#6b7280" }}>No returnable supplier purchases right now.</p>
+          ) : (
+            <div style={{ display: "grid", gap: 12 }}>
+              <label>
+                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier</span>
+                <select
+                  className="input"
+                  value={returnSupplierId ?? ""}
+                  onChange={(e) => handleReturnSupplierChange(e.target.value ? Number(e.target.value) : null)}
+                  disabled={submittingReturn}
+                >
+                  <option value="">All suppliers</option>
+                  {returnSuppliers.map((supplier) => (
+                    <option key={supplier.id} value={supplier.id}>
+                      {supplier.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Purchase Order</span>
+                <select
+                  className="input"
+                  value={selectedReturnOrder?.nextReturnPurchase?.id ?? ""}
+                  onChange={(e) => handleReturnOrderChange(e.target.value ? Number(e.target.value) : null)}
+                  disabled={submittingReturn || returnOrdersForSupplier.length === 0}
+                >
+                  <option value="">Select purchase order</option>
+                  {returnOrdersForSupplier.map((order) => (
+                    <option key={order.key} value={order.nextReturnPurchase?.id ?? ""}>
+                      {order.order_number} - {order.supplier_name} - {order.line_count} item{order.line_count === 1 ? "" : "s"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Purchase Line</span>
+                <select
+                  className="input"
+                  value={returnPurchaseId ?? ""}
+                  onChange={(e) => handleReturnPurchaseChange(e.target.value ? Number(e.target.value) : null)}
+                  disabled={submittingReturn || selectedReturnOrder == null}
+                >
+                  <option value="">Select purchase line</option>
+                  {selectedReturnableItems.map((purchase) => (
+                    <option key={purchase.id} value={purchase.id}>
+                      {purchase.product_name} - {Number(purchase.quantity || 0).toFixed(2)} available - {formatCurrency(Number(purchase.total_cost || 0))}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {selectedReturnPurchase ? (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, padding: 12, border: "1px solid #e2e8f0", background: "#fffaf0", borderRadius: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Product</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedReturnPurchase.product_name}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Available Qty</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{Number(selectedReturnPurchase.quantity || 0).toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Unit Cost</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(Number(selectedReturnPurchase.unit_cost_price || 0))}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Line Value Left</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(Number(selectedReturnPurchase.total_cost || 0))}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Estimated Return Value</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: estimatedReturnValue > 0 ? "#9a3412" : "#0f172a" }}>{formatCurrency(estimatedReturnValue)}</div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+                <label>
+                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Quantity to Return</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={returnQuantity}
+                    onChange={(e) => setReturnQuantity(e.target.value)}
+                    disabled={submittingReturn || selectedReturnPurchase == null}
+                  />
+                </label>
+                <label>
+                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Return Date</span>
+                  <input
+                    className="input"
+                    type="date"
+                    value={returnDate}
+                    onChange={(e) => setReturnDate(e.target.value)}
+                    disabled={submittingReturn}
+                  />
+                </label>
+              </div>
+
+              <label>
+                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Reason</span>
+                <input
+                  className="input"
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  placeholder="Optional reason for the supplier return"
+                  disabled={submittingReturn}
+                />
+              </label>
+
+              <label>
+                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Notes</span>
+                <textarea
+                  className="textarea"
+                  rows={3}
+                  value={returnNotes}
+                  onChange={(e) => setReturnNotes(e.target.value)}
+                  placeholder="Optional details about the returned goods"
+                  disabled={submittingReturn}
+                />
+              </label>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={resetReturnForm}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: "white",
+                    color: "#334155",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => void handleRecordReturn()}
+                  disabled={submittingReturn || selectedReturnPurchase == null}
+                >
+                  {submittingReturn ? "Saving..." : "Record Return"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="card" style={{ marginBottom: 0 }}>
+          <div style={{ marginBottom: 16 }}>
+            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Recent Supplier Returns</h3>
+            <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
+              Review what was sent back to suppliers and who recorded each return.
+            </p>
+          </div>
+
+          {loading && purchaseReturns.length === 0 && !panelDataErrors.returns ? (
+            <p style={{ margin: 0, color: "#6b7280" }}>Loading return history...</p>
+          ) : panelDataErrors.returns && purchaseReturns.length === 0 ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.returns}</p>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => void loadPanelData()}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: "white",
+                    color: "#334155",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          ) : purchaseReturns.length === 0 ? (
+            <p style={{ margin: 0, color: "#6b7280" }}>No supplier returns recorded yet.</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
@@ -2179,23 +2682,25 @@ export default function PurchasingPanel({
                     <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
                     <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Supplier</th>
                     <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Invoice</th>
-                    <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Amount</th>
-                    <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Method</th>
+                    <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Quantity</th>
+                    <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Value</th>
+                    <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Reason</th>
                     <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>By</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {payments.map((payment) => (
-                    <tr key={payment.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                      <td style={{ padding: 12, fontSize: 14 }}>{formatDate(payment.payment_date || payment.created_at)}</td>
+                  {purchaseReturns.map((purchaseReturn) => (
+                    <tr key={purchaseReturn.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: 12, fontSize: 14 }}>{formatDate(purchaseReturn.return_date || purchaseReturn.created_at)}</td>
                       <td style={{ padding: 12, fontSize: 14 }}>
-                        <div style={{ fontWeight: 700, color: "#0f172a" }}>{payment.supplier_name}</div>
-                        <div style={{ color: "#6b7280", fontSize: 12 }}>{payment.product_name || "Payment record"}</div>
+                        <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchaseReturn.supplier_name}</div>
+                        <div style={{ color: "#6b7280", fontSize: 12 }}>{purchaseReturn.product_name || "Purchase return"}</div>
                       </td>
-                      <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{payment.purchase_invoice_number || payment.order_number || "-"}</td>
-                      <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(payment.amount || 0))}</td>
-                      <td style={{ padding: 12, fontSize: 14, textTransform: "capitalize" }}>{payment.payment_method.replace(/_/g, " ")}</td>
-                      <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{payment.created_by_name || "System"}</td>
+                      <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{purchaseReturn.purchase_invoice_number || purchaseReturn.order_number || "-"}</td>
+                      <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{Number(purchaseReturn.quantity_returned || 0).toFixed(2)}</td>
+                      <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}</td>
+                      <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{purchaseReturn.reason || "-"}</td>
+                      <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{purchaseReturn.created_by_name || "System"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2243,6 +2748,7 @@ export default function PurchasingPanel({
             {purchaseOrders.map((order) => {
               const statusMeta = getStatusMeta(order.payment_status);
               const orderPayments = orderPaymentsByKey.get(order.key) ?? [];
+              const orderReturns = orderReturnsByKey.get(order.key) ?? [];
               return (
                 <div
                   key={order.key}
@@ -2388,25 +2894,92 @@ export default function PurchasingPanel({
                     )}
                   </div>
 
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Return Timeline</div>
+                      <div style={{ fontSize: 12, color: "#64748b" }}>{orderReturns.length} return{orderReturns.length === 1 ? "" : "s"}</div>
+                    </div>
+
+                    {orderReturns.length === 0 ? (
+                      <div style={{ padding: 12, borderRadius: 10, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 13 }}>
+                        No supplier returns recorded for this order yet.
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 8 }}>
+                        {orderReturns.map((purchaseReturn) => (
+                          <div
+                            key={purchaseReturn.id}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1fr)",
+                              gap: 12,
+                              padding: 12,
+                              borderRadius: 10,
+                              border: "1px solid #e2e8f0",
+                              background: "#ffffff",
+                              alignItems: "center",
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatDate(purchaseReturn.return_date || purchaseReturn.created_at)}</div>
+                              <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{purchaseReturn.product_name || "Purchase return"}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Quantity</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#9a3412" }}>{Number(purchaseReturn.quantity_returned || 0).toFixed(2)}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Value</div>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: "#9a3412" }}>{formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Recorded By</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{purchaseReturn.created_by_name || "System"}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                     <div style={{ fontSize: 12, color: "#64748b" }}>{order.created_by_name || "System"}</div>
-                    <button
-                      type="button"
-                      onClick={() => order.nextPaymentPurchase && openPaymentForPurchase(order.nextPaymentPurchase)}
-                      disabled={!order.nextPaymentPurchase}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        border: "1px solid #2563eb",
-                        background: order.nextPaymentPurchase ? "#2563eb" : "#e5e7eb",
-                        color: order.nextPaymentPurchase ? "#ffffff" : "#6b7280",
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: order.nextPaymentPurchase ? "pointer" : "not-allowed",
-                      }}
-                    >
-                      {order.nextPaymentPurchase ? "Record Payment" : "Fully Paid"}
-                    </button>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        onClick={() => order.nextReturnPurchase && openReturnForPurchase(order.nextReturnPurchase)}
+                        disabled={!order.nextReturnPurchase}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 8,
+                          border: "1px solid #b45309",
+                          background: order.nextReturnPurchase ? "#fff7ed" : "#e5e7eb",
+                          color: order.nextReturnPurchase ? "#9a3412" : "#6b7280",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: order.nextReturnPurchase ? "pointer" : "not-allowed",
+                        }}
+                      >
+                        {order.nextReturnPurchase ? "Return to Supplier" : "No Returnable Items"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => order.nextPaymentPurchase && openPaymentForPurchase(order.nextPaymentPurchase)}
+                        disabled={!order.nextPaymentPurchase}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 8,
+                          border: "1px solid #2563eb",
+                          background: order.nextPaymentPurchase ? "#2563eb" : "#e5e7eb",
+                          color: order.nextPaymentPurchase ? "#ffffff" : "#6b7280",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: order.nextPaymentPurchase ? "pointer" : "not-allowed",
+                        }}
+                      >
+                        {order.nextPaymentPurchase ? "Record Payment" : "Fully Paid"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

@@ -229,6 +229,25 @@ export type SupplierPayment = {
   created_by_name?: string | null;
 };
 
+export type PurchaseReturn = {
+  id: number;
+  supplier_id?: number | null;
+  supplier_name: string;
+  purchase_id: number;
+  product_id?: number | null;
+  order_number?: string | null;
+  purchase_invoice_number?: string | null;
+  product_name?: string | null;
+  quantity_returned: number;
+  unit_cost_price: number;
+  total_cost_returned: number;
+  return_date?: string | null;
+  reason?: string | null;
+  notes?: string | null;
+  created_at: string;
+  created_by_name?: string | null;
+};
+
 export type SupplierDetail = {
   supplier: Supplier;
   purchases: Purchase[];
@@ -241,5 +260,13 @@ export type NewSupplierPayment = {
   amount: number;
   payment_method: string;
   payment_date?: string | null;
+  notes?: string | null;
+};
+
+export type NewPurchaseReturn = {
+  purchase_id: number;
+  quantity_returned: number;
+  return_date?: string | null;
+  reason?: string | null;
   notes?: string | null;
 };

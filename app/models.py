@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 
@@ -184,6 +184,33 @@ class SupplierPayment(Base):
 
     supplier: Mapped[Supplier | None] = relationship()
     purchase: Mapped[Purchase | None] = relationship()
+
+
+class PurchaseReturn(Base):
+    __tablename__ = "purchase_returns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True, default=None)
+    purchase_id: Mapped[int] = mapped_column(ForeignKey("purchases.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), index=True, default=None)
+    stock_movement_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stock_movements.id", ondelete="SET NULL"), index=True, default=None
+    )
+    order_number: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
+    quantity_returned: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    unit_cost_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    total_cost_returned: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    return_date: Mapped[date | None] = mapped_column(Date, default=None)
+    reason: Mapped[str | None] = mapped_column(String(255), default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    supplier: Mapped[Supplier | None] = relationship()
+    purchase: Mapped[Purchase] = relationship()
+    product: Mapped[Product | None] = relationship()
+    stock_movement: Mapped[StockMovement | None] = relationship()
 
 
 class Sale(Base):

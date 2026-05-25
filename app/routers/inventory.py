@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import schemas
-from ..models import Product, StockMovement, Sale, User, SystemSettings, Branch, Supplier, Purchase, SupplierPayment
+from ..models import Product, StockMovement, Sale, User, SystemSettings, Branch, Supplier, Purchase, SupplierPayment, PurchaseReturn
 from ..auth import get_current_active_user
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
@@ -531,6 +531,81 @@ def _attach_supplier_payment_metadata(payments: list[SupplierPayment], db: Sessi
         payment.supplier_name = supplier_name_by_id.get(payment.supplier_id or -1) or (reference_purchase.supplier_name if reference_purchase else "Supplier")
 
 
+def _attach_purchase_return_metadata(returns: list[PurchaseReturn], db: Session) -> None:
+    if not returns:
+        return
+
+    creator_ids = sorted({purchase_return.user_id for purchase_return in returns})
+    creators = db.execute(select(User.id, User.name).where(User.id.in_(creator_ids))).all()
+    creator_name_by_id = {int(uid): name for uid, name in creators}
+
+    purchase_ids = sorted({purchase_return.purchase_id for purchase_return in returns})
+    purchases = db.scalars(select(Purchase).where(Purchase.id.in_(purchase_ids))).all() if purchase_ids else []
+    purchase_by_id = {purchase.id: purchase for purchase in purchases}
+
+    supplier_ids = sorted({purchase_return.supplier_id for purchase_return in returns if purchase_return.supplier_id is not None})
+    suppliers = db.scalars(select(Supplier).where(Supplier.id.in_(supplier_ids))).all() if supplier_ids else []
+    supplier_name_by_id = {supplier.id: supplier.name for supplier in suppliers}
+
+    for purchase_return in returns:
+        purchase = purchase_by_id.get(purchase_return.purchase_id)
+        purchase_return.created_by_name = creator_name_by_id.get(purchase_return.user_id)
+        purchase_return.order_number = purchase_return.order_number or (purchase.order_number if purchase else None)
+        purchase_return.purchase_invoice_number = purchase.invoice_number if purchase else None
+        purchase_return.product_name = purchase.product_name if purchase else None
+        purchase_return.supplier_name = (
+            supplier_name_by_id.get(purchase_return.supplier_id or -1)
+            or (purchase.supplier_name if purchase else "Supplier")
+        )
+
+
+def _get_product_stock_balance(
+    db: Session,
+    tenant_user_ids: list[int],
+    active_branch_id: int,
+    product_id: int,
+) -> Decimal:
+    balance = db.scalar(
+        select(func.coalesce(func.sum(StockMovement.change), 0)).where(
+            StockMovement.product_id == product_id,
+            StockMovement.user_id.in_(tenant_user_ids),
+            StockMovement.branch_id == active_branch_id,
+        )
+    )
+    return _to_money(balance)
+
+
+def _get_purchase_returnable_quantity(
+    db: Session,
+    tenant_user_ids: list[int],
+    active_branch_id: int,
+    purchase: Purchase,
+) -> Decimal:
+    if purchase.product_id is None:
+        return MONEY_ZERO
+
+    source_movement = purchase.stock_movement
+    if source_movement and source_movement.batch_number:
+        balances = get_batch_balances(
+            db=db,
+            tenant_user_ids=tenant_user_ids,
+            branch_id=active_branch_id,
+            product_id=purchase.product_id,
+        )
+        matching_balance = next(
+            (
+                balance.balance
+                for balance in balances
+                if balance.batch_number == source_movement.batch_number
+                and balance.expiry_date == source_movement.expiry_date
+            ),
+            MONEY_ZERO,
+        )
+        return _to_money(matching_balance)
+
+    return _get_product_stock_balance(db, tenant_user_ids, active_branch_id, purchase.product_id)
+
+
 def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
     settings = db.query(SystemSettings).filter(SystemSettings.owner_user_id == owner_user_id).first()
     if settings:
@@ -787,6 +862,28 @@ def list_supplier_payments(
     return payments
 
 
+@router.get("/purchase-returns", response_model=list[schemas.PurchaseReturnRead])
+def list_purchase_returns(
+    limit: int = Query(default=40, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    returns = db.scalars(
+        select(PurchaseReturn)
+        .where(
+            PurchaseReturn.user_id.in_(tenant_user_ids),
+            PurchaseReturn.branch_id == active_branch_id,
+        )
+        .order_by(PurchaseReturn.return_date.desc(), PurchaseReturn.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    _attach_purchase_return_metadata(returns, db)
+    return returns
+
+
 @router.post("/purchase-orders", response_model=schemas.PurchaseOrderRead, status_code=201)
 def create_purchase_order(
     payload: schemas.PurchaseOrderCreate,
@@ -956,6 +1053,96 @@ def create_supplier_payment(
     db.refresh(payment)
     _attach_supplier_payment_metadata([payment], db)
     return payment
+
+
+@router.post("/purchase-returns", response_model=schemas.PurchaseReturnRead, status_code=201)
+def create_purchase_return(
+    payload: schemas.PurchaseReturnCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    purchase = db.scalar(
+        select(Purchase).where(
+            Purchase.id == payload.purchase_id,
+            Purchase.user_id.in_(tenant_user_ids),
+            Purchase.branch_id == active_branch_id,
+        )
+    )
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+
+    if purchase.product_id is None:
+        raise HTTPException(status_code=400, detail="This purchase is missing product information")
+
+    _apply_purchase_payment_state(purchase)
+
+    remaining_quantity = _to_money(purchase.quantity)
+    if remaining_quantity <= MONEY_ZERO:
+        raise HTTPException(status_code=400, detail="This purchase has already been fully returned")
+
+    quantity_to_return = _to_money(payload.quantity_returned)
+    if quantity_to_return > remaining_quantity:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot return more than {remaining_quantity} unit(s) from this purchase",
+        )
+
+    available_stock = _get_purchase_returnable_quantity(db, tenant_user_ids, active_branch_id, purchase)
+    if quantity_to_return > available_stock:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only {available_stock} unit(s) are still available in stock for this purchase batch",
+        )
+
+    supplier = _resolve_supplier_for_existing_purchases(db, current_user, tenant_user_ids, [purchase])
+    source_movement = purchase.stock_movement
+    unit_cost_price = _to_money(purchase.unit_cost_price)
+    total_cost_returned = (quantity_to_return * unit_cost_price).quantize(MONEY_SCALE)
+
+    return_movement = StockMovement(
+        user_id=current_user.id,
+        branch_id=active_branch_id,
+        product_id=purchase.product_id,
+        change=-quantity_to_return,
+        reason="Return to Supplier",
+        batch_number=source_movement.batch_number if source_movement else None,
+        expiry_date=source_movement.expiry_date if source_movement else None,
+        unit_cost_price=unit_cost_price,
+        unit_selling_price=(source_movement.unit_selling_price if source_movement else purchase.unit_selling_price),
+        location=(source_movement.location if source_movement and source_movement.location else "Main Store"),
+    )
+    db.add(return_movement)
+    db.flush()
+
+    purchase_return = PurchaseReturn(
+        user_id=current_user.id,
+        branch_id=active_branch_id,
+        supplier_id=supplier.id,
+        purchase_id=purchase.id,
+        product_id=purchase.product_id,
+        stock_movement_id=return_movement.id,
+        order_number=purchase.order_number,
+        quantity_returned=quantity_to_return,
+        unit_cost_price=unit_cost_price,
+        total_cost_returned=total_cost_returned,
+        return_date=payload.return_date or date.today(),
+        reason=(payload.reason or "").strip() or None,
+        notes=(payload.notes or "").strip() or None,
+    )
+    db.add(purchase_return)
+
+    purchase.quantity = (remaining_quantity - quantity_to_return).quantize(MONEY_SCALE)
+    purchase.total_cost = (purchase.quantity * unit_cost_price).quantize(MONEY_SCALE)
+    _apply_purchase_payment_state(purchase)
+    if purchase.payment_status == "paid":
+        purchase.due_date = None
+
+    db.commit()
+    db.refresh(purchase_return)
+    _attach_purchase_return_metadata([purchase_return], db)
+    return purchase_return
 
 
 @router.post("/transfers")
