@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { createPurchaseOrder, createPurchaseReturn, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchaseReturnsCached, fetchPurchasesCached, fetchSupplierDetail, fetchSupplierPaymentsCached, fetchSuppliersCached, updateSupplier } from "../api";
@@ -43,6 +43,8 @@ const paymentMethodOptions = [
   { value: "other", label: "Other" },
 ];
 
+const MAX_VISIBLE_SUPPLIER_RESULTS = 8;
+
 function toISODate(date: Date): string {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, "0");
@@ -71,6 +73,20 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function formatCurrency(value: number): string {
   const normalized = Number.isFinite(value) ? value : 0;
   return `GHS ${normalized.toFixed(2)}`;
+}
+
+function getSupplierMatchRank(supplier: Supplier, query: string): number {
+  const name = supplier.name.toLowerCase();
+  const contactPerson = (supplier.contact_person || "").toLowerCase();
+  const phone = (supplier.phone || "").toLowerCase();
+  const email = (supplier.email || "").toLowerCase();
+
+  if (name === query) return 0;
+  if (name.startsWith(query)) return 1;
+  if (name.includes(query)) return 2;
+  if (contactPerson.startsWith(query)) return 3;
+  if (contactPerson.includes(query) || phone.includes(query) || email.includes(query)) return 4;
+  return Number.POSITIVE_INFINITY;
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -115,6 +131,341 @@ function getSupplierFormValues(supplier: Supplier) {
     address: supplier.address || "",
     notes: supplier.notes || "",
   };
+}
+
+type SupplierNameComboboxProps = {
+  suppliers: Supplier[];
+  value: string;
+  selectedSupplier: Supplier | null;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+};
+
+function SupplierNameCombobox({
+  suppliers,
+  value,
+  selectedSupplier,
+  onChange,
+  disabled = false,
+}: SupplierNameComboboxProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const inputId = useId();
+  const listboxId = useId();
+  const optionIdPrefix = useId();
+
+  const normalizedSearch = value.trim().toLowerCase();
+
+  const matchingSuppliers = useMemo(() => {
+    const sortedSuppliers = [...suppliers].sort((left, right) => left.name.localeCompare(right.name));
+    if (!normalizedSearch) {
+      return sortedSuppliers;
+    }
+
+    return sortedSuppliers
+      .map((supplier) => ({
+        supplier,
+        rank: getSupplierMatchRank(supplier, normalizedSearch),
+      }))
+      .filter((entry) => Number.isFinite(entry.rank))
+      .sort((left, right) => {
+        if (left.rank !== right.rank) return left.rank - right.rank;
+        return left.supplier.name.localeCompare(right.supplier.name);
+      })
+      .map((entry) => entry.supplier);
+  }, [normalizedSearch, suppliers]);
+
+  const visibleSuppliers = useMemo(
+    () => matchingSuppliers.slice(0, MAX_VISIBLE_SUPPLIER_RESULTS),
+    [matchingSuppliers],
+  );
+
+  const activeSupplier = activeIndex >= 0 ? visibleSuppliers[activeIndex] ?? null : null;
+
+  useEffect(() => {
+    if (!isOpen) {
+      setActiveIndex(-1);
+      return;
+    }
+
+    if (visibleSuppliers.length === 0) {
+      setActiveIndex(-1);
+      return;
+    }
+
+    setActiveIndex((previousIndex) => {
+      if (previousIndex < 0) return 0;
+      return Math.min(previousIndex, visibleSuppliers.length - 1);
+    });
+  }, [isOpen, visibleSuppliers]);
+
+  useEffect(() => {
+    if (!isOpen || activeIndex < 0) {
+      return;
+    }
+
+    const activeOption = document.getElementById(`${optionIdPrefix}-${activeIndex}`);
+    activeOption?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, isOpen, optionIdPrefix]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [isOpen]);
+
+  const selectSupplier = (supplier: Supplier) => {
+    onChange(supplier.name);
+    setIsOpen(false);
+    setActiveIndex(-1);
+  };
+
+  const clearInput = () => {
+    onChange("");
+    setIsOpen(false);
+    setActiveIndex(-1);
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled || suppliers.length === 0) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        return;
+      }
+      if (visibleSuppliers.length === 0) {
+        return;
+      }
+      setActiveIndex((previousIndex) => Math.min(previousIndex + 1, visibleSuppliers.length - 1));
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!isOpen) {
+        setIsOpen(true);
+        return;
+      }
+      if (visibleSuppliers.length === 0) {
+        return;
+      }
+      setActiveIndex((previousIndex) => (previousIndex <= 0 ? 0 : previousIndex - 1));
+      return;
+    }
+
+    if (event.key === "Enter") {
+      if (!isOpen || !activeSupplier) {
+        return;
+      }
+      event.preventDefault();
+      selectSupplier(activeSupplier);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      if (!isOpen) {
+        return;
+      }
+      event.preventDefault();
+      setIsOpen(false);
+      setActiveIndex(-1);
+    }
+  };
+
+  const inputSummary = (() => {
+    if (suppliers.length === 0) {
+      return "Type the supplier name. Saved supplier suggestions will appear once suppliers are available.";
+    }
+
+    if (selectedSupplier) {
+      return "Saved supplier selected. You can still type a different name if needed.";
+    }
+
+    if (!normalizedSearch) {
+      return `Type a supplier name or browse ${suppliers.length} saved supplier${suppliers.length === 1 ? "" : "s"}.`;
+    }
+
+    if (matchingSuppliers.length === 0) {
+      return "No saved supplier matched. Continue typing to use a new supplier name.";
+    }
+
+    return `${matchingSuppliers.length} saved supplier match${matchingSuppliers.length === 1 ? "" : "es"} found.`;
+  })();
+
+  return (
+    <div ref={containerRef} style={{ display: "grid", gap: 10, position: "relative", maxWidth: 720 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <label htmlFor={inputId} style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>
+          Supplier Name
+        </label>
+        {value ? (
+          <button
+            type="button"
+            onClick={clearInput}
+            disabled={disabled}
+            style={{
+              padding: "4px 8px",
+              borderRadius: 999,
+              border: "1px solid #d1d5db",
+              background: "white",
+              color: "#475569",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Clear
+          </button>
+        ) : (
+          <span style={{ padding: "4px 8px", borderRadius: 999, background: "#eff6ff", color: "#1d4ed8", fontSize: 12, fontWeight: 700 }}>
+            {suppliers.length} saved
+          </span>
+        )}
+      </div>
+
+      <input
+        id={inputId}
+        className="input"
+        role="combobox"
+        aria-expanded={isOpen}
+        aria-controls={listboxId}
+        aria-autocomplete="list"
+        aria-activedescendant={activeIndex >= 0 ? `${optionIdPrefix}-${activeIndex}` : undefined}
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setIsOpen(true);
+        }}
+        onFocus={() => {
+          if (!disabled && suppliers.length > 0) {
+            setIsOpen(true);
+          }
+        }}
+        onKeyDown={handleKeyDown}
+        placeholder="Type or search supplier name"
+        disabled={disabled}
+      />
+
+      <div style={{ fontSize: 12, color: "#64748b" }}>{inputSummary}</div>
+
+      {selectedSupplier ? (
+        <div
+          style={{
+            padding: "12px 14px",
+            borderRadius: 12,
+            border: "1px solid #bfdbfe",
+            background: "linear-gradient(180deg, #f8fbff 0%, #eff6ff 100%)",
+            display: "grid",
+            gap: 6,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedSupplier.name}</div>
+            <span style={{ padding: "4px 8px", borderRadius: 999, background: "#dbeafe", color: "#1d4ed8", fontSize: 12, fontWeight: 700 }}>
+              Saved Supplier
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#64748b" }}>
+            {selectedSupplier.contact_person ? <span>Contact {selectedSupplier.contact_person}</span> : null}
+            {selectedSupplier.phone ? <span>{selectedSupplier.phone}</span> : null}
+            {selectedSupplier.email ? <span>{selectedSupplier.email}</span> : null}
+            <span>Outstanding {formatCurrency(Number(selectedSupplier.outstanding_balance || 0))}</span>
+          </div>
+        </div>
+      ) : value.trim() ? (
+        <div
+          style={{
+            padding: "12px 14px",
+            borderRadius: 12,
+            border: "1px solid #fcd34d",
+            background: "#fffbeb",
+            display: "grid",
+            gap: 4,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e" }}>New supplier name</div>
+          <div style={{ fontSize: 12, color: "#a16207" }}>{value.trim()}</div>
+        </div>
+      ) : null}
+
+      {isOpen ? (
+        <div
+          id={listboxId}
+          role="listbox"
+          aria-label="Supplier name suggestions"
+          style={{
+            maxHeight: 320,
+            overflowY: "auto",
+            borderRadius: 14,
+            border: "1px solid #dbe5f2",
+            background: "#ffffff",
+            boxShadow: "0 18px 30px rgba(15, 23, 42, 0.08)",
+            padding: 8,
+            display: "grid",
+            gap: 6,
+          }}
+        >
+          {visibleSuppliers.length === 0 ? (
+            <div style={{ padding: "12px 14px", borderRadius: 10, background: "#f8fafc", color: "#64748b", fontSize: 13 }}>
+              No saved supplier matched that search.
+            </div>
+          ) : (
+            visibleSuppliers.map((supplier, index) => {
+              const isActive = index === activeIndex;
+              const isSelected = supplier.id === selectedSupplier?.id;
+              return (
+                <button
+                  key={supplier.id}
+                  id={`${optionIdPrefix}-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => selectSupplier(supplier)}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    border: isActive ? "1px solid #2563eb" : isSelected ? "1px solid #bfdbfe" : "1px solid #e2e8f0",
+                    background: isActive ? "#eff6ff" : isSelected ? "#f8fbff" : "#ffffff",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    display: "grid",
+                    gap: 4,
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{supplier.name}</span>
+                    <span style={{ fontSize: 12, color: "#475569", fontWeight: 700 }}>
+                      {formatCurrency(Number(supplier.outstanding_balance || 0))} due
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#64748b" }}>
+                    {supplier.contact_person ? <span>{supplier.contact_person}</span> : null}
+                    {supplier.phone ? <span>{supplier.phone}</span> : null}
+                    {supplier.email ? <span>{supplier.email}</span> : null}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 type PurchaseOrderLine = {
@@ -1567,32 +1918,13 @@ export default function PurchasingPanel({
                 <p style={helperTextStyle}>Start with the supplier name only. The rest of the order details stay out of the way until you need them.</p>
               </div>
 
-              <div style={wideFieldGridStyle}>
-                <label>
-                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier Name</span>
-                  <input
-                    className="input"
-                    list="purchase-supplier-options"
-                    value={manualSupplierName}
-                    onChange={(e) => handleSupplierNameChange(e.target.value)}
-                    placeholder="Type or select supplier name"
-                    disabled={submittingPurchase}
-                  />
-                  <datalist id="purchase-supplier-options">
-                    {suppliers.map((supplier) => (
-                      <option key={supplier.id} value={supplier.name} />
-                    ))}
-                  </datalist>
-                </label>
-              </div>
-
-              <div style={{ fontSize: 12, color: selectedSupplierId != null ? "#1d4ed8" : "#64748b" }}>
-                {matchedPurchaseSupplier
-                  ? `Using saved supplier record: ${matchedPurchaseSupplier.name}`
-                  : suppliers.length > 0
-                    ? "Type the supplier name or pick one from the suggestion list."
-                    : "Type the supplier name to continue."}
-              </div>
+              <SupplierNameCombobox
+                suppliers={suppliers}
+                value={manualSupplierName}
+                selectedSupplier={matchedPurchaseSupplier}
+                onChange={handleSupplierNameChange}
+                disabled={submittingPurchase}
+              />
             </div>
 
             <div style={emphasisSectionStyle}>
