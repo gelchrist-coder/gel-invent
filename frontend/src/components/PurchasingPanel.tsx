@@ -248,6 +248,8 @@ export default function PurchasingPanel({
   const [quantity, setQuantity] = useState("1");
   const [unitCostPrice, setUnitCostPrice] = useState("");
   const [unitSellingPrice, setUnitSellingPrice] = useState("");
+  const [isChangingLinePrice, setIsChangingLinePrice] = useState(false);
+  const [showOptionalOrderDetails, setShowOptionalOrderDetails] = useState(false);
   const [amountPaid, setAmountPaid] = useState("");
   const [purchasePaymentMethod, setPurchasePaymentMethod] = useState("cash");
   const [purchaseDate, setPurchaseDate] = useState(() => toISODate(new Date()));
@@ -278,6 +280,19 @@ export default function PurchasingPanel({
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [panelDataErrors, setPanelDataErrors] = useState<PanelDataErrors>(() => createEmptyPanelDataErrors());
+
+  const handleSupplierNameChange = useCallback((value: string) => {
+    setManualSupplierName(value);
+
+    const normalizedValue = value.trim().toLowerCase();
+    if (!normalizedValue) {
+      setSelectedSupplierId(null);
+      return;
+    }
+
+    const matchedSupplier = suppliers.find((supplier) => supplier.name.trim().toLowerCase() === normalizedValue) ?? null;
+    setSelectedSupplierId(matchedSupplier?.id ?? null);
+  }, [suppliers]);
 
   const loadPanelData = useCallback(async () => {
     setLoading(true);
@@ -392,9 +407,40 @@ export default function PurchasingPanel({
     () => purchaseOrders.filter((order) => order.nextReturnPurchase != null),
     [purchaseOrders],
   );
+  const matchedPurchaseSupplier = useMemo(
+    () => suppliers.find((supplier) => supplier.id === selectedSupplierId) ?? null,
+    [selectedSupplierId, suppliers],
+  );
+  const savedUnitCostPrice = useMemo(
+    () => selectedProduct?.cost_price != null ? Number(selectedProduct.cost_price) : null,
+    [selectedProduct],
+  );
+  const savedUnitSellingPrice = useMemo(
+    () => selectedProduct?.selling_price != null ? Number(selectedProduct.selling_price) : null,
+    [selectedProduct],
+  );
+  const requiresManualPriceEntry = isChangingLinePrice || savedUnitCostPrice == null;
+  const effectiveUnitCostPrice = useMemo(() => {
+    if (!requiresManualPriceEntry) {
+      return savedUnitCostPrice ?? NaN;
+    }
+
+    return Number(unitCostPrice);
+  }, [requiresManualPriceEntry, savedUnitCostPrice, unitCostPrice]);
+  const effectiveUnitSellingPrice = useMemo(() => {
+    if (!requiresManualPriceEntry) {
+      return savedUnitSellingPrice;
+    }
+
+    if (unitSellingPrice.trim() === "") {
+      return null;
+    }
+
+    return Number(unitSellingPrice);
+  }, [requiresManualPriceEntry, savedUnitSellingPrice, unitSellingPrice]);
   const draftLineTotal = useMemo(
-    () => (Number(quantity || 0) || 0) * (Number(unitCostPrice || 0) || 0),
-    [quantity, unitCostPrice],
+    () => (Number(quantity || 0) || 0) * (Number.isFinite(effectiveUnitCostPrice) ? effectiveUnitCostPrice : 0),
+    [effectiveUnitCostPrice, quantity],
   );
   const estimatedTotal = useMemo(
     () => orderItems.reduce((sum, item) => sum + Number(item.line_total || 0), 0),
@@ -422,6 +468,7 @@ export default function PurchasingPanel({
 
     setUnitCostPrice(selectedProduct.cost_price != null ? String(selectedProduct.cost_price) : "");
     setUnitSellingPrice(selectedProduct.selling_price != null ? String(selectedProduct.selling_price) : "");
+    setIsChangingLinePrice(selectedProduct.cost_price == null);
     setExpiryDate("");
 
     if (selectedSupplierId != null || manualSupplierName.trim() || orderItems.length > 0) {
@@ -429,21 +476,11 @@ export default function PurchasingPanel({
     }
 
     if (selectedProduct.supplier) {
-      const matchedSupplier = suppliers.find(
-        (supplier) => supplier.name.toLowerCase() === selectedProduct.supplier?.toLowerCase(),
-      );
-      if (matchedSupplier) {
-        setSelectedSupplierId(matchedSupplier.id);
-        setManualSupplierName("");
-      } else {
-        setSelectedSupplierId(null);
-        setManualSupplierName(selectedProduct.supplier);
-      }
+      handleSupplierNameChange(selectedProduct.supplier);
     } else {
-      setSelectedSupplierId(null);
-      setManualSupplierName("");
+      handleSupplierNameChange("");
     }
-  }, [manualSupplierName, orderItems.length, selectedProduct, selectedSupplierId, suppliers]);
+  }, [handleSupplierNameChange, manualSupplierName, orderItems.length, selectedProduct, selectedSupplierId]);
 
   const paymentSuppliers = useMemo(
     () => suppliers.filter((supplier) => Number(supplier.outstanding_balance || 0) > 0 || Number(supplier.unpaid_purchases_count || 0) > 0),
@@ -670,8 +707,7 @@ export default function PurchasingPanel({
   }, [loadSupplierDetail, supplierDetail?.supplier.id]);
 
   const focusPurchaseSupplier = (supplier: Supplier) => {
-    setSelectedSupplierId(supplier.id);
-    setManualSupplierName("");
+    handleSupplierNameChange(supplier.name);
     setNotice(`Supplier ${supplier.name} selected for the purchase order form`);
   };
 
@@ -682,8 +718,8 @@ export default function PurchasingPanel({
     }
 
     const quantityValue = Number(quantity);
-    const unitCostValue = Number(unitCostPrice);
-    const unitSellingValue = unitSellingPrice.trim() === "" ? null : Number(unitSellingPrice);
+    const unitCostValue = effectiveUnitCostPrice;
+    const unitSellingValue = effectiveUnitSellingPrice;
 
     if (!Number.isFinite(quantityValue) || quantityValue <= 0) {
       setError("Enter a valid purchase quantity");
@@ -727,6 +763,7 @@ export default function PurchasingPanel({
     setQuantity("1");
     setUnitCostPrice(selectedProduct.cost_price != null ? String(selectedProduct.cost_price) : "");
     setUnitSellingPrice(selectedProduct.selling_price != null ? String(selectedProduct.selling_price) : "");
+    setIsChangingLinePrice(selectedProduct.cost_price == null);
     setExpiryDate("");
   };
 
@@ -890,8 +927,7 @@ export default function PurchasingPanel({
         notes: trimOrUndefined(supplierForm.notes),
       });
       setSupplierForm(emptySupplierForm);
-      setSelectedSupplierId(created.id);
-      setManualSupplierName("");
+      handleSupplierNameChange(created.name);
       setNotice(`Supplier ${created.name} added`);
       await loadPanelData();
       await loadSupplierDetail(created.id);
@@ -925,8 +961,8 @@ export default function PurchasingPanel({
       return;
     }
 
-    if (selectedSupplierId == null && !manualSupplierName.trim()) {
-      setError("Select a supplier or type a supplier name");
+    if (!manualSupplierName.trim()) {
+      setError("Enter the supplier name");
       return;
     }
 
@@ -957,6 +993,8 @@ export default function PurchasingPanel({
       setQuantity("1");
       setSelectedSupplierId(null);
       setManualSupplierName("");
+      setIsChangingLinePrice(selectedProduct?.cost_price == null);
+      setShowOptionalOrderDetails(false);
       setAmountPaid("");
       setPurchasePaymentMethod("cash");
       setDueDate("");
@@ -1526,68 +1564,41 @@ export default function PurchasingPanel({
             <div style={emphasisSectionStyle}>
               <div style={{ display: "grid", gap: 6 }}>
                 <div style={subSectionLabelStyle}>Order Details</div>
-                <p style={helperTextStyle}>Start with the supplier, invoice reference, and purchase date before adding line items.</p>
+                <p style={helperTextStyle}>Start with the supplier name only. The rest of the order details stay out of the way until you need them.</p>
               </div>
 
               <div style={wideFieldGridStyle}>
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier</span>
-                <select
-                  className="input"
-                  value={selectedSupplierId ?? ""}
-                  onChange={(e) => setSelectedSupplierId(e.target.value ? Number(e.target.value) : null)}
-                  disabled={submittingPurchase}
-                >
-                  <option value="">Type supplier name manually</option>
-                  {suppliers.map((supplier) => (
-                    <option key={supplier.id} value={supplier.id}>
-                      {supplier.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              {selectedSupplierId == null ? (
                 <label>
                   <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier Name</span>
                   <input
                     className="input"
+                    list="purchase-supplier-options"
                     value={manualSupplierName}
-                    onChange={(e) => setManualSupplierName(e.target.value)}
-                    placeholder="Type a supplier name"
+                    onChange={(e) => handleSupplierNameChange(e.target.value)}
+                    placeholder="Type or select supplier name"
                     disabled={submittingPurchase}
                   />
+                  <datalist id="purchase-supplier-options">
+                    {suppliers.map((supplier) => (
+                      <option key={supplier.id} value={supplier.name} />
+                    ))}
+                  </datalist>
                 </label>
-              ) : null}
+              </div>
 
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Invoice Number</span>
-                <input
-                  className="input"
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  placeholder="Optional"
-                  disabled={submittingPurchase}
-                />
-              </label>
-
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Purchase Date</span>
-                <input
-                  className="input"
-                  type="date"
-                  value={purchaseDate}
-                  onChange={(e) => setPurchaseDate(e.target.value)}
-                  disabled={submittingPurchase}
-                />
-              </label>
+              <div style={{ fontSize: 12, color: selectedSupplierId != null ? "#1d4ed8" : "#64748b" }}>
+                {matchedPurchaseSupplier
+                  ? `Using saved supplier record: ${matchedPurchaseSupplier.name}`
+                  : suppliers.length > 0
+                    ? "Type the supplier name or pick one from the suggestion list."
+                    : "Type the supplier name to continue."}
               </div>
             </div>
 
             <div style={emphasisSectionStyle}>
               <div style={{ display: "grid", gap: 6 }}>
                 <div style={subSectionLabelStyle}>Add Line Item</div>
-                <p style={helperTextStyle}>Pick a product, confirm the buying price, and add it to the current order.</p>
+                <p style={helperTextStyle}>Pick a product, decide whether the price changed, then enter the quantity and add it to the order.</p>
               </div>
 
               <div style={{ maxWidth: 720 }}>
@@ -1609,19 +1620,79 @@ export default function PurchasingPanel({
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{Number(selectedProduct.current_stock || 0)}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current Supplier</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedProduct.supplier || "Not set"}</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Saved Cost Price</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
+                      {savedUnitCostPrice != null ? formatCurrency(savedUnitCostPrice) : "Not set"}
+                    </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Perishability</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: isPerishableProduct ? "#b45309" : "#334155" }}>
-                      {isPerishableProduct ? "Perishable" : "Non-perishable"}
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Saved Selling Price</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
+                      {savedUnitSellingPrice != null ? formatCurrency(savedUnitSellingPrice) : "Not set"}
                     </div>
                   </div>
                   <div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Draft Line Total</div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(draftLineTotal)}</div>
                   </div>
+                </div>
+              ) : null}
+
+              {selectedProduct ? (
+                <div style={{ display: "grid", gap: 10, padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#fffaf0" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Will there be a price change?</div>
+                      <div style={{ fontSize: 12, color: "#64748b" }}>
+                        {requiresManualPriceEntry
+                          ? "Enter the updated buying and selling price for this line item."
+                          : "No price change needed. Just enter the quantity and add the line item."}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        onClick={() => setIsChangingLinePrice(false)}
+                        disabled={savedUnitCostPrice == null}
+                        style={{
+                          padding: "7px 10px",
+                          borderRadius: 8,
+                          border: "1px solid #d1d5db",
+                          background: !requiresManualPriceEntry ? "#0f172a" : "white",
+                          color: !requiresManualPriceEntry ? "#ffffff" : "#1f2937",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: savedUnitCostPrice == null ? "not-allowed" : "pointer",
+                          opacity: savedUnitCostPrice == null ? 0.6 : 1,
+                        }}
+                      >
+                        No
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsChangingLinePrice(true)}
+                        style={{
+                          padding: "7px 10px",
+                          borderRadius: 8,
+                          border: "1px solid #b45309",
+                          background: requiresManualPriceEntry ? "#b45309" : "white",
+                          color: requiresManualPriceEntry ? "#ffffff" : "#9a3412",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Yes
+                      </button>
+                    </div>
+                  </div>
+
+                  {savedUnitCostPrice == null ? (
+                    <div style={{ fontSize: 12, color: "#9a3412" }}>
+                      This product has no saved cost price yet, so enter the price for this purchase line.
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -1638,31 +1709,43 @@ export default function PurchasingPanel({
                     disabled={submittingPurchase}
                   />
                 </label>
-                <label>
-                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Cost Price</span>
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={unitCostPrice}
-                    onChange={(e) => setUnitCostPrice(e.target.value)}
-                    disabled={submittingPurchase}
-                  />
-                </label>
-                <label>
-                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Selling Price</span>
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={unitSellingPrice}
-                    onChange={(e) => setUnitSellingPrice(e.target.value)}
-                    disabled={submittingPurchase}
-                  />
-                </label>
+
+                {requiresManualPriceEntry ? (
+                  <>
+                    <label>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Cost Price</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={unitCostPrice}
+                        onChange={(e) => setUnitCostPrice(e.target.value)}
+                        disabled={submittingPurchase}
+                      />
+                    </label>
+                    <label>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Selling Price</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={unitSellingPrice}
+                        onChange={(e) => setUnitSellingPrice(e.target.value)}
+                        disabled={submittingPurchase}
+                      />
+                    </label>
+                  </>
+                ) : null}
               </div>
+
+              {!requiresManualPriceEntry && selectedProduct ? (
+                <div style={{ fontSize: 12, color: "#64748b" }}>
+                  Using saved prices for this product: cost {formatCurrency(savedUnitCostPrice ?? 0)}
+                  {savedUnitSellingPrice != null ? ` and selling ${formatCurrency(savedUnitSellingPrice)}` : ""}.
+                </div>
+              ) : null}
 
               {isPerishableProduct ? (
                 <label>
@@ -1770,48 +1853,106 @@ export default function PurchasingPanel({
 
             <div style={plainSectionStyle}>
               <div style={{ display: "grid", gap: 6 }}>
-                <div style={subSectionLabelStyle}>Payment and Notes</div>
-                <p style={helperTextStyle}>Record any upfront payment and confirm the remaining balance before submitting the order.</p>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={subSectionLabelStyle}>Optional Order Details</div>
+                  <button
+                    type="button"
+                    onClick={() => setShowOptionalOrderDetails((previousValue) => !previousValue)}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "white",
+                      color: "#334155",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {showOptionalOrderDetails ? "Hide Optional Details" : "Show Optional Details"}
+                  </button>
+                </div>
+                <p style={helperTextStyle}>Add invoice number, purchase date, upfront payment, due date, and notes only when needed.</p>
               </div>
 
-              <div style={compactFieldGridStyle}>
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Amount Paid Now</span>
-                <input
-                  className="input"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={amountPaid}
-                  onChange={(e) => setAmountPaid(e.target.value)}
-                  placeholder="Optional upfront payment"
-                  disabled={submittingPurchase}
-                />
-              </label>
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Payment Method</span>
-                <select
-                  className="input"
-                  value={purchasePaymentMethod}
-                  onChange={(e) => setPurchasePaymentMethod(e.target.value)}
-                  disabled={submittingPurchase}
-                >
-                  {paymentMethodOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Due Date</span>
-                <input
-                  className="input"
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  disabled={submittingPurchase}
-                />
-              </label>
-              </div>
+              {showOptionalOrderDetails ? (
+                <>
+                  <div style={wideFieldGridStyle}>
+                    <label>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Invoice Number</span>
+                      <input
+                        className="input"
+                        value={invoiceNumber}
+                        onChange={(e) => setInvoiceNumber(e.target.value)}
+                        placeholder="Optional"
+                        disabled={submittingPurchase}
+                      />
+                    </label>
+
+                    <label>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Purchase Date</span>
+                      <input
+                        className="input"
+                        type="date"
+                        value={purchaseDate}
+                        onChange={(e) => setPurchaseDate(e.target.value)}
+                        disabled={submittingPurchase}
+                      />
+                    </label>
+                  </div>
+
+                  <div style={compactFieldGridStyle}>
+                    <label>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Amount Paid Now</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={amountPaid}
+                        onChange={(e) => setAmountPaid(e.target.value)}
+                        placeholder="Optional upfront payment"
+                        disabled={submittingPurchase}
+                      />
+                    </label>
+                    <label>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Payment Method</span>
+                      <select
+                        className="input"
+                        value={purchasePaymentMethod}
+                        onChange={(e) => setPurchasePaymentMethod(e.target.value)}
+                        disabled={submittingPurchase}
+                      >
+                        {paymentMethodOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Due Date</span>
+                      <input
+                        className="input"
+                        type="date"
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                        disabled={submittingPurchase}
+                      />
+                    </label>
+                  </div>
+
+                  <label>
+                    <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Notes</span>
+                    <textarea
+                      className="textarea"
+                      rows={3}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Optional order note"
+                      disabled={submittingPurchase}
+                    />
+                  </label>
+                </>
+              ) : null}
 
               <div style={metricGridStyle}>
               <div>
@@ -1851,18 +1992,6 @@ export default function PurchasingPanel({
                 </span>
               </div>
               </div>
-
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Notes</span>
-                <textarea
-                  className="textarea"
-                  rows={3}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Optional order note"
-                  disabled={submittingPurchase}
-                />
-              </label>
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 13, color: "#475569", maxWidth: 480 }}>
