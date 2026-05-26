@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from html import escape
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
@@ -18,6 +19,82 @@ from app.utils.email import send_email, smtp_configured
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
+WALK_IN_CUSTOMER_NAMES = {
+    "walk in",
+    "walk in customer",
+    "walkin",
+    "guest",
+    "anonymous",
+}
+
+
+def _normalized_customer_name(name: str | None) -> str | None:
+    if name is None:
+        return None
+    cleaned = " ".join(str(name).strip().split())
+    return cleaned or None
+
+
+def _is_walk_in_customer_name(name: str | None) -> bool:
+    normalized = _normalized_customer_name(name)
+    if not normalized:
+        return False
+    lookup = normalized.lower().replace("-", " ").replace("_", " ")
+    lookup = " ".join(lookup.split())
+    return lookup in WALK_IN_CUSTOMER_NAMES
+
+
+def _extract_phone_from_notes(notes: str | None) -> str | None:
+    if not notes:
+        return None
+    phone_match = re.search(r"Phone:\s*([\d\s\-\+]+)", notes)
+    if not phone_match:
+        return None
+    value = phone_match.group(1).strip()
+    return value or None
+
+
+def _get_or_create_creditor(
+    *,
+    db: Session,
+    tenant_user_ids: list[int],
+    active_branch_id: int,
+    actor_user_id: int,
+    customer_name: str,
+    phone: str | None = None,
+    email: str | None = None,
+) -> models.Creditor:
+    normalized_name = _normalized_customer_name(customer_name)
+    if not normalized_name:
+        raise HTTPException(status_code=400, detail="Customer name is required")
+
+    creditor = db.scalar(
+        select(models.Creditor).where(
+            func.lower(func.trim(models.Creditor.name)) == normalized_name.lower(),
+            models.Creditor.user_id.in_(tenant_user_ids),
+            models.Creditor.branch_id == active_branch_id,
+        )
+    )
+
+    if not creditor:
+        creditor = models.Creditor(
+            user_id=actor_user_id,
+            branch_id=active_branch_id,
+            name=normalized_name,
+            phone=phone,
+            email=email,
+            total_debt=Decimal("0.00"),
+        )
+        db.add(creditor)
+        db.flush()
+        return creditor
+
+    if phone and not creditor.phone:
+        creditor.phone = phone
+    if email and not creditor.email:
+        creditor.email = email
+    return creditor
+
 
 class SendReceiptEmailRequest(BaseModel):
     sale_ids: list[int] = Field(..., min_length=1)
@@ -27,6 +104,13 @@ class SendReceiptEmailRequest(BaseModel):
 
 class SendReceiptEmailResponse(BaseModel):
     message: str
+
+
+class SaleCustomerAssignRequest(BaseModel):
+    customer_name: str = Field(..., min_length=1, max_length=255)
+    phone: str | None = Field(default=None, max_length=50)
+    email: EmailStr | None = None
+    notes: str | None = None
 
 
 @router.post("", response_model=SaleRead, status_code=201)
@@ -91,6 +175,11 @@ def create_sale(
             detail=f"Insufficient stock. Available: {available_stock}",
         )
 
+    normalized_customer_name = _normalized_customer_name(payload.customer_name)
+    if _is_walk_in_customer_name(normalized_customer_name):
+        normalized_customer_name = None
+    customer_phone = _extract_phone_from_notes(payload.notes)
+
     # Create the sale
     sale = models.Sale(
         user_id=current_user.id,
@@ -101,7 +190,7 @@ def create_sale(
         pack_quantity=payload.pack_quantity,
         unit_price=payload.unit_price,
         total_price=payload.total_price,
-        customer_name=payload.customer_name,
+        customer_name=normalized_customer_name,
         payment_method=payload.payment_method,
         amount_paid=payload.amount_paid,
         partial_payment_method=payload.partial_payment_method,
@@ -110,6 +199,18 @@ def create_sale(
     )
     db.add(sale)
     db.flush()  # Flush to get sale.id
+
+    # Create or enrich customer profile for any named sale (cash/credit/partial).
+    customer_creditor: models.Creditor | None = None
+    if normalized_customer_name:
+        customer_creditor = _get_or_create_creditor(
+            db=db,
+            tenant_user_ids=tenant_user_ids,
+            active_branch_id=active_branch_id,
+            actor_user_id=current_user.id,
+            customer_name=normalized_customer_name,
+            phone=customer_phone,
+        )
 
     # Deduct stock FIFO by earliest expiry date (non-expiring batches are sold last).
     today = date.today()
@@ -241,40 +342,16 @@ def create_sale(
             )
     
     # Create creditor transaction if there's credit involved
-    if credit_amount > 0 and payload.customer_name:
-        # Extract phone number from notes if present
-        phone_number = None
-        if payload.notes:
-            import re
-            phone_match = re.search(r'Phone: ([\d\s\-\+]+)', payload.notes)
-            if phone_match:
-                phone_number = phone_match.group(1).strip()
-        
-        # Find or create creditor by name for current user's tenant
-        creditor = db.scalar(
-            select(models.Creditor).where(
-                models.Creditor.name == payload.customer_name,
-                models.Creditor.user_id.in_(tenant_user_ids),
-                models.Creditor.branch_id == active_branch_id,
-            )
+    if credit_amount > 0 and normalized_customer_name:
+        creditor = customer_creditor or _get_or_create_creditor(
+            db=db,
+            tenant_user_ids=tenant_user_ids,
+            active_branch_id=active_branch_id,
+            actor_user_id=current_user.id,
+            customer_name=normalized_customer_name,
+            phone=customer_phone,
         )
-        
-        if not creditor:
-            # Create new creditor if doesn't exist
-            creditor = models.Creditor(
-                user_id=current_user.id,
-                branch_id=active_branch_id,
-                name=payload.customer_name,
-                phone=phone_number,
-                total_debt=credit_amount,
-            )
-            db.add(creditor)
-            db.flush()
-        else:
-            # Update existing creditor's debt and phone if provided
-            creditor.total_debt += credit_amount
-            if phone_number and not creditor.phone:
-                creditor.phone = phone_number
+        creditor.total_debt += credit_amount
         
         # Build transaction notes
         if payload.payment_method == "partial":
@@ -615,6 +692,102 @@ def get_sale(
     creator = db.scalar(select(models.User).where(models.User.id == sale.user_id))
     sale.created_by_name = creator.name if creator else None
     
+    return sale
+
+
+@router.patch("/{sale_id}/customer", response_model=SaleRead)
+def assign_sale_customer(
+    sale_id: int,
+    payload: SaleCustomerAssignRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    """Attach a named customer to an existing sale (useful for converting rushed walk-in checkout)."""
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    sale = db.scalar(
+        select(models.Sale).where(
+            models.Sale.id == sale_id,
+            models.Sale.user_id.in_(tenant_user_ids),
+            models.Sale.branch_id == active_branch_id,
+        )
+    )
+    if not sale:
+        raise HTTPException(status_code=404, detail="Sale not found")
+
+    normalized_customer_name = _normalized_customer_name(payload.customer_name)
+    if not normalized_customer_name or _is_walk_in_customer_name(normalized_customer_name):
+        raise HTTPException(status_code=400, detail="Please provide a valid customer name")
+
+    normalized_phone = _normalized_customer_name(payload.phone) if payload.phone else None
+    normalized_email = str(payload.email).strip() if payload.email else None
+
+    if payload.notes and payload.notes.strip():
+        appended_note = payload.notes.strip()
+        sale.notes = f"{sale.notes} | {appended_note}" if sale.notes else appended_note
+
+    sale.customer_name = normalized_customer_name
+    creditor = _get_or_create_creditor(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        active_branch_id=active_branch_id,
+        actor_user_id=current_user.id,
+        customer_name=normalized_customer_name,
+        phone=normalized_phone or _extract_phone_from_notes(sale.notes),
+        email=normalized_email,
+    )
+
+    # For legacy credit sales that were recorded as walk-in, create missing debt/payment ledger entries.
+    if sale.payment_method in {"credit", "partial"}:
+        existing_debt = db.scalar(
+            select(models.CreditTransaction).where(
+                models.CreditTransaction.sale_id == sale.id,
+                models.CreditTransaction.user_id.in_(tenant_user_ids),
+                models.CreditTransaction.branch_id == active_branch_id,
+                models.CreditTransaction.transaction_type == "debt",
+            )
+        )
+        if not existing_debt:
+            sale_total = Decimal(sale.total_price or 0)
+            amount_paid = Decimal(sale.amount_paid or 0)
+            if sale.payment_method == "partial":
+                debt_amount = sale_total - amount_paid
+            else:
+                debt_amount = sale_total
+
+            if debt_amount > 0:
+                creditor.total_debt += debt_amount
+                db.add(
+                    models.CreditTransaction(
+                        user_id=current_user.id,
+                        branch_id=active_branch_id,
+                        creditor_id=creditor.id,
+                        sale_id=sale.id,
+                        amount=debt_amount,
+                        transaction_type="debt",
+                        notes="Debt added after walk-in customer conversion",
+                    )
+                )
+
+            if sale.payment_method == "credit" and amount_paid > 0:
+                creditor.total_debt -= amount_paid
+                db.add(
+                    models.CreditTransaction(
+                        user_id=current_user.id,
+                        branch_id=active_branch_id,
+                        creditor_id=creditor.id,
+                        sale_id=sale.id,
+                        amount=amount_paid,
+                        transaction_type="payment",
+                        notes="Initial payment recorded after walk-in customer conversion",
+                    )
+                )
+
+    db.commit()
+    db.refresh(sale)
+
+    creator = db.scalar(select(models.User).where(models.User.id == sale.user_id))
+    sale.created_by_name = creator.name if creator else None
     return sale
 
 

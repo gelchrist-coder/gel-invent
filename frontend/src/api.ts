@@ -812,6 +812,23 @@ export async function sendSalesReceiptEmail(payload: {
   });
 }
 
+export type AssignSaleCustomerPayload = {
+  customer_name: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+};
+
+export async function assignSaleCustomer(saleId: number, payload: AssignSaleCustomerPayload): Promise<Sale> {
+  const result = await jsonRequest<Sale>(`/sales/${saleId}/customer`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  dataCache.delete(getCacheKey("sales"));
+  dataCache.delete(getCacheKey("salesDashboard"));
+  return result;
+}
+
 export async function createSaleForBranch(payload: NewSale, branchIdOverride: string | number | null): Promise<Sale> {
   const headers: Record<string, string> = {};
   if (branchIdOverride != null) {

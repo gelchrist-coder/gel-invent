@@ -26,6 +26,8 @@ interface Creditor {
   total_purchases?: number;
   total_payments?: number;
   transaction_count?: number;
+  purchase_count?: number;
+  loyalty_points?: number;
   loyalty_level?: "Bronze" | "Silver" | "Gold" | "VIP";
   created_at?: string;
   notes: string | null;
@@ -97,15 +99,24 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
     .reduce((sum, t) => sum + t.amount, 0);
   const actualDebt = totalDebt - totalPayments;
 
+  const totalPurchaseValueFromApi = Number(creditor.total_purchases);
+  const totalPurchaseValue = Number.isFinite(totalPurchaseValueFromApi) ? totalPurchaseValueFromApi : totalDebt;
+  const purchaseCountFromApi = Number(creditor.purchase_count ?? creditor.transaction_count ?? 0);
+  const purchaseCount = Number.isFinite(purchaseCountFromApi) ? Math.max(0, Math.round(purchaseCountFromApi)) : transactions.length;
+  const loyaltyPointsFromApi = Number(creditor.loyalty_points);
+  const loyaltyPoints = Number.isFinite(loyaltyPointsFromApi)
+    ? Math.max(0, Math.round(loyaltyPointsFromApi))
+    : Math.max(0, Math.floor(totalPurchaseValue / 10));
+
   const outstanding = Math.max(0, actualDebt);
   const creditBalance = Math.max(0, -actualDebt);
   const loyaltyLevel =
     (creditor.loyalty_level as "Bronze" | "Silver" | "Gold" | "VIP" | undefined) ||
-    ((totalDebt >= 5000 || transactions.length >= 20) && outstanding <= 0
+    ((totalPurchaseValue >= 5000 || purchaseCount >= 20) && outstanding <= 0
       ? "VIP"
-      : totalDebt >= 2000 || transactions.length >= 12
+      : totalPurchaseValue >= 2000 || purchaseCount >= 12
         ? "Gold"
-        : totalDebt >= 800 || transactions.length >= 6
+        : totalPurchaseValue >= 800 || purchaseCount >= 6
           ? "Silver"
           : "Bronze");
 
@@ -169,9 +180,10 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
           <p class="muted">Customer: ${creditor.name}</p>
           <p class="muted">Generated: ${new Date().toLocaleString()}</p>
           <div class="summary">
-            <strong>Total Purchases:</strong> ${formatCurrency(totalDebt)}<br />
+            <strong>Total Purchases:</strong> ${formatCurrency(totalPurchaseValue)}<br />
             <strong>Total Payments:</strong> ${formatCurrency(totalPayments)}<br />
             <strong>${actualDebt >= 0 ? "Outstanding" : "Credit Balance"}:</strong> ${formatCurrency(actualDebt >= 0 ? outstanding : creditBalance)}<br />
+            <strong>Loyalty Points:</strong> ${loyaltyPoints}<br />
             <strong>Loyalty Level:</strong> ${loyaltyLevel}
           </div>
           <table>
@@ -270,11 +282,12 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
 
         {/* Summary Cards */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, marginBottom: 24 }}>
-          <div style={{ backgroundColor: "#fee2e2", borderRadius: 8, padding: 16 }}>
-            <p style={{ margin: 0, fontSize: 13, color: "#991b1b" }}>Total Purchases on Credit</p>
-            <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: "#dc2626" }}>
-              {formatCurrency(totalDebt)}
+          <div style={{ backgroundColor: "#dbeafe", borderRadius: 8, padding: 16 }}>
+            <p style={{ margin: 0, fontSize: 13, color: "#1e40af" }}>Total Purchases</p>
+            <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: "#1d4ed8" }}>
+              {formatCurrency(totalPurchaseValue)}
             </p>
+            <p style={{ margin: "6px 0 0", fontSize: 12, color: "#1e40af" }}>{purchaseCount} purchases</p>
           </div>
           <div style={{ backgroundColor: "#d1fae5", borderRadius: 8, padding: 16 }}>
             <p style={{ margin: 0, fontSize: 13, color: "#065f46" }}>Total Paid by Customer</p>
@@ -295,6 +308,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
             <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: "#0f766e" }}>
               {loyaltyLevel}
             </p>
+            <p style={{ margin: "6px 0 0", fontSize: 12, color: "#0f766e" }}>{loyaltyPoints} points</p>
           </div>
         </div>
 

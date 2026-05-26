@@ -9,9 +9,19 @@ type SalesListProps = {
   onRefresh?: () => void;
   allowDelete?: boolean;
   onPrintReceipt?: (sale: Sale) => void;
+  onConvertWalkIn?: (sale: Sale) => void;
 };
 
-export default function SalesList({ sales, products, onDelete, onRefresh, allowDelete = false, onPrintReceipt }: SalesListProps) {
+const WALK_IN_NAMES = new Set(["walk in", "walk in customer", "walkin", "guest", "anonymous"]);
+
+function isWalkInSale(sale: Sale): boolean {
+  const rawName = String(sale.customer_name || "").trim();
+  if (!rawName) return true;
+  const normalized = rawName.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+  return WALK_IN_NAMES.has(normalized);
+}
+
+export default function SalesList({ sales, products, onDelete, onRefresh, allowDelete = false, onPrintReceipt, onConvertWalkIn }: SalesListProps) {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [returnSale, setReturnSale] = useState<Sale | null>(null);
 
@@ -183,6 +193,24 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                         }}
                       >
                         Receipt
+                      </button>
+                    )}
+                    {onConvertWalkIn && isWalkInSale(sale) && (
+                      <button
+                        type="button"
+                        onClick={() => onConvertWalkIn(sale)}
+                        style={{
+                          padding: "5px 10px",
+                          borderRadius: 4,
+                          border: "1px solid #fcd34d",
+                          backgroundColor: "#fffbeb",
+                          color: "#92400e",
+                          cursor: "pointer",
+                          fontSize: "0.8125rem",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Assign Customer
                       </button>
                     )}
                     {allowDelete && (

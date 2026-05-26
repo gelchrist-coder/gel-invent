@@ -14,6 +14,71 @@ from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/creditors", tags=["creditors"])
 
+WALK_IN_CUSTOMER_NAMES = {
+    "walk in",
+    "walk in customer",
+    "walkin",
+    "guest",
+    "anonymous",
+}
+
+
+def _normalize_customer_name(name: str | None) -> str:
+    normalized = str(name or "").strip().lower().replace("-", " ").replace("_", " ")
+    return " ".join(normalized.split())
+
+
+def _is_walk_in_customer_name(name: str | None) -> bool:
+    normalized = _normalize_customer_name(name)
+    if not normalized:
+        return False
+    return normalized in WALK_IN_CUSTOMER_NAMES
+
+
+def _sales_aggregate_by_customer_name(
+    *,
+    db: Session,
+    tenant_user_ids: list[int],
+    active_branch_id: int,
+) -> dict[str, dict[str, object]]:
+    rows = db.execute(
+        select(
+            Sale.customer_name,
+            func.count(Sale.id).label("sale_count"),
+            func.coalesce(func.sum(Sale.total_price), 0).label("total_spent"),
+            func.max(Sale.created_at).label("last_sale_at"),
+        )
+        .where(
+            Sale.user_id.in_(tenant_user_ids),
+            Sale.branch_id == active_branch_id,
+            Sale.customer_name.is_not(None),
+            func.trim(Sale.customer_name) != "",
+        )
+        .group_by(Sale.customer_name)
+    ).all()
+
+    aggregate: dict[str, dict[str, object]] = {}
+    for customer_name, sale_count, total_spent, last_sale_at in rows:
+        key = _normalize_customer_name(customer_name)
+        if not key or _is_walk_in_customer_name(key):
+            continue
+        existing = aggregate.get(key)
+        if existing is None:
+            aggregate[key] = {
+                "sale_count": int(sale_count or 0),
+                "total_spent": Decimal(total_spent or 0),
+                "last_sale_at": last_sale_at,
+            }
+            continue
+
+        existing["sale_count"] = int(existing["sale_count"]) + int(sale_count or 0)
+        existing["total_spent"] = Decimal(existing["total_spent"]) + Decimal(total_spent or 0)
+        existing_last_sale = existing["last_sale_at"]
+        if existing_last_sale is None or (last_sale_at and last_sale_at > existing_last_sale):
+            existing["last_sale_at"] = last_sale_at
+
+    return aggregate
+
 
 def _loyalty_level(total_purchases: Decimal, transaction_count: int, outstanding: Decimal) -> str:
     if (total_purchases >= Decimal("5000") or transaction_count >= 20) and outstanding <= 0:
@@ -67,6 +132,11 @@ async def get_creditors(
             CreditTransaction.branch_id == active_branch_id,
         )
     ).all() if creditor_ids else []
+    sales_aggregate = _sales_aggregate_by_customer_name(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        active_branch_id=active_branch_id,
+    )
 
     aggregate: dict[int, dict[str, object]] = {
         cid: {
@@ -101,8 +171,18 @@ async def get_creditors(
         tx_count = int(agg["transaction_count"]) if agg else 0
         last_transaction = agg["last_transaction"] if agg else None
 
+        sales_key = _normalize_customer_name(creditor.name)
+        sales_item = sales_aggregate.get(sales_key, None)
+        purchase_count = int(sales_item["sale_count"]) if sales_item else 0
+        total_spent = Decimal(sales_item["total_spent"]) if sales_item else Decimal(0)
+        last_purchase_at = sales_item["last_sale_at"] if sales_item else None
+
         actual_debt = total_debt_amount - total_payments
-        loyalty_level = _loyalty_level(total_debt_amount, tx_count, actual_debt)
+        loyalty_level = _loyalty_level(total_spent, purchase_count, actual_debt)
+        loyalty_points = int(total_spent // Decimal("10"))
+        last_activity = last_transaction
+        if last_purchase_at and (last_activity is None or last_purchase_at > last_activity):
+            last_activity = last_purchase_at
         
         result.append({
             "id": creditor.id,
@@ -111,10 +191,14 @@ async def get_creditors(
             "email": creditor.email,
             "total_debt": float(creditor.total_debt),
             "actual_debt": float(actual_debt),
-            "total_purchases": float(total_debt_amount),
+            "total_purchases": float(total_spent),
             "total_payments": float(total_payments),
-            "transaction_count": tx_count,
-            "last_transaction_at": last_transaction.isoformat() if last_transaction else None,
+            "transaction_count": purchase_count,
+            "purchase_count": purchase_count,
+            "credit_transaction_count": tx_count,
+            "loyalty_points": loyalty_points,
+            "last_transaction_at": last_activity.isoformat() if last_activity else None,
+            "last_purchase_at": last_purchase_at.isoformat() if last_purchase_at else None,
             "loyalty_level": loyalty_level,
             "notes": creditor.notes,
             "created_at": creditor.created_at.isoformat(),
@@ -151,11 +235,21 @@ async def get_creditor(
         )
         .order_by(CreditTransaction.created_at.desc())
     ).all()
+    sales_aggregate = _sales_aggregate_by_customer_name(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        active_branch_id=active_branch_id,
+    )
     
     total_debt_amount = sum((t.amount for t in transactions if t.transaction_type == "debt"), Decimal(0))
     total_payments = sum((t.amount for t in transactions if t.transaction_type == "payment"), Decimal(0))
     actual_debt = total_debt_amount - total_payments
-    loyalty_level = _loyalty_level(total_debt_amount, len(transactions), actual_debt)
+    sales_key = _normalize_customer_name(creditor.name)
+    sales_item = sales_aggregate.get(sales_key, None)
+    purchase_count = int(sales_item["sale_count"]) if sales_item else 0
+    total_spent = Decimal(sales_item["total_spent"]) if sales_item else Decimal(0)
+    loyalty_level = _loyalty_level(total_spent, purchase_count, actual_debt)
+    loyalty_points = int(total_spent // Decimal("10"))
 
     return {
         "id": creditor.id,
@@ -164,9 +258,11 @@ async def get_creditor(
         "email": creditor.email,
         "total_debt": float(creditor.total_debt),
         "actual_debt": float(actual_debt),
-        "total_purchases": float(total_debt_amount),
+        "total_purchases": float(total_spent),
         "total_payments": float(total_payments),
         "transaction_count": len(transactions),
+        "purchase_count": purchase_count,
+        "loyalty_points": loyalty_points,
         "loyalty_level": loyalty_level,
         "notes": creditor.notes,
         "created_at": creditor.created_at.isoformat(),
@@ -407,10 +503,21 @@ async def get_creditor_statement(
         )
         .order_by(CreditTransaction.created_at.asc(), CreditTransaction.id.asc())
     ).all()
+    sales_aggregate = _sales_aggregate_by_customer_name(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        active_branch_id=active_branch_id,
+    )
 
-    total_purchases = sum((t.amount for t in transactions if t.transaction_type == "debt"), Decimal(0))
+    total_credit_purchases = sum((t.amount for t in transactions if t.transaction_type == "debt"), Decimal(0))
     total_payments = sum((t.amount for t in transactions if t.transaction_type == "payment"), Decimal(0))
-    outstanding = total_purchases - total_payments
+    outstanding = total_credit_purchases - total_payments
+
+    sales_key = _normalize_customer_name(creditor.name)
+    sales_item = sales_aggregate.get(sales_key, None)
+    purchase_count = int(sales_item["sale_count"]) if sales_item else 0
+    total_spent = Decimal(sales_item["total_spent"]) if sales_item else Decimal(0)
+    loyalty_points = int(total_spent // Decimal("10"))
 
     return {
         "customer": {
@@ -422,11 +529,14 @@ async def get_creditor_statement(
             "created_at": creditor.created_at.isoformat(),
         },
         "summary": {
-            "total_purchases": float(total_purchases),
+            "total_purchases": float(total_spent),
+            "total_credit_purchases": float(total_credit_purchases),
             "total_payments": float(total_payments),
             "outstanding": float(outstanding),
-            "transaction_count": len(transactions),
-            "loyalty_level": _loyalty_level(total_purchases, len(transactions), outstanding),
+            "transaction_count": purchase_count,
+            "credit_transaction_count": len(transactions),
+            "loyalty_points": loyalty_points,
+            "loyalty_level": _loyalty_level(total_spent, purchase_count, outstanding),
             "generated_at": datetime.utcnow().isoformat(),
         },
         "transactions": [

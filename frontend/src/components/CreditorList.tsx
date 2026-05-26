@@ -11,7 +11,11 @@ interface Creditor {
   total_purchases: number;
   total_payments: number;
   transaction_count: number;
+  purchase_count?: number;
+  credit_transaction_count?: number;
+  loyalty_points?: number;
   last_transaction_at: string | null;
+  last_purchase_at?: string | null;
   loyalty_level: "Bronze" | "Silver" | "Gold" | "VIP";
   notes: string | null;
   created_at: string;
@@ -58,6 +62,19 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
     const n = Number(amount);
     if (!Number.isFinite(n)) return 0;
     return Math.max(0, n);
+  };
+
+  const purchasesFor = (creditor: Creditor) => {
+    const value = Number(creditor.purchase_count ?? creditor.transaction_count ?? 0);
+    return Number.isFinite(value) ? Math.max(0, value) : 0;
+  };
+
+  const loyaltyPointsFor = (creditor: Creditor) => {
+    const points = Number(creditor.loyalty_points);
+    if (Number.isFinite(points)) return Math.max(0, Math.round(points));
+    const derived = Number(creditor.total_purchases || 0);
+    if (!Number.isFinite(derived)) return 0;
+    return Math.max(0, Math.floor(derived / 10));
   };
 
   const filteredCreditors = creditors.filter(
@@ -196,6 +213,12 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
             {formatCurrency(creditors.reduce((sum, c) => sum + Number(c.total_payments || 0), 0))}
           </p>
         </div>
+        <div style={{ backgroundColor: "white", border: "1px solid #e5e7eb", borderRadius: 8, padding: 16 }}>
+          <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Total Loyalty Points</p>
+          <p style={{ margin: "8px 0 0", fontSize: 24, fontWeight: 700, color: "#7c3aed" }}>
+            {creditors.reduce((sum, c) => sum + loyaltyPointsFor(c), 0)}
+          </p>
+        </div>
       </div>
 
       {/* Customers Table */}
@@ -209,7 +232,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
           WebkitOverflowScrolling: "touch",
         }}
       >
-        <table style={{ width: "100%", minWidth: 920, borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", minWidth: 980, borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ backgroundColor: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
               <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
@@ -222,7 +245,10 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
                 Outstanding Balance
               </th>
               <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
-                Transactions
+                Purchases
+              </th>
+              <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
+                Points
               </th>
               <th style={{ padding: "12px 16px", textAlign: "center", fontSize: 12, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
                 Loyalty
@@ -238,7 +264,7 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
           <tbody>
             {sortedCreditors.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>
+                <td colSpan={8} style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>
                   {searchTerm ? "No customers found matching your search." : "No customers yet. Click 'Add Customer' to get started."}
                 </td>
               </tr>
@@ -295,7 +321,22 @@ export default function CreditorList({ onSelectCreditor, onAddCreditor, refreshT
                         fontWeight: 600,
                       }}
                     >
-                      {creditor.transaction_count}
+                      {purchasesFor(creditor)}
+                    </span>
+                  </td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        padding: "4px 12px",
+                        backgroundColor: "#f5f3ff",
+                        color: "#6d28d9",
+                        borderRadius: 12,
+                        fontSize: 13,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {loyaltyPointsFor(creditor)}
                     </span>
                   </td>
                   <td style={{ padding: "12px 16px", textAlign: "center" }}>

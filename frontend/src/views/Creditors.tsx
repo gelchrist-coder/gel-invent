@@ -13,7 +13,11 @@ interface Creditor {
   total_purchases: number;
   total_payments: number;
   transaction_count: number;
+  purchase_count?: number;
+  credit_transaction_count?: number;
+  loyalty_points?: number;
   last_transaction_at: string | null;
+  last_purchase_at?: string | null;
   loyalty_level: "Bronze" | "Silver" | "Gold" | "VIP";
   notes: string | null;
   created_at: string;

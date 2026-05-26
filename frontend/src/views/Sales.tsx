@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
-import { fetchSalesCached, createSalesBulk, deleteSale, fetchProductsCached, getCachedProducts, getCachedSales, sendSalesReceiptEmail } from "../api";
+import { assignSaleCustomer, fetchSalesCached, createSalesBulk, deleteSale, fetchProductsCached, getCachedProducts, getCachedSales, sendSalesReceiptEmail } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
@@ -26,6 +26,8 @@ const SALES_PERIOD_LABEL: Record<"all" | "day" | "week" | "month", string> = {
   month: "This month",
 };
 
+const WALK_IN_NAMES = new Set(["walk in", "walk in customer", "walkin", "guest", "anonymous"]);
+
 function normalizeSalePaymentMethod(paymentMethod: string | null | undefined): string {
   const normalized = String(paymentMethod ?? "").trim().toLowerCase();
   return normalized || "unknown";
@@ -43,6 +45,13 @@ function formatPaymentLabel(paymentMethod: string): string {
 
 function toCurrency(value: number): string {
   return `GHS ${value.toFixed(2)}`;
+}
+
+function isWalkInCustomerName(name: string | null | undefined): boolean {
+  const raw = String(name || "").trim();
+  if (!raw) return true;
+  const normalized = raw.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+  return WALK_IN_NAMES.has(normalized);
 }
 
 export default function Sales() {
@@ -68,6 +77,13 @@ export default function Sales() {
   const [salesSearchTerm, setSalesSearchTerm] = useState("");
   const [salesPaymentFilter, setSalesPaymentFilter] = useState("all");
   const [salesRowsLimit, setSalesRowsLimit] = useState<number>(5);
+  const [assignCustomerSale, setAssignCustomerSale] = useState<Sale | null>(null);
+  const [assignCustomerName, setAssignCustomerName] = useState("");
+  const [assignCustomerPhone, setAssignCustomerPhone] = useState("");
+  const [assignCustomerEmail, setAssignCustomerEmail] = useState("");
+  const [assignCustomerNotes, setAssignCustomerNotes] = useState("");
+  const [assignCustomerError, setAssignCustomerError] = useState<string | null>(null);
+  const [assigningCustomer, setAssigningCustomer] = useState(false);
   const hasLoadedOnce = useRef(false);
 
   // Get user and business info for receipt
@@ -484,6 +500,56 @@ export default function Sales() {
       await loadData(); // Refresh sales and products (to update stock)
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to delete sale");
+    }
+  };
+
+  const closeAssignCustomerModal = () => {
+    setAssignCustomerSale(null);
+    setAssignCustomerName("");
+    setAssignCustomerPhone("");
+    setAssignCustomerEmail("");
+    setAssignCustomerNotes("");
+    setAssignCustomerError(null);
+  };
+
+  const openAssignCustomerModal = (sale: Sale) => {
+    setAssignCustomerSale(sale);
+    setAssignCustomerName(isWalkInCustomerName(sale.customer_name) ? "" : String(sale.customer_name || ""));
+    setAssignCustomerPhone("");
+    setAssignCustomerEmail("");
+    setAssignCustomerNotes("");
+    setAssignCustomerError(null);
+  };
+
+  const submitAssignCustomer = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!assignCustomerSale) return;
+
+    const customerName = assignCustomerName.trim();
+    const customerPhone = assignCustomerPhone.trim();
+    const customerEmail = assignCustomerEmail.trim();
+    const notes = assignCustomerNotes.trim();
+
+    if (!customerName) {
+      setAssignCustomerError("Customer name is required.");
+      return;
+    }
+
+    setAssigningCustomer(true);
+    setAssignCustomerError(null);
+    try {
+      await assignSaleCustomer(assignCustomerSale.id, {
+        customer_name: customerName,
+        phone: customerPhone || undefined,
+        email: customerEmail || undefined,
+        notes: notes || undefined,
+      });
+      closeAssignCustomerModal();
+      await loadData();
+    } catch (err) {
+      setAssignCustomerError(err instanceof Error ? err.message : "Failed to assign customer.");
+    } finally {
+      setAssigningCustomer(false);
     }
   };
 
@@ -924,6 +990,7 @@ export default function Sales() {
               onRefresh={loadData}
               allowDelete={canDeleteSales}
               onPrintReceipt={reprintSaleReceipt}
+              onConvertWalkIn={openAssignCustomerModal}
             />
           </>
         )}
@@ -936,6 +1003,143 @@ export default function Sales() {
         </div>
         <ReturnsList products={products} />
       </div>
+
+      {/* Assign Customer Modal */}
+      {assignCustomerSale && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(15, 23, 42, 0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1100,
+            padding: 20,
+          }}
+          onClick={() => {
+            if (assigningCustomer) return;
+            closeAssignCustomerModal();
+          }}
+        >
+          <form
+            onSubmit={submitAssignCustomer}
+            style={{
+              width: "100%",
+              maxWidth: 460,
+              background: "white",
+              borderRadius: 12,
+              boxShadow: "0 24px 56px rgba(15, 23, 42, 0.3)",
+              border: "1px solid #e5e7eb",
+              overflow: "hidden",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{ padding: "16px 18px", borderBottom: "1px solid #e5e7eb", background: "#f8fafc" }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#0f172a" }}>Assign Customer to Sale</h3>
+              <p style={{ margin: "6px 0 0", fontSize: 12, color: "#64748b" }}>
+                Sale #{assignCustomerSale.id} · {productById.get(assignCustomerSale.product_id)?.name || `Product #${assignCustomerSale.product_id}`} · {toCurrency(Number(assignCustomerSale.total_price || 0))}
+              </p>
+            </div>
+
+            <div style={{ display: "grid", gap: 10, padding: "16px 18px" }}>
+              <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 600, color: "#334155" }}>
+                Customer Name
+                <input
+                  type="text"
+                  value={assignCustomerName}
+                  onChange={(event) => setAssignCustomerName(event.target.value)}
+                  placeholder="Enter customer name"
+                  className="input"
+                  maxLength={255}
+                  required
+                  disabled={assigningCustomer}
+                />
+              </label>
+
+              <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 600, color: "#334155" }}>
+                Phone (optional)
+                <input
+                  type="text"
+                  value={assignCustomerPhone}
+                  onChange={(event) => setAssignCustomerPhone(event.target.value)}
+                  placeholder="e.g. 024 000 0000"
+                  className="input"
+                  maxLength={50}
+                  disabled={assigningCustomer}
+                />
+              </label>
+
+              <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 600, color: "#334155" }}>
+                Email (optional)
+                <input
+                  type="email"
+                  value={assignCustomerEmail}
+                  onChange={(event) => setAssignCustomerEmail(event.target.value)}
+                  placeholder="customer@email.com"
+                  className="input"
+                  maxLength={255}
+                  disabled={assigningCustomer}
+                />
+              </label>
+
+              <label style={{ display: "grid", gap: 4, fontSize: 12, fontWeight: 600, color: "#334155" }}>
+                Note (optional)
+                <textarea
+                  value={assignCustomerNotes}
+                  onChange={(event) => setAssignCustomerNotes(event.target.value)}
+                  placeholder="Add context, e.g. rushed checkout"
+                  rows={3}
+                  style={{ resize: "vertical", minHeight: 78 }}
+                  className="input"
+                  disabled={assigningCustomer}
+                />
+              </label>
+
+              {assignCustomerError && (
+                <p style={{ margin: 0, fontSize: 12, color: "#b91c1c" }}>{assignCustomerError}</p>
+              )}
+            </div>
+
+            <div style={{ padding: "12px 18px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button
+                type="button"
+                onClick={closeAssignCustomerModal}
+                disabled={assigningCustomer}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  color: "#374151",
+                  cursor: assigningCustomer ? "not-allowed" : "pointer",
+                  opacity: assigningCustomer ? 0.65 : 1,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={assigningCustomer}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 6,
+                  border: "none",
+                  background: assigningCustomer ? "#94a3b8" : "#111827",
+                  color: "white",
+                  fontWeight: 700,
+                  cursor: assigningCustomer ? "not-allowed" : "pointer",
+                }}
+              >
+                {assigningCustomer ? "Saving..." : "Assign Customer"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Confirmation Modal */}
       {showConfirmation && pendingSales.length > 0 && (
@@ -1361,6 +1565,7 @@ export default function Sales() {
                 onRefresh={loadData}
                 allowDelete={canDeleteSales}
                 onPrintReceipt={reprintSaleReceipt}
+                onConvertWalkIn={openAssignCustomerModal}
               />
             </div>
           </div>
