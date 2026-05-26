@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
-import { createPurchaseOrder, createPurchaseReturn, createSupplier, createSupplierPayment, deactivateSupplier, fetchPurchaseReturnsCached, fetchPurchasesCached, fetchSupplierDetail, fetchSupplierPaymentsCached, fetchSuppliersCached, supportsPurchaseReturns, updateSupplier } from "../api";
+import { createPurchaseOrder, createPurchaseReturn, createSupplier, createSupplierPayment, fetchPurchaseReturnsCached, fetchPurchasesCached, fetchSupplierPaymentsCached, fetchSuppliersCached, supportsPurchaseReturns } from "../api";
 import ProductSearchSelect from "./ProductSearchSelect";
-import type { Product, Purchase, PurchaseReturn, Supplier, SupplierDetail, SupplierPayment } from "../types";
+import type { Product, Purchase, PurchaseReturn, Supplier, SupplierPayment } from "../types";
 
 type Props = {
   products: Product[];
@@ -14,7 +14,6 @@ type Props = {
 
 const emptySupplierForm = {
   name: "",
-  contact_person: "",
   phone: "",
   email: "",
   address: "",
@@ -83,15 +82,14 @@ function formatCurrency(value: number): string {
 
 function getSupplierMatchRank(supplier: Supplier, query: string): number {
   const name = supplier.name.toLowerCase();
-  const contactPerson = (supplier.contact_person || "").toLowerCase();
   const phone = (supplier.phone || "").toLowerCase();
   const email = (supplier.email || "").toLowerCase();
 
   if (name === query) return 0;
   if (name.startsWith(query)) return 1;
   if (name.includes(query)) return 2;
-  if (contactPerson.startsWith(query)) return 3;
-  if (contactPerson.includes(query) || phone.includes(query) || email.includes(query)) return 4;
+  if (phone.startsWith(query)) return 3;
+  if (phone.includes(query) || email.includes(query)) return 4;
   return Number.POSITIVE_INFINITY;
 }
 
@@ -126,17 +124,6 @@ function getPurchaseReturnDateValue(purchaseReturn: PurchaseReturn): number {
   const raw = purchaseReturn.return_date || purchaseReturn.created_at;
   const timestamp = new Date(raw).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-function getSupplierFormValues(supplier: Supplier) {
-  return {
-    name: supplier.name || "",
-    contact_person: supplier.contact_person || "",
-    phone: supplier.phone || "",
-    email: supplier.email || "",
-    address: supplier.address || "",
-    notes: supplier.notes || "",
-  };
 }
 
 type SupplierNameComboboxProps = {
@@ -386,7 +373,6 @@ function SupplierNameCombobox({
             </span>
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#64748b" }}>
-            {selectedSupplier.contact_person ? <span>Contact {selectedSupplier.contact_person}</span> : null}
             {selectedSupplier.phone ? <span>{selectedSupplier.phone}</span> : null}
             {selectedSupplier.email ? <span>{selectedSupplier.email}</span> : null}
             <span>Outstanding {formatCurrency(Number(selectedSupplier.outstanding_balance || 0))}</span>
@@ -460,7 +446,6 @@ function SupplierNameCombobox({
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#64748b" }}>
-                    {supplier.contact_person ? <span>{supplier.contact_person}</span> : null}
                     {supplier.phone ? <span>{supplier.phone}</span> : null}
                     {supplier.email ? <span>{supplier.email}</span> : null}
                   </div>
@@ -604,10 +589,6 @@ export default function PurchasingPanel({
   const [payments, setPayments] = useState<SupplierPayment[]>([]);
   const [purchaseReturns, setPurchaseReturns] = useState<PurchaseReturn[]>([]);
   const [purchaseReturnsSupported, setPurchaseReturnsSupported] = useState(false);
-  const [supplierDetail, setSupplierDetail] = useState<SupplierDetail | null>(null);
-  const [loadingSupplierDetail, setLoadingSupplierDetail] = useState(false);
-  const [editingSupplierId, setEditingSupplierId] = useState<number | null>(null);
-  const [supplierEditForm, setSupplierEditForm] = useState(emptySupplierForm);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   const [orderItems, setOrderItems] = useState<PurchaseOrderLine[]>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
@@ -645,8 +626,6 @@ export default function PurchasingPanel({
   const [submittingSupplier, setSubmittingSupplier] = useState(false);
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [submittingReturn, setSubmittingReturn] = useState(false);
-  const [savingSupplierDetail, setSavingSupplierDetail] = useState(false);
-  const [deactivatingSupplierId, setDeactivatingSupplierId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadWarning, setLoadWarning] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -801,7 +780,7 @@ export default function PurchasingPanel({
     }
 
     return rankedSuppliers.filter((supplier) => {
-      return [supplier.name, supplier.contact_person, supplier.phone, supplier.email]
+      return [supplier.name, supplier.phone, supplier.email]
         .map((value) => normalizeText(value || ""))
         .some((value) => value.includes(normalizedSupplierSearch));
     });
@@ -1049,11 +1028,6 @@ export default function PurchasingPanel({
     [suppliers],
   );
 
-  const selectedSupplierRecord = useMemo(
-    () => suppliers.find((supplier) => supplier.id === supplierDetail?.supplier.id) ?? supplierDetail?.supplier ?? null,
-    [supplierDetail, suppliers],
-  );
-
   const paymentOrdersForSupplier = useMemo(
     () => purchaseOrders.filter((order) => Number(order.amount_due || 0) > 0 && (paymentSupplierId == null || resolveSupplierIdForOrder(order) === paymentSupplierId)),
     [paymentSupplierId, purchaseOrders, resolveSupplierIdForOrder],
@@ -1137,18 +1111,6 @@ export default function PurchasingPanel({
     },
     [returnQuantityValue, selectedReturnPurchase],
   );
-  const supplierReturnsForDetail = useMemo(() => {
-    if (!selectedSupplierRecord) {
-      return [];
-    }
-
-    return purchaseReturns.filter((purchaseReturn) => {
-      if (purchaseReturn.supplier_id != null && purchaseReturn.supplier_id === selectedSupplierRecord.id) {
-        return true;
-      }
-      return purchaseReturn.supplier_name.toLowerCase() === selectedSupplierRecord.name.toLowerCase();
-    });
-  }, [purchaseReturns, selectedSupplierRecord]);
 
   useEffect(() => {
     if (paymentSupplierId == null) {
@@ -1237,26 +1199,6 @@ export default function PurchasingPanel({
       sectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   };
-
-  const loadSupplierDetail = useCallback(async (supplierId: number) => {
-    setLoadingSupplierDetail(true);
-    try {
-      const detail = await fetchSupplierDetail(supplierId);
-      setSupplierDetail(detail);
-      setSupplierEditForm(getSupplierFormValues(detail.supplier));
-      return detail;
-    } finally {
-      setLoadingSupplierDetail(false);
-    }
-  }, []);
-
-  const refreshOpenSupplierDetail = useCallback(async (supplierId?: number | null) => {
-    const targetId = supplierId ?? supplierDetail?.supplier.id ?? null;
-    if (targetId == null) {
-      return null;
-    }
-    return loadSupplierDetail(targetId);
-  }, [loadSupplierDetail, supplierDetail?.supplier.id]);
 
   const focusPurchaseSupplier = (supplier: Supplier) => {
     setSelectedSupplierId(supplier.id);
@@ -1398,26 +1340,6 @@ export default function PurchasingPanel({
     scrollSectionIntoView(returnSectionRef);
   };
 
-  const openReturnForSupplier = (supplier: Supplier) => {
-    const targetOrder = returnableOrders.find((order) => resolveSupplierIdForOrder(order) === supplier.id);
-    if (!targetOrder || !targetOrder.nextReturnPurchase) {
-      setNotice(`No returnable purchases found for ${supplier.name}`);
-      return;
-    }
-    openReturnForPurchase(targetOrder.nextReturnPurchase);
-  };
-
-  const openSupplierDetail = async (supplier: Supplier) => {
-    setError(null);
-    setNotice(null);
-    setEditingSupplierId(null);
-    try {
-      await loadSupplierDetail(supplier.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load supplier detail");
-    }
-  };
-
   const handlePaymentSupplierChange = (supplierId: number | null) => {
     setPaymentSupplierId(supplierId);
     if (supplierId == null) {
@@ -1478,8 +1400,8 @@ export default function PurchasingPanel({
       return;
     }
 
-    if (!supplierForm.contact_person.trim()) {
-      setError("Contact person is required");
+    if (!supplierForm.phone.trim()) {
+      setError("Phone number is required");
       return;
     }
 
@@ -1489,7 +1411,7 @@ export default function PurchasingPanel({
     try {
       const created = await createSupplier({
         name: supplierForm.name.trim(),
-        contact_person: trimOrUndefined(supplierForm.contact_person),
+        phone: trimOrUndefined(supplierForm.phone),
       });
       setSupplierForm(emptySupplierForm);
       setManualSupplierName(created.name);
@@ -1498,7 +1420,6 @@ export default function PurchasingPanel({
       setShowAllSuppliers(false);
       setNotice(`Supplier ${created.name} added`);
       await loadPanelData();
-      await loadSupplierDetail(created.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create supplier");
     } finally {
@@ -1569,7 +1490,6 @@ export default function PurchasingPanel({
       setExpiryDate("");
       setNotice(`Purchase order ${purchaseOrder.order_number} recorded with ${purchaseOrder.line_count} item${purchaseOrder.line_count === 1 ? "" : "s"} and status ${getStatusMeta(purchaseOrder.payment_status).label.toLowerCase()}`);
       await loadPanelData();
-      await refreshOpenSupplierDetail(purchaseOrder.supplier_id ?? selectedSupplierId);
       if (onPurchaseRecorded) {
         await onPurchaseRecorded();
       }
@@ -1618,7 +1538,6 @@ export default function PurchasingPanel({
       setNotice(`Recorded ${formatCurrency(Number(payment.amount || 0))} payment for ${payment.supplier_name}${payment.order_number ? ` on ${payment.order_number}` : ""}`);
       resetPaymentForm();
       await loadPanelData();
-      await refreshOpenSupplierDetail(payment.supplier_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to record supplier payment");
     } finally {
@@ -1664,7 +1583,6 @@ export default function PurchasingPanel({
       );
       resetReturnForm();
       await loadPanelData();
-      await refreshOpenSupplierDetail(purchaseReturn.supplier_id);
       if (onPurchaseRecorded) {
         await onPurchaseRecorded();
       }
@@ -1672,71 +1590,6 @@ export default function PurchasingPanel({
       setError(err instanceof Error ? err.message : "Failed to record supplier return");
     } finally {
       setSubmittingReturn(false);
-    }
-  };
-
-  const handleSaveSupplierDetail = async () => {
-    if (!supplierDetail) {
-      return;
-    }
-
-    if (!supplierEditForm.name.trim()) {
-      setError("Supplier name is required");
-      return;
-    }
-
-    setSavingSupplierDetail(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const updatedSupplier = await updateSupplier(supplierDetail.supplier.id, {
-        name: supplierEditForm.name.trim(),
-        contact_person: trimOrUndefined(supplierEditForm.contact_person),
-        phone: trimOrUndefined(supplierEditForm.phone),
-        email: trimOrUndefined(supplierEditForm.email),
-        address: trimOrUndefined(supplierEditForm.address),
-        notes: trimOrUndefined(supplierEditForm.notes),
-      });
-      setNotice(`Supplier ${updatedSupplier.name} updated`);
-      setEditingSupplierId(null);
-      await loadPanelData();
-      await loadSupplierDetail(updatedSupplier.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update supplier");
-    } finally {
-      setSavingSupplierDetail(false);
-    }
-  };
-
-  const handleDeactivateSupplier = async () => {
-    if (!supplierDetail) {
-      return;
-    }
-
-    const supplier = supplierDetail.supplier;
-    if (!confirm(`Deactivate ${supplier.name}? This keeps purchase history but removes the supplier from active purchasing lists.`)) {
-      return;
-    }
-
-    setDeactivatingSupplierId(supplier.id);
-    setError(null);
-    setNotice(null);
-    try {
-      const result = await deactivateSupplier(supplier.id);
-      if (selectedSupplierId === supplier.id) {
-        setSelectedSupplierId(null);
-      }
-      if (paymentSupplierId === supplier.id) {
-        resetPaymentForm();
-      }
-      setSupplierDetail(null);
-      setEditingSupplierId(null);
-      setNotice(result.message);
-      await loadPanelData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to deactivate supplier");
-    } finally {
-      setDeactivatingSupplierId(null);
     }
   };
 
@@ -1981,22 +1834,6 @@ export default function PurchasingPanel({
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button
                     type="button"
-                    onClick={() => void openSupplierDetail(matchedPurchaseSupplier)}
-                    style={{
-                      padding: "7px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #1d4ed8",
-                      background: "#1d4ed8",
-                      color: "#ffffff",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    View Details
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => {
                       setSelectedSupplierId(null);
                       setManualSupplierName("");
@@ -2108,8 +1945,8 @@ export default function PurchasingPanel({
                     style={{
                       padding: "14px 16px",
                       borderRadius: 14,
-                      border: supplier.id === supplierDetail?.supplier.id ? "1px solid #0f172a" : supplier.id === selectedSupplierId ? "1px solid #2563eb" : "1px solid #e2e8f0",
-                      background: supplier.id === supplierDetail?.supplier.id ? "#f8fafc" : supplier.id === selectedSupplierId ? "#eff6ff" : "#ffffff",
+                      border: supplier.id === selectedSupplierId ? "1px solid #2563eb" : "1px solid #e2e8f0",
+                      background: supplier.id === selectedSupplierId ? "#eff6ff" : "#ffffff",
                       display: "grid",
                       gap: 12,
                     }}
@@ -2118,26 +1955,10 @@ export default function PurchasingPanel({
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{supplier.name}</div>
                         <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                          {supplier.contact_person || supplier.phone || supplier.email || "No contact details yet"}
+                          {supplier.phone || supplier.email || "No phone number added"}
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button
-                          type="button"
-                          onClick={() => void openSupplierDetail(supplier)}
-                          style={{
-                            padding: "7px 10px",
-                            borderRadius: 8,
-                            border: "1px solid #0f172a",
-                            background: supplier.id === supplierDetail?.supplier.id ? "#0f172a" : "white",
-                            color: supplier.id === supplierDetail?.supplier.id ? "#ffffff" : "#0f172a",
-                            fontSize: 12,
-                            fontWeight: 700,
-                            cursor: "pointer",
-                          }}
-                        >
-                          View Details
-                        </button>
                         <button
                           type="button"
                           onClick={() => focusPurchaseSupplier(supplier)}
@@ -2721,7 +2542,7 @@ export default function PurchasingPanel({
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
               <div>
                 <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800, color: "#0f172a" }}>Add Supplier</h3>
-                <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>Save supplier name and contact person, then continue the purchase workflow.</p>
+                <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>Save supplier name and phone number, then continue the purchase workflow.</p>
               </div>
               <button
                 type="button"
@@ -2755,12 +2576,12 @@ export default function PurchasingPanel({
             </label>
 
             <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Contact Person</span>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Phone Number</span>
               <input
                 className="input"
-                value={supplierForm.contact_person}
-                onChange={(e) => setSupplierForm((prev) => ({ ...prev, contact_person: e.target.value }))}
-                placeholder="e.g. Kwame Mensah"
+                value={supplierForm.phone}
+                onChange={(e) => setSupplierForm((prev) => ({ ...prev, phone: e.target.value }))}
+                placeholder="e.g. 024 123 4567"
                 disabled={submittingSupplier}
               />
             </label>
@@ -2796,367 +2617,6 @@ export default function PurchasingPanel({
         </div>
       ) : null}
 
-      <div className="card" style={{ marginBottom: 0 }}>
-        <div style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Supplier Detail</h3>
-          <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-            Inspect supplier activity, edit contact details, and deactivate suppliers once their balances are settled.
-          </p>
-        </div>
-
-        {loadingSupplierDetail ? (
-          <p style={{ margin: 0, color: "#6b7280" }}>Loading supplier detail...</p>
-        ) : !supplierDetail || !selectedSupplierRecord ? (
-          <p style={{ margin: 0, color: "#6b7280" }}>Select a supplier from the directory to view details and manage it.</p>
-        ) : (
-          <div style={{ display: "grid", gap: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-              <div>
-                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  <h4 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#0f172a" }}>{selectedSupplierRecord.name}</h4>
-                  <span
-                    style={{
-                      padding: "4px 8px",
-                      borderRadius: 999,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      border: selectedSupplierRecord.is_active ? "1px solid #86efac" : "1px solid #fca5a5",
-                      background: selectedSupplierRecord.is_active ? "#dcfce7" : "#fee2e2",
-                      color: selectedSupplierRecord.is_active ? "#166534" : "#b91c1c",
-                    }}
-                  >
-                    {selectedSupplierRecord.is_active ? "Active" : "Inactive"}
-                  </span>
-                </div>
-                <div style={{ marginTop: 6, fontSize: 13, color: "#64748b" }}>
-                  {selectedSupplierRecord.contact_person || selectedSupplierRecord.phone || selectedSupplierRecord.email || "No contact details added yet"}
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  onClick={() => focusPurchaseSupplier(selectedSupplierRecord)}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #d1d5db",
-                    background: "white",
-                    color: "#1f2937",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  Use for Purchase
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openPaymentForSupplier(selectedSupplierRecord)}
-                  disabled={Number(selectedSupplierRecord.unpaid_purchases_count || 0) === 0}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #2563eb",
-                    background: Number(selectedSupplierRecord.unpaid_purchases_count || 0) === 0 ? "#e5e7eb" : "#2563eb",
-                    color: Number(selectedSupplierRecord.unpaid_purchases_count || 0) === 0 ? "#6b7280" : "#ffffff",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: Number(selectedSupplierRecord.unpaid_purchases_count || 0) === 0 ? "not-allowed" : "pointer",
-                  }}
-                >
-                  Record Payment
-                </button>
-                {purchaseReturnsSupported ? (
-                  <button
-                    type="button"
-                    onClick={() => openReturnForSupplier(selectedSupplierRecord)}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      border: "1px solid #b45309",
-                      background: "white",
-                      color: "#9a3412",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Return to Supplier
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (editingSupplierId === selectedSupplierRecord.id) {
-                      setEditingSupplierId(null);
-                      setSupplierEditForm(getSupplierFormValues(selectedSupplierRecord));
-                      return;
-                    }
-                    setEditingSupplierId(selectedSupplierRecord.id);
-                    setSupplierEditForm(getSupplierFormValues(selectedSupplierRecord));
-                  }}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #0f172a",
-                    background: editingSupplierId === selectedSupplierRecord.id ? "#0f172a" : "white",
-                    color: editingSupplierId === selectedSupplierRecord.id ? "#ffffff" : "#0f172a",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  {editingSupplierId === selectedSupplierRecord.id ? "Cancel Edit" : "Edit Supplier"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleDeactivateSupplier()}
-                  disabled={deactivatingSupplierId === selectedSupplierRecord.id}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #dc2626",
-                    background: deactivatingSupplierId === selectedSupplierRecord.id ? "#fecaca" : "white",
-                    color: "#b91c1c",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: deactivatingSupplierId === selectedSupplierRecord.id ? "not-allowed" : "pointer",
-                  }}
-                >
-                  {deactivatingSupplierId === selectedSupplierRecord.id ? "Deactivating..." : "Deactivate Supplier"}
-                </button>
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-              <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Total Purchased</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>{formatCurrency(Number(selectedSupplierRecord.total_purchased || 0))}</div>
-              </div>
-              <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Total Paid</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: "#1d4ed8" }}>{formatCurrency(Number(selectedSupplierRecord.total_paid || 0))}</div>
-              </div>
-              <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Outstanding</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: Number(selectedSupplierRecord.outstanding_balance || 0) > 0 ? "#b45309" : "#166534" }}>
-                  {formatCurrency(Number(selectedSupplierRecord.outstanding_balance || 0))}
-                </div>
-              </div>
-              <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Open Invoices</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: Number(selectedSupplierRecord.unpaid_purchases_count || 0) > 0 ? "#b91c1c" : "#0f172a" }}>
-                  {Number(selectedSupplierRecord.unpaid_purchases_count || 0)}
-                </div>
-              </div>
-            </div>
-
-            {editingSupplierId === selectedSupplierRecord.id ? (
-              <div style={{ display: "grid", gap: 12, padding: 16, borderRadius: 12, border: "1px solid #dbe5f2", background: "#f8fbff" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-                  <label>
-                    <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier Name</span>
-                    <input className="input" value={supplierEditForm.name} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, name: e.target.value }))} />
-                  </label>
-                  <label>
-                    <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Contact Person</span>
-                    <input className="input" value={supplierEditForm.contact_person} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, contact_person: e.target.value }))} />
-                  </label>
-                  <label>
-                    <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Phone</span>
-                    <input className="input" value={supplierEditForm.phone} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, phone: e.target.value }))} />
-                  </label>
-                  <label>
-                    <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Email</span>
-                    <input className="input" value={supplierEditForm.email} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, email: e.target.value }))} />
-                  </label>
-                </div>
-                <label>
-                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Address</span>
-                  <textarea className="textarea" rows={2} value={supplierEditForm.address} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, address: e.target.value }))} />
-                </label>
-                <label>
-                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Notes</span>
-                  <textarea className="textarea" rows={3} value={supplierEditForm.notes} onChange={(e) => setSupplierEditForm((prev) => ({ ...prev, notes: e.target.value }))} />
-                </label>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingSupplierId(null);
-                      setSupplierEditForm(getSupplierFormValues(selectedSupplierRecord));
-                    }}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: "white",
-                      color: "#334155",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button type="button" className="button" onClick={() => void handleSaveSupplierDetail()} disabled={savingSupplierDetail}>
-                    {savingSupplierDetail ? "Saving..." : "Save Supplier"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Contact Person</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedSupplierRecord.contact_person || "-"}</div>
-                </div>
-                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Phone</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedSupplierRecord.phone || "-"}</div>
-                </div>
-                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Email</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedSupplierRecord.email || "-"}</div>
-                </div>
-                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff" }}>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Last Payment</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatDate(selectedSupplierRecord.last_payment_date)}</div>
-                </div>
-                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff", gridColumn: "1 / -1" }}>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Address</div>
-                  <div style={{ fontSize: 14, color: "#0f172a" }}>{selectedSupplierRecord.address || "No address recorded"}</div>
-                </div>
-                <div style={{ padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#ffffff", gridColumn: "1 / -1" }}>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>Notes</div>
-                  <div style={{ fontSize: 14, color: "#0f172a", whiteSpace: "pre-wrap" }}>{selectedSupplierRecord.notes || "No notes recorded"}</div>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 20, alignItems: "start" }}>
-              <div style={{ overflowX: "auto" }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Supplier Purchases</div>
-                {supplierDetail.purchases.length === 0 ? (
-                  <p style={{ margin: 0, color: "#6b7280" }}>No purchases recorded for this supplier yet.</p>
-                ) : (
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
-                    <thead>
-                      <tr style={{ background: "#f8fafc" }}>
-                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
-                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Product</th>
-                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Status</th>
-                        <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Balance</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {supplierDetail.purchases.map((purchase) => {
-                        const statusMeta = getStatusMeta(purchase.payment_status);
-                        return (
-                          <tr key={purchase.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                            <td style={{ padding: 12, fontSize: 14 }}>{formatDate(purchase.purchase_date || purchase.created_at)}</td>
-                            <td style={{ padding: 12, fontSize: 14 }}>
-                              <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchase.product_name}</div>
-                              <div style={{ fontSize: 12, color: "#64748b" }}>
-                                {purchase.order_number
-                                  ? `${purchase.order_number} · ${purchase.invoice_number || purchase.product_sku}`
-                                  : purchase.invoice_number || purchase.product_sku}
-                              </div>
-                            </td>
-                            <td style={{ padding: 12, fontSize: 14 }}>
-                              <span
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  padding: "4px 8px",
-                                  borderRadius: 999,
-                                  fontSize: 12,
-                                  fontWeight: 700,
-                                  border: `1px solid ${statusMeta.border}`,
-                                  background: statusMeta.background,
-                                  color: statusMeta.color,
-                                }}
-                              >
-                                {statusMeta.label}
-                              </span>
-                            </td>
-                            <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(purchase.amount_due || 0))}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              <div style={{ overflowX: "auto" }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Supplier Payments</div>
-                {supplierDetail.payments.length === 0 ? (
-                  <p style={{ margin: 0, color: "#6b7280" }}>No payments recorded for this supplier yet.</p>
-                ) : (
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
-                    <thead>
-                      <tr style={{ background: "#f8fafc" }}>
-                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
-                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Invoice</th>
-                        <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Method</th>
-                        <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {supplierDetail.payments.map((payment) => (
-                        <tr key={payment.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                          <td style={{ padding: 12, fontSize: 14 }}>{formatDate(payment.payment_date || payment.created_at)}</td>
-                          <td style={{ padding: 12, fontSize: 14 }}>
-                            <div style={{ fontWeight: 700, color: "#0f172a" }}>{payment.purchase_invoice_number || payment.order_number || "-"}</div>
-                            <div style={{ fontSize: 12, color: "#64748b" }}>{payment.product_name || "Payment record"}</div>
-                          </td>
-                          <td style={{ padding: 12, fontSize: 14, textTransform: "capitalize" }}>{payment.payment_method.replace(/_/g, " ")}</td>
-                          <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(payment.amount || 0))}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              {purchaseReturnsSupported ? (
-                <div style={{ overflowX: "auto" }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Supplier Returns</div>
-                  {panelDataErrors.returns && supplierReturnsForDetail.length === 0 ? (
-                    <p style={{ margin: 0, color: "#92400e" }}>{panelDataErrors.returns}</p>
-                  ) : supplierReturnsForDetail.length === 0 ? (
-                    <p style={{ margin: 0, color: "#6b7280" }}>No returns recorded for this supplier yet.</p>
-                  ) : (
-                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
-                      <thead>
-                        <tr style={{ background: "#f8fafc" }}>
-                          <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
-                          <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Product</th>
-                          <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Qty</th>
-                          <th style={{ padding: 12, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>Value</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {supplierReturnsForDetail.map((purchaseReturn) => (
-                          <tr key={purchaseReturn.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                            <td style={{ padding: 12, fontSize: 14 }}>{formatDate(purchaseReturn.return_date || purchaseReturn.created_at)}</td>
-                            <td style={{ padding: 12, fontSize: 14 }}>
-                              <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchaseReturn.product_name || "Purchase return"}</div>
-                              <div style={{ fontSize: 12, color: "#64748b" }}>{purchaseReturn.purchase_invoice_number || purchaseReturn.order_number || "-"}</div>
-                            </td>
-                            <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{Number(purchaseReturn.quantity_returned || 0).toFixed(2)}</td>
-                            <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        )}
-      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20, alignItems: "start" }}>
         <div className="card" style={{ marginBottom: 0 }} ref={paymentSectionRef}>
