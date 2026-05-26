@@ -2,11 +2,12 @@ import React, { useMemo, useState } from "react";
 
 import { Branch, NewProduct, Supplier } from "../types";
 import { useAppCategories } from "../categories";
-import { updateMyCategories } from "../api";
+import { createSupplier, updateMyCategories } from "../api";
 
 type Props = {
   onCreate: (payload: NewProduct, branchIdOverride?: number | null) => Promise<void>;
   onCancel?: () => void;
+  onSupplierDirectoryChanged?: () => Promise<void> | void;
   userRole?: string;
   branches?: Branch[];
   activeBranchId?: number | null;
@@ -15,10 +16,12 @@ type Props = {
 };
 
 const UNITS = ["pcs", "box", "pack", "dozen", "carton", "bundle", "unit"];
+const MAX_VISIBLE_SUPPLIER_OPTIONS = 100;
 
 export default function ProductForm({
   onCreate,
   onCancel,
+  onSupplierDirectoryChanged,
   userRole = "Admin",
   branches,
   activeBranchId,
@@ -30,6 +33,8 @@ export default function ProductForm({
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [isPerishable, setIsPerishable] = useState(false);
+  const [supplierSearchTerm, setSupplierSearchTerm] = useState("");
+  const [locallyCreatedSupplierNames, setLocallyCreatedSupplierNames] = useState<string[]>([]);
 
   const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
 
@@ -96,14 +101,44 @@ export default function ProductForm({
 
     return Array.from(suppliersByKey.values()).sort((left, right) => left.localeCompare(right));
   }, [existingSuppliers]);
+  const allSupplierNames = useMemo(() => {
+    const suppliersByKey = new Map<string, string>();
+
+    existingSupplierNames.forEach((supplierName) => {
+      suppliersByKey.set(supplierName.toLowerCase(), supplierName);
+    });
+
+    locallyCreatedSupplierNames.forEach((supplierName) => {
+      const cleanedName = supplierName.trim();
+      if (!cleanedName) {
+        return;
+      }
+      suppliersByKey.set(cleanedName.toLowerCase(), cleanedName);
+    });
+
+    return Array.from(suppliersByKey.values()).sort((left, right) => left.localeCompare(right));
+  }, [existingSupplierNames, locallyCreatedSupplierNames]);
+  const filteredSupplierNames = useMemo(() => {
+    const normalizedSearch = supplierSearchTerm.trim().toLowerCase();
+    if (!normalizedSearch) {
+      return allSupplierNames;
+    }
+
+    return allSupplierNames.filter((supplierName) => supplierName.toLowerCase().includes(normalizedSearch));
+  }, [allSupplierNames, supplierSearchTerm]);
+  const visibleSupplierOptions = useMemo(
+    () => filteredSupplierNames.slice(0, MAX_VISIBLE_SUPPLIER_OPTIONS),
+    [filteredSupplierNames],
+  );
+  const hiddenSupplierOptionCount = Math.max(filteredSupplierNames.length - visibleSupplierOptions.length, 0);
   const selectedKnownSupplierName = useMemo(() => {
     const currentSupplierName = (form.supplier || "").trim();
     if (!currentSupplierName) {
       return "";
     }
 
-    return existingSupplierNames.find((name) => name.toLowerCase() === currentSupplierName.toLowerCase()) ?? "";
-  }, [existingSupplierNames, form.supplier]);
+    return allSupplierNames.find((name) => name.toLowerCase() === currentSupplierName.toLowerCase()) ?? "";
+  }, [allSupplierNames, form.supplier]);
 
   const effectiveBranchId = useMemo(() => {
     if (role === "Admin") {
@@ -139,12 +174,39 @@ export default function ProductForm({
     }
 
     const normalizedSupplierName =
-      existingSupplierNames.find((name) => name.toLowerCase() === supplierName.toLowerCase()) ?? supplierName;
+      allSupplierNames.find((name) => name.toLowerCase() === supplierName.toLowerCase()) ?? supplierName;
+
+    const isKnownSupplier = allSupplierNames.some((name) => name.toLowerCase() === normalizedSupplierName.toLowerCase());
 
     setBusy(true);
     setSubmittingMode(mode);
     setError(null);
     try {
+      if (!isKnownSupplier) {
+        try {
+          const createdSupplier = await createSupplier({
+            name: normalizedSupplierName,
+          });
+          setLocallyCreatedSupplierNames((previousSuppliers) => {
+            if (previousSuppliers.some((name) => name.toLowerCase() === createdSupplier.name.toLowerCase())) {
+              return previousSuppliers;
+            }
+            return [...previousSuppliers, createdSupplier.name];
+          });
+          if (onSupplierDirectoryChanged) {
+            await onSupplierDirectoryChanged();
+          }
+        } catch (supplierError) {
+          const supplierErrorMessage = supplierError instanceof Error ? supplierError.message : "Failed to create supplier";
+          if (!/already exists/i.test(supplierErrorMessage)) {
+            throw new Error(`Failed to add supplier to supplier directory: ${supplierErrorMessage}`);
+          }
+          if (onSupplierDirectoryChanged) {
+            await onSupplierDirectoryChanged();
+          }
+        }
+      }
+
       // If user typed a new category, persist it to the business categories list (Admin only).
       const selectedCategory = (form.category ?? "").trim();
       if (selectedCategory) {
@@ -587,6 +649,13 @@ export default function ProductForm({
           <div className="grid" style={{ gap: 12 }}>
             <label>
               Saved Suppliers
+              <input
+                className="input"
+                value={supplierSearchTerm}
+                onChange={(e) => setSupplierSearchTerm(e.target.value)}
+                placeholder={allSupplierNames.length > MAX_VISIBLE_SUPPLIER_OPTIONS ? "Search suppliers by name" : "Filter saved suppliers"}
+                style={{ marginBottom: 8 }}
+              />
               <select
                 className="input"
                 value={selectedKnownSupplierName}
@@ -597,10 +666,10 @@ export default function ProductForm({
                   }
                   setForm({ ...form, supplier: supplierName });
                 }}
-                disabled={existingSupplierNames.length === 0}
+                disabled={allSupplierNames.length === 0}
               >
-                <option value="">{existingSupplierNames.length === 0 ? "No saved suppliers available" : "Select an existing supplier"}</option>
-                {existingSupplierNames.map((supplierName) => (
+                <option value="">{allSupplierNames.length === 0 ? "No saved suppliers available" : `Select an existing supplier (${allSupplierNames.length} saved)`}</option>
+                {visibleSupplierOptions.map((supplierName) => (
                   <option key={supplierName} value={supplierName}>
                     {supplierName}
                   </option>
@@ -609,6 +678,11 @@ export default function ProductForm({
               <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
                 Pick a supplier from your supplier directory or type a new one below. This supplier is used to match products in Purchasing.
               </small>
+              {hiddenSupplierOptionCount > 0 ? (
+                <small style={{ color: "#1d4ed8", fontSize: 12, marginTop: 4, display: "block", fontWeight: 600 }}>
+                  Showing first {MAX_VISIBLE_SUPPLIER_OPTIONS} results. Refine search to find the remaining {hiddenSupplierOptionCount} suppliers.
+                </small>
+              ) : null}
             </label>
             <label>
               Supplier Name *

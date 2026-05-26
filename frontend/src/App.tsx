@@ -704,6 +704,14 @@ export default function App() {
                   <ProductForm
                     onCreate={handleCreateProduct}
                     onCancel={() => setShowAddProduct(false)}
+                    onSupplierDirectoryChanged={async () => {
+                      try {
+                        const data = await fetchSuppliersCached((fresh) => setSupplierDirectory(fresh));
+                        setSupplierDirectory(data);
+                      } catch {
+                        // Supplier refresh is best-effort for the product form.
+                      }
+                    }}
                     userRole={userRole}
                     branches={branches}
                     activeBranchId={activeBranchId}
