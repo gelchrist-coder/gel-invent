@@ -19,6 +19,13 @@ type SalesPaymentFilterOption = {
   count: number;
 };
 
+const SALES_PERIOD_LABEL: Record<"all" | "day" | "week" | "month", string> = {
+  all: "All time",
+  day: "Today",
+  week: "This week",
+  month: "This month",
+};
+
 function normalizeSalePaymentMethod(paymentMethod: string | null | undefined): string {
   const normalized = String(paymentMethod ?? "").trim().toLowerCase();
   return normalized || "unknown";
@@ -32,6 +39,10 @@ function formatPaymentLabel(paymentMethod: string): string {
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+function toCurrency(value: number): string {
+  return `GHS ${value.toFixed(2)}`;
 }
 
 export default function Sales() {
@@ -56,6 +67,7 @@ export default function Sales() {
   const [salesPeriod, setSalesPeriod] = useState<"all" | "day" | "week" | "month">("all");
   const [salesSearchTerm, setSalesSearchTerm] = useState("");
   const [salesPaymentFilter, setSalesPaymentFilter] = useState("all");
+  const [salesRowsLimit, setSalesRowsLimit] = useState<number>(5);
   const hasLoadedOnce = useRef(false);
 
   // Get user and business info for receipt
@@ -403,13 +415,6 @@ export default function Sales() {
     }
   };
 
-  const salesPeriodLabel: Record<"all" | "day" | "week" | "month", string> = {
-    all: "All time",
-    day: "Today",
-    week: "This week",
-    month: "This month",
-  };
-
   const periodStart = useMemo(() => {
     if (salesPeriod === "all") return null;
     const now = new Date();
@@ -491,6 +496,53 @@ export default function Sales() {
   const filteredSalesTotal = useMemo(
     () => filteredSales.reduce((sum, sale) => sum + Number(sale.total_price || 0), 0),
     [filteredSales]
+  );
+
+  const visibleSales = useMemo(
+    () => filteredSales.slice(0, salesRowsLimit),
+    [filteredSales, salesRowsLimit],
+  );
+
+  const salesAverageTicket = useMemo(
+    () => (filteredSales.length > 0 ? filteredSalesTotal / filteredSales.length : 0),
+    [filteredSales.length, filteredSalesTotal],
+  );
+
+  const filteredCreditSalesCount = useMemo(
+    () => filteredSales.reduce((count, sale) => (
+      normalizeSalePaymentMethod(sale.payment_method) === "credit" ? count + 1 : count
+    ), 0),
+    [filteredSales],
+  );
+
+  const salesKpiItems = useMemo(
+    () => [
+      {
+        label: "Transactions",
+        value: String(periodFilteredSales.length),
+        helper: SALES_PERIOD_LABEL[salesPeriod],
+        accent: "#0f172a",
+      },
+      {
+        label: "Filtered Rows",
+        value: String(filteredSales.length),
+        helper: "After current filters",
+        accent: "#1d4ed8",
+      },
+      {
+        label: "Average Ticket",
+        value: toCurrency(salesAverageTicket),
+        helper: "Filtered sales",
+        accent: "#047857",
+      },
+      {
+        label: "Credit Sales",
+        value: String(filteredCreditSalesCount),
+        helper: "Filtered transactions",
+        accent: "#b45309",
+      },
+    ],
+    [filteredCreditSalesCount, filteredSales.length, periodFilteredSales.length, salesAverageTicket, salesPeriod],
   );
 
   // PDF Export function
@@ -638,10 +690,10 @@ export default function Sales() {
             <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Recent Sales</h3>
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
               <div style={{ fontSize: 12, color: "#6b7280" }}>
-                Total ({salesPeriodLabel[salesPeriod]}): <strong style={{ color: "#111827" }}>GHS {periodSalesTotal.toFixed(2)}</strong>
+                Total ({SALES_PERIOD_LABEL[salesPeriod]}): <strong style={{ color: "#111827" }}>{toCurrency(periodSalesTotal)}</strong>
                 {(salesSearchTerm.trim() || salesPaymentFilter !== "all") && (
                   <>
-                    {" "}· Filtered: <strong style={{ color: "#0f766e" }}>GHS {filteredSalesTotal.toFixed(2)}</strong>
+                    {" "}· Filtered: <strong style={{ color: "#0f766e" }}>{toCurrency(filteredSalesTotal)}</strong>
                   </>
                 )}
               </div>
@@ -685,7 +737,7 @@ export default function Sales() {
               >
                 📄 Export PDF
               </button>
-              {filteredSales.length > 5 && (
+              {filteredSales.length > salesRowsLimit && (
                 <button
                   onClick={() => setShowHistoryModal(true)}
                   style={{
@@ -703,6 +755,30 @@ export default function Sales() {
                 </button>
               )}
             </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+              gap: 8,
+            }}
+          >
+            {salesKpiItems.map((item) => (
+              <div
+                key={item.label}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                  background: "#f8fafc",
+                }}
+              >
+                <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700, marginBottom: 3 }}>{item.label}</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: item.accent, lineHeight: 1.15 }}>{item.value}</div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{item.helper}</div>
+              </div>
+            ))}
           </div>
 
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -735,8 +811,32 @@ export default function Sales() {
                 </button>
               ))}
             </div>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                color: "#64748b",
+                fontWeight: 700,
+              }}
+            >
+              Rows
+              <select
+                value={salesRowsLimit}
+                onChange={(event) => setSalesRowsLimit(Number(event.target.value))}
+                className="input"
+                style={{ width: 84, minWidth: 84, height: 34, padding: "0 10px" }}
+              >
+                {[5, 10, 20].map((limit) => (
+                  <option key={limit} value={limit}>
+                    {limit}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div style={{ marginLeft: "auto", fontSize: 12, color: "#6b7280" }}>
-              Showing {Math.min(filteredSales.length, 5)} of {filteredSales.length}
+              Showing {visibleSales.length} of {filteredSales.length}
             </div>
           </div>
         </div>
@@ -746,7 +846,7 @@ export default function Sales() {
           <>
             {loading ? <p style={{ margin: "0 0 8px 0", color: "#6b7280", fontSize: 12 }}>Refreshing...</p> : null}
             <SalesList
-              sales={filteredSales.slice(0, 5)}
+              sales={visibleSales}
               products={products}
               onDelete={handleDeleteSale}
               onRefresh={loadData}
