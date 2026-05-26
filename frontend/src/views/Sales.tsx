@@ -406,6 +406,78 @@ export default function Sales() {
     handleDone();
   };
 
+  const reprintSaleReceipt = (sale: Sale) => {
+    const product = productById.get(sale.product_id);
+    const productName = product?.name || `Product #${sale.product_id}`;
+    const qtyDisplay = sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number"
+      ? `${sale.pack_quantity} pack`
+      : `${sale.quantity} units`;
+    const logoHtml = businessLogoUrl
+      ? `<div style="margin-bottom:8px;"><img src="${businessLogoUrl}" alt="Logo" style="height:40px;max-width:140px;object-fit:contain;" /></div>`
+      : "";
+    const watermarkHtml = businessLogoUrl ? "" : '<div class="watermark">Gel Invent</div>';
+
+    const receiptHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Receipt</title>
+        <style>
+          body { font-family: 'Courier New', monospace; max-width: 300px; margin: 0 auto; padding: 20px; }
+          .header { text-align: center; margin-bottom: 20px; border-bottom: 2px dashed #000; padding-bottom: 10px; }
+          .business-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+          .receipt-info { font-size: 12px; margin-bottom: 15px; }
+          .items { border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 10px 0; margin: 15px 0; }
+          .item-row { display: flex; justify-content: space-between; margin: 5px 0; }
+          .total-section { margin-top: 15px; }
+          .total-row { display: flex; justify-content: space-between; margin: 5px 0; font-weight: bold; }
+          .footer { text-align: center; margin-top: 20px; font-size: 11px; border-top: 2px dashed #000; padding-top: 10px; }
+          .watermark { position: fixed; top: 45%; left: 50%; transform: translate(-50%, -50%) rotate(-18deg); font-size: 36px; font-weight: 700; color: #000; opacity: 0.08; letter-spacing: 2px; pointer-events: none; }
+          @media print { body { margin: 0; padding: 10px; } }
+        </style>
+      </head>
+      <body>
+        ${watermarkHtml}
+        <div class="header">
+          ${logoHtml}
+          <div class="business-name">${businessName}</div>
+          <div>Sales Receipt</div>
+        </div>
+        <div class="receipt-info">
+          <div>Receipt No: #${String(sale.id).padStart(6, "0")}</div>
+          <div>Date: ${new Date(sale.created_at).toLocaleString()}</div>
+          <div>Served by: ${sale.created_by_name || salesPerson}</div>
+          ${sale.customer_name ? `<div>Customer: ${sale.customer_name}</div>` : ""}
+        </div>
+        <div class="items">
+          <div class="item-row"><div><strong>${productName}</strong></div></div>
+          <div class="item-row"><div>${qtyDisplay} × GHS ${Number(sale.unit_price).toFixed(2)}</div><div>GHS ${Number(sale.total_price).toFixed(2)}</div></div>
+        </div>
+        <div class="total-section">
+          <div class="total-row"><div>TOTAL:</div><div>GHS ${Number(sale.total_price).toFixed(2)}</div></div>
+          <div class="item-row"><div>Payment:</div><div>${String(sale.payment_method || "cash").toUpperCase()}</div></div>
+        </div>
+        <div class="footer">
+          <div>Thank you for your business!</div>
+          <div>Please come again</div>
+        </div>
+        <script>
+          window.onload = function() { window.print(); }
+        </script>
+      </body>
+      </html>
+    `;
+
+    const receiptWindow = window.open("", "_blank");
+    if (!receiptWindow) {
+      alert("Please allow popups to print receipt");
+      return;
+    }
+
+    receiptWindow.document.write(receiptHTML);
+    receiptWindow.document.close();
+  };
+
   const handleDeleteSale = async (saleId: number) => {
     try {
       await deleteSale(saleId);
@@ -851,6 +923,7 @@ export default function Sales() {
               onDelete={handleDeleteSale}
               onRefresh={loadData}
               allowDelete={canDeleteSales}
+              onPrintReceipt={reprintSaleReceipt}
             />
           </>
         )}
@@ -1287,6 +1360,7 @@ export default function Sales() {
                 onDelete={handleDeleteSale}
                 onRefresh={loadData}
                 allowDelete={canDeleteSales}
+                onPrintReceipt={reprintSaleReceipt}
               />
             </div>
           </div>

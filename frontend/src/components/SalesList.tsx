@@ -8,9 +8,10 @@ type SalesListProps = {
   onDelete: (saleId: number) => void;
   onRefresh?: () => void;
   allowDelete?: boolean;
+  onPrintReceipt?: (sale: Sale) => void;
 };
 
-export default function SalesList({ sales, products, onDelete, onRefresh, allowDelete = false }: SalesListProps) {
+export default function SalesList({ sales, products, onDelete, onRefresh, allowDelete = false, onPrintReceipt }: SalesListProps) {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [returnSale, setReturnSale] = useState<Sale | null>(null);
 
@@ -75,31 +76,31 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ backgroundColor: "#f9fafb" }}>
-              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1, backgroundColor: "#f9fafb" }}>
                 Date
               </th>
-              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1, backgroundColor: "#f9fafb" }}>
                 Product
               </th>
-              <th style={{ padding: 12, textAlign: "right", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: 12, textAlign: "right", borderBottom: "2px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1, backgroundColor: "#f9fafb" }}>
                 Qty
               </th>
-              <th style={{ padding: 12, textAlign: "right", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: 12, textAlign: "right", borderBottom: "2px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1, backgroundColor: "#f9fafb" }}>
                 Price
               </th>
-              <th style={{ padding: 12, textAlign: "right", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: 12, textAlign: "right", borderBottom: "2px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1, backgroundColor: "#f9fafb" }}>
                 Total
               </th>
-              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1, backgroundColor: "#f9fafb" }}>
                 Customer
               </th>
-              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1, backgroundColor: "#f9fafb" }}>
                 Payment
               </th>
-              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1, backgroundColor: "#f9fafb" }}>
                 Recorded By
               </th>
-              <th style={{ padding: 12, textAlign: "center", borderBottom: "2px solid #e5e7eb" }}>
+              <th style={{ padding: 12, textAlign: "center", borderBottom: "2px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1, backgroundColor: "#f9fafb" }}>
                 Actions
               </th>
             </tr>
@@ -149,7 +150,7 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                   </span>
                 </td>
                 <td style={{ padding: 12, textAlign: "center" }}>
-                  <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
                     <button
                       type="button"
                       onClick={() => handleReturn(sale)}
@@ -166,6 +167,24 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                     >
                       Return
                     </button>
+                    {onPrintReceipt && (
+                      <button
+                        type="button"
+                        onClick={() => onPrintReceipt(sale)}
+                        style={{
+                          padding: "5px 10px",
+                          borderRadius: 4,
+                          border: "1px solid #bfdbfe",
+                          backgroundColor: "#eff6ff",
+                          color: "#1d4ed8",
+                          cursor: "pointer",
+                          fontSize: "0.8125rem",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Receipt
+                      </button>
+                    )}
                     {allowDelete && (
                       <button
                         type="button"

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NewSale, Product } from "../types";
 import { useAppCategories } from "../categories";
-import { updateMyCategories } from "../api";
 
 type POSSaleFormProps = {
   products: Product[];
@@ -30,9 +29,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const customerInputRef = useRef<HTMLInputElement | null>(null);
 
   const userCategories = useAppCategories();
-
-  const [addingCategory, setAddingCategory] = useState(false);
-  const [newCategoryName, setNewCategoryName] = useState("");
+  const [amountReceived, setAmountReceived] = useState("");
   
   // Credit sale states
   const [showCreditModal, setShowCreditModal] = useState(false);
@@ -172,6 +169,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     setCustomerName("");
     setPaymentMethod("cash");
     setNotes("");
+    setAmountReceived("");
     setCreditorName("");
     setCreditorPhone("");
     setInitialPayment(0);
@@ -187,6 +185,17 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
 
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
   const formattedTotalItems = Number.isInteger(totalItems) ? String(totalItems) : totalItems.toFixed(2);
+  const parsedAmountReceived = Number(amountReceived);
+  const hasEnteredAmountReceived = amountReceived.trim() !== "" && Number.isFinite(parsedAmountReceived);
+  const effectiveCashReceived = paymentMethod === "cash"
+    ? (hasEnteredAmountReceived ? parsedAmountReceived : cartTotal)
+    : cartTotal;
+  const changeDue = paymentMethod === "cash" ? Math.max(effectiveCashReceived - cartTotal, 0) : 0;
+  const amountShort = paymentMethod === "cash" ? Math.max(cartTotal - effectiveCashReceived, 0) : 0;
+
+  const applyQuickTender = (extra: number) => {
+    setAmountReceived((cartTotal + extra).toFixed(2));
+  };
 
   // Submit order
   const handleSubmit = (e: React.FormEvent) => {
@@ -229,6 +238,11 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
       }
       setCreditorName(customerName); // Use customer name as creditor name
       setShowCreditModal(true);
+      return;
+    }
+
+    if (paymentMethod === "cash" && hasEnteredAmountReceived && amountShort > 0) {
+      showMessage(`Amount received is short by GHS ${amountShort.toFixed(2)}`);
       return;
     }
 
@@ -356,92 +370,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
               {category === "all" ? "All" : category}
             </button>
           ))}
-
-          <button
-            type="button"
-            onClick={() => {
-              setAddingCategory(true);
-              setNewCategoryName("");
-            }}
-            style={{
-              padding: "5px 10px",
-              border: "1px dashed #d1d5db",
-              background: "white",
-              color: "#9ca3af",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontSize: 11,
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            + Add
-          </button>
         </div>
-
-        {addingCategory && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              type="text"
-              placeholder="Type a category"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              style={{
-                flex: 1,
-                padding: "10px 12px",
-                border: "2px solid #e5e7eb",
-                borderRadius: 8,
-                fontSize: 14,
-              }}
-            />
-            <button
-              type="button"
-              onClick={async () => {
-                const value = newCategoryName.trim();
-                if (!value) return;
-                setAddingCategory(false);
-                setNewCategoryName("");
-                try {
-                  await updateMyCategories([...userCategories, value]);
-                } catch {
-                  // Ignore; user may not be admin.
-                }
-                setSelectedCategory(value);
-              }}
-              style={{
-                padding: "10px 12px",
-                border: "1px solid #d1d5db",
-                borderRadius: 8,
-                background: "white",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#374151",
-              }}
-            >
-              Add
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAddingCategory(false);
-                setNewCategoryName("");
-              }}
-              style={{
-                padding: "10px 12px",
-                border: "1px solid #d1d5db",
-                borderRadius: 8,
-                background: "white",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 600,
-                color: "#6b7280",
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        )}
 
         {/* Products Grid */}
         <div style={{
@@ -713,7 +642,13 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                 <div style={{ marginBottom: 10 }}>
                   <select
                     value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    onChange={(e) => {
+                      const method = e.target.value;
+                      setPaymentMethod(method);
+                      if (method !== "cash") {
+                        setAmountReceived("");
+                      }
+                    }}
                     style={{
                       width: "100%",
                       padding: "10px 12px",
@@ -750,6 +685,73 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                     }}
                   />
                 </div>
+
+                {paymentMethod === "cash" && (
+                  <div
+                    style={{
+                      marginBottom: 10,
+                      padding: "10px",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 6,
+                      background: "#f8fafc",
+                    }}
+                  >
+                    <label style={{ display: "block", fontSize: 12, color: "#475569", marginBottom: 6, fontWeight: 700 }}>
+                      Amount Received
+                    </label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0"
+                      value={amountReceived}
+                      onChange={(e) => setAmountReceived(e.target.value)}
+                      placeholder={`Exact: ${cartTotal.toFixed(2)}`}
+                      style={{
+                        width: "100%",
+                        padding: "9px 10px",
+                        border: "1px solid #d1d5db",
+                        borderRadius: 4,
+                        fontSize: 13,
+                        background: "white",
+                      }}
+                    />
+
+                    <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                      {[
+                        { label: "Exact", extra: 0 },
+                        { label: "+5", extra: 5 },
+                        { label: "+10", extra: 10 },
+                        { label: "+20", extra: 20 },
+                      ].map((quick) => (
+                        <button
+                          key={quick.label}
+                          type="button"
+                          onClick={() => applyQuickTender(quick.extra)}
+                          style={{
+                            padding: "5px 10px",
+                            borderRadius: 999,
+                            border: "1px solid #cbd5e1",
+                            background: "white",
+                            color: "#334155",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {quick.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, fontSize: 12 }}>
+                      <span style={{ color: "#64748b", fontWeight: 700 }}>{amountShort > 0 ? "Amount Short" : "Change Due"}</span>
+                      <strong style={{ color: amountShort > 0 ? "#b91c1c" : "#166534", fontSize: 13 }}>
+                        GHS {(amountShort > 0 ? amountShort : changeDue).toFixed(2)}
+                      </strong>
+                    </div>
+                  </div>
+                )}
 
                 </div>
 
