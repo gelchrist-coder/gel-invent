@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { createProduct, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, updateProduct, getCachedProducts, clearDataCache } from "./api";
+import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, updateProduct, getCachedProducts, clearDataCache } from "./api";
 import Layout from "./components/Layout";
 import { getSalesOutboxCount } from "./offline/storage";
 import { syncSalesOutboxOnce } from "./offline/sync";
@@ -76,6 +76,7 @@ export default function App() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const prefetchedBranchRef = useRef<number | null>(null);
   const syncInFlightRef = useRef(false);
+  const supplierSyncInFlightRef = useRef(false);
 
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
 
@@ -141,6 +142,55 @@ export default function App() {
       setFilterSupplier("all");
     }
   }, [filterSupplier, supplierOptions]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    if (supplierSyncInFlightRef.current) {
+      return;
+    }
+
+    if (supplierOptions.length === 0) {
+      return;
+    }
+
+    const supplierDirectorySet = new Set(
+      supplierDirectory
+        .map((supplier) => supplier.name.trim().toLowerCase())
+        .filter((name) => name.length > 0),
+    );
+    const missingSupplierNames = supplierOptions.filter(
+      (supplierName) => !supplierDirectorySet.has(supplierName.trim().toLowerCase()),
+    );
+
+    if (missingSupplierNames.length === 0) {
+      return;
+    }
+
+    supplierSyncInFlightRef.current = true;
+
+    void (async () => {
+      try {
+        for (const supplierName of missingSupplierNames) {
+          try {
+            await createSupplier({ name: supplierName });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "";
+            if (!/already exists/i.test(message) && import.meta.env.DEV) {
+              console.warn(`Failed to sync supplier '${supplierName}' from products:`, error);
+            }
+          }
+        }
+
+        const refreshedSuppliers = await fetchSuppliersCached((fresh) => setSupplierDirectory(fresh));
+        setSupplierDirectory(refreshedSuppliers);
+      } finally {
+        supplierSyncInFlightRef.current = false;
+      }
+    })();
+  }, [isAuthenticated, supplierDirectory, supplierOptions]);
 
   const logoutAndReset = () => {
     setIsAuthenticated(false);
