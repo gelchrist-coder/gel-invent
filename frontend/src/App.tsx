@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { createProduct, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, updateProduct, getCachedProducts, clearDataCache } from "./api";
+import { createProduct, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, updateProduct, getCachedProducts, clearDataCache } from "./api";
 import Layout from "./components/Layout";
 import { getSalesOutboxCount } from "./offline/storage";
 import { syncSalesOutboxOnce } from "./offline/sync";
@@ -8,7 +8,7 @@ import ProductForm from "./components/ProductForm";
 import ProductList from "./components/ProductList";
 import { useAppCategories } from "./categories";
 import { updateMyCategories } from "./api";
-import { Branch, NewProduct, Product } from "./types";
+import { Branch, NewProduct, Product, Supplier } from "./types";
 import Creditors from "./views/Creditors";
 import Dashboard from "./views/Dashboard";
 import Inventory from "./views/Inventory";
@@ -62,6 +62,7 @@ export default function App() {
   const [userRole, setUserRole] = useState(() => readStoredUser()?.role || "Admin");
   const [currentUserId, setCurrentUserId] = useState<number | null>(() => readStoredUser()?.id ?? null);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [supplierDirectory, setSupplierDirectory] = useState<Supplier[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<number | null>(() => {
     const raw = localStorage.getItem("activeBranchId");
     if (!raw) return null;
@@ -152,6 +153,7 @@ export default function App() {
     setUserRole("Admin");
     setCurrentUserId(null);
     setBranches([]);
+    setSupplierDirectory([]);
     setActiveBranchId(null);
     setOutboxCount(0);
   };
@@ -452,6 +454,44 @@ export default function App() {
     void run();
   }, [isAuthenticated, activeBranchId]);
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    let isMounted = true;
+
+    fetchSuppliersCached((fresh) => {
+      if (isMounted) {
+        setSupplierDirectory(fresh);
+      }
+    })
+      .then((data) => {
+        if (isMounted) {
+          setSupplierDirectory(data);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setSupplierDirectory([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated, activeBranchId]);
+
+  useEffect(() => {
+    if (!showAddProduct || !isAuthenticated) {
+      return;
+    }
+
+    fetchSuppliersCached((fresh) => setSupplierDirectory(fresh))
+      .then((data) => setSupplierDirectory(data))
+      .catch(() => {});
+  }, [showAddProduct, isAuthenticated, activeBranchId]);
+
   const handleLogin = (_email: string, _password: string) => {
     const user = readStoredUser();
     if (user) {
@@ -492,6 +532,7 @@ export default function App() {
     // Clear cached branch-scoped responses and reset product selection immediately.
     clearDataCache();
     setProducts([]);
+    setSupplierDirectory([]);
     setSelectedId(null);
 
     // Notify other components that the active branch changed
@@ -666,6 +707,7 @@ export default function App() {
                     userRole={userRole}
                     branches={branches}
                     activeBranchId={activeBranchId}
+                    existingSuppliers={supplierDirectory}
                     layoutMode="modal"
                   />
                 </div>

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 
-import { Branch, NewProduct } from "../types";
+import { Branch, NewProduct, Supplier } from "../types";
 import { useAppCategories } from "../categories";
 import { updateMyCategories } from "../api";
 
@@ -10,6 +10,7 @@ type Props = {
   userRole?: string;
   branches?: Branch[];
   activeBranchId?: number | null;
+  existingSuppliers?: Supplier[];
   layoutMode?: "card" | "modal";
 };
 
@@ -21,6 +22,7 @@ export default function ProductForm({
   userRole = "Admin",
   branches,
   activeBranchId,
+  existingSuppliers,
   layoutMode = "card",
 }: Props) {
   const categoryOptions = useAppCategories();
@@ -77,6 +79,31 @@ export default function ProductForm({
     : undefined;
 
   const visibleBranches = useMemo(() => branches ?? [], [branches]);
+  const existingSupplierNames = useMemo(() => {
+    const suppliersByKey = new Map<string, string>();
+
+    (existingSuppliers ?? []).forEach((supplier) => {
+      const supplierName = (supplier.name || "").trim();
+      if (!supplierName) {
+        return;
+      }
+
+      const normalizedName = supplierName.toLowerCase();
+      if (!suppliersByKey.has(normalizedName)) {
+        suppliersByKey.set(normalizedName, supplierName);
+      }
+    });
+
+    return Array.from(suppliersByKey.values()).sort((left, right) => left.localeCompare(right));
+  }, [existingSuppliers]);
+  const selectedKnownSupplierName = useMemo(() => {
+    const currentSupplierName = (form.supplier || "").trim();
+    if (!currentSupplierName) {
+      return "";
+    }
+
+    return existingSupplierNames.find((name) => name.toLowerCase() === currentSupplierName.toLowerCase()) ?? "";
+  }, [existingSupplierNames, form.supplier]);
 
   const effectiveBranchId = useMemo(() => {
     if (role === "Admin") {
@@ -104,6 +131,15 @@ export default function ProductForm({
       setError("Expiry date is required for perishable goods");
       return;
     }
+
+    const supplierName = (form.supplier || "").trim();
+    if (!supplierName) {
+      setError("Supplier is required");
+      return;
+    }
+
+    const normalizedSupplierName =
+      existingSupplierNames.find((name) => name.toLowerCase() === supplierName.toLowerCase()) ?? supplierName;
 
     setBusy(true);
     setSubmittingMode(mode);
@@ -138,7 +174,7 @@ export default function ProductForm({
         unit: form.unit || "pcs",
         pack_size: form.packSize ? parseInt(form.packSize) : undefined,
         category: form.category || undefined,
-        supplier: form.supplier?.trim() || undefined,
+        supplier: normalizedSupplierName,
         expiry_date: isPerishable ? (form.expiry_date || undefined) : undefined,
         cost_price: form.costPrice ? parseFloat(form.costPrice) : undefined,
         pack_cost_price: form.packCostPrice ? parseFloat(form.packCostPrice) : undefined,
@@ -165,7 +201,7 @@ export default function ProductForm({
           initialStock: "0",
           packSize: "",
           reorderLevel: form.reorderLevel,
-          supplier: "",
+          supplier: normalizedSupplierName,
           status: form.status || "active",
         });
         setIsPerishable(false);
@@ -550,12 +586,38 @@ export default function ProductForm({
           </h3>
           <div className="grid" style={{ gap: 12 }}>
             <label>
-              Supplier
+              Saved Suppliers
+              <select
+                className="input"
+                value={selectedKnownSupplierName}
+                onChange={(e) => {
+                  const supplierName = e.target.value;
+                  if (!supplierName) {
+                    return;
+                  }
+                  setForm({ ...form, supplier: supplierName });
+                }}
+                disabled={existingSupplierNames.length === 0}
+              >
+                <option value="">{existingSupplierNames.length === 0 ? "No saved suppliers available" : "Select an existing supplier"}</option>
+                {existingSupplierNames.map((supplierName) => (
+                  <option key={supplierName} value={supplierName}>
+                    {supplierName}
+                  </option>
+                ))}
+              </select>
+              <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
+                Pick a supplier from your supplier directory or type a new one below. This supplier is used to match products in Purchasing.
+              </small>
+            </label>
+            <label>
+              Supplier Name *
               <input
                 className="input"
                 value={form.supplier}
                 onChange={(e) => setForm({ ...form, supplier: e.target.value })}
                 placeholder="Supplier name or company"
+                required
               />
             </label>
             <label>
