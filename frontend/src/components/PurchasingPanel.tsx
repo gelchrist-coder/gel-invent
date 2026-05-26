@@ -1273,6 +1273,11 @@ export default function PurchasingPanel({
       return;
     }
 
+    if (!supplierForm.contact_person.trim()) {
+      setError("Contact person is required");
+      return;
+    }
+
     setSubmittingSupplier(true);
     setError(null);
     setNotice(null);
@@ -1280,10 +1285,6 @@ export default function PurchasingPanel({
       const created = await createSupplier({
         name: supplierForm.name.trim(),
         contact_person: trimOrUndefined(supplierForm.contact_person),
-        phone: trimOrUndefined(supplierForm.phone),
-        email: trimOrUndefined(supplierForm.email),
-        address: trimOrUndefined(supplierForm.address),
-        notes: trimOrUndefined(supplierForm.notes),
       });
       setSupplierForm(emptySupplierForm);
       handleSupplierNameChange(created.name);
@@ -1708,7 +1709,7 @@ export default function PurchasingPanel({
           <div style={emphasisSectionStyle}>
             <div style={{ display: "grid", gap: 6 }}>
               <div style={subSectionLabelStyle}>Add Supplier</div>
-              <p style={helperTextStyle}>Capture the supplier once so future orders and payments need fewer manual fields.</p>
+              <p style={helperTextStyle}>Capture supplier name and contact person once so future orders and payments need fewer manual fields.</p>
             </div>
 
             <label>
@@ -1721,52 +1722,13 @@ export default function PurchasingPanel({
               />
             </label>
 
-            <div style={wideFieldGridStyle}>
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Contact Person</span>
-                <input
-                  className="input"
-                  value={supplierForm.contact_person}
-                  onChange={(e) => setSupplierForm((prev) => ({ ...prev, contact_person: e.target.value }))}
-                  placeholder="Optional"
-                />
-              </label>
-              <label>
-                <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Phone</span>
-                <input
-                  className="input"
-                  value={supplierForm.phone}
-                  onChange={(e) => setSupplierForm((prev) => ({ ...prev, phone: e.target.value }))}
-                  placeholder="024..."
-                />
-              </label>
-            </div>
-
             <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Email</span>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Contact Person</span>
               <input
                 className="input"
-                value={supplierForm.email}
-                onChange={(e) => setSupplierForm((prev) => ({ ...prev, email: e.target.value }))}
-                placeholder="supplier@example.com"
-              />
-            </label>
-
-            <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Address / Notes</span>
-              <textarea
-                className="textarea"
-                value={`${supplierForm.address}${supplierForm.address && supplierForm.notes ? "\n" : ""}${supplierForm.notes}`}
-                onChange={(e) => {
-                  const [firstLine, ...rest] = e.target.value.split("\n");
-                  setSupplierForm((prev) => ({
-                    ...prev,
-                    address: firstLine,
-                    notes: rest.join("\n"),
-                  }));
-                }}
-                rows={3}
-                placeholder="Address on the first line, extra notes below"
+                value={supplierForm.contact_person}
+                onChange={(e) => setSupplierForm((prev) => ({ ...prev, contact_person: e.target.value }))}
+                placeholder="e.g. Kwame Mensah"
               />
             </label>
 
