@@ -67,6 +67,14 @@ export default function ProductForm({
 
   const role = userRole;
   const isModalLayout = layoutMode === "modal";
+  const modalSectionStyle = isModalLayout
+    ? {
+        border: "1px solid #e2e8f0",
+        borderRadius: 12,
+        background: "#f8fafc",
+        padding: 12,
+      }
+    : undefined;
 
   const visibleBranches = useMemo(() => branches ?? [], [branches]);
 
@@ -178,26 +186,31 @@ export default function ProductForm({
   };
 
   return (
-    <div className={isModalLayout ? undefined : "card"} style={{ maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <h2 className="section-title" style={{ margin: 0 }}>Add New Product</h2>
+    <div className={isModalLayout ? undefined : "card"} style={{ maxWidth: 900, margin: "0 auto", paddingTop: isModalLayout ? 8 : 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: isModalLayout ? 16 : 24, gap: 12 }}>
+        <div>
+          <h2 className="section-title" style={{ margin: 0 }}>Add New Product</h2>
+          {isModalLayout ? <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>Set essentials first, then optional fields below.</p> : null}
+        </div>
         <button
           type="button"
           className="button"
           onClick={generateSKU}
           style={{
-            background: "#6b7280",
-            padding: "8px 14px",
-            fontSize: isModalLayout ? 13 : undefined,
+            background: isModalLayout ? "#334155" : "#6b7280",
+            padding: isModalLayout ? "7px 12px" : "8px 14px",
+            fontSize: isModalLayout ? 12 : undefined,
+            borderRadius: isModalLayout ? 999 : undefined,
+            fontWeight: 700,
           }}
         >
           Generate SKU
         </button>
       </div>
 
-      <form onSubmit={submit} className="grid" style={{ gap: isModalLayout ? 18 : 20 }}>
+      <form onSubmit={submit} className="grid" style={{ gap: isModalLayout ? 14 : 20 }}>
         {/* Basic Information */}
-        <div>
+        <div style={modalSectionStyle}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
             Basic Information
           </h3>
@@ -369,7 +382,7 @@ export default function ProductForm({
         </div>
 
         {/* Pricing & Inventory */}
-        <div>
+        <div style={modalSectionStyle}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
             Pricing & Inventory
           </h3>
@@ -531,7 +544,7 @@ export default function ProductForm({
         </div>
 
         {/* Additional Details */}
-        <div>
+        <div style={modalSectionStyle}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
             Additional Details
           </h3>
@@ -576,13 +589,31 @@ export default function ProductForm({
         {error ? <p style={{ color: "#d14343", margin: 0 }}>{error}</p> : null}
 
         {/* Action Buttons */}
-        <div style={{ display: "flex", gap: 12, paddingTop: 12, borderTop: "1px solid #e6e9f2" }}>
+        <div style={{ display: "flex", gap: 10, paddingTop: 12, borderTop: "1px solid #e6e9f2", flexWrap: "wrap", justifyContent: isModalLayout ? "flex-end" : "flex-start" }}>
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={busy}
+              style={{
+                padding: isModalLayout ? "9px 14px" : "10px 20px",
+                background: "transparent",
+                border: "1px solid #d8dce8",
+                borderRadius: 10,
+                cursor: "pointer",
+                fontWeight: 600,
+                color: "#475569",
+              }}
+            >
+              Cancel
+            </button>
+          )}
           <button
             className="button"
             type="submit"
             disabled={busy}
             data-save-mode="save"
-            style={{ flex: 1 }}
+            style={{ flex: isModalLayout ? undefined : 1, minWidth: isModalLayout ? 160 : undefined }}
           >
             {busy && submittingMode === "save" ? "Saving..." : "Save Product"}
           </button>
@@ -591,27 +622,10 @@ export default function ProductForm({
             type="submit"
             disabled={busy}
             data-save-mode="saveAndNew"
-            style={{ flex: 1, background: "#10b981" }}
+            style={{ flex: isModalLayout ? undefined : 1, minWidth: isModalLayout ? 168 : undefined, background: "#10b981" }}
           >
             {busy && submittingMode === "saveAndNew" ? "Saving..." : "Save & Add Another"}
           </button>
-          {onCancel && (
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={busy}
-              style={{
-                padding: "10px 20px",
-                background: "transparent",
-                border: "1px solid #d8dce8",
-                borderRadius: 10,
-                cursor: "pointer",
-                fontWeight: 600,
-              }}
-            >
-              Cancel
-            </button>
-          )}
         </div>
       </form>
     </div>

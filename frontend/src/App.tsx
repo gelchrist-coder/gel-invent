@@ -582,19 +582,24 @@ export default function App() {
 
         return (
           <div className="app-shell">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
-              <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Products</h1>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+              <div>
+                <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0, letterSpacing: -0.3 }}>Products</h1>
+                <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>Manage catalog pricing, stock health, and product quality in one place.</p>
+              </div>
               <button
                 className="button"
                 onClick={() => setShowAddProduct(true)}
                 style={{
-                  background: "#1f7aff",
+                  background: "linear-gradient(135deg, #1f7aff, #2563eb)",
                   display: "flex",
                   alignItems: "center",
                   gap: 8,
-                  padding: "12px 20px",
-                  fontSize: 15,
-                  fontWeight: 600,
+                  padding: "11px 18px",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  borderRadius: 12,
+                  boxShadow: "0 10px 20px rgba(37, 99, 235, 0.24)",
                 }}
               >
                 <span>Add New Product</span>
@@ -610,25 +615,28 @@ export default function App() {
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  background: "rgba(0, 0, 0, 0.5)",
+                  background: "rgba(15, 23, 42, 0.55)",
+                  backdropFilter: "blur(2px)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   zIndex: 1000,
-                  padding: 20,
+                  padding: 16,
                 }}
                 onClick={() => setShowAddProduct(false)}
               >
                 <div
                   style={{
                     background: "white",
-                      borderRadius: 16,
-                      maxWidth: 840,
+                      borderRadius: 20,
+                      maxWidth: 860,
                     width: "100%",
                     maxHeight: "90vh",
                     overflow: "auto",
-                      padding: 18,
+                      padding: 20,
                       position: "relative",
+                      border: "1px solid #dbe5f2",
+                      boxShadow: "0 24px 44px rgba(15, 23, 42, 0.28)",
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -636,18 +644,18 @@ export default function App() {
                       type="button"
                       onClick={() => setShowAddProduct(false)}
                       style={{
-                        position: "sticky",
-                        top: 0,
-                        float: "right",
-                        background: "transparent",
-                        border: "none",
-                        fontSize: 13,
+                        position: "absolute",
+                        top: 12,
+                        right: 12,
+                        background: "#f8fafc",
+                        border: "1px solid #dbe5f2",
+                        fontSize: 12,
                         cursor: "pointer",
-                        color: "#6b7280",
+                        color: "#475569",
                         padding: "6px 10px",
-                        borderRadius: 8,
+                        borderRadius: 999,
                         fontWeight: 700,
-                        zIndex: 2,
+                        zIndex: 3,
                       }}
                     >
                       Close
@@ -667,28 +675,28 @@ export default function App() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fit, minmax(176px, 1fr))",
                 gap: 12,
-                marginBottom: 16,
+                marginBottom: 14,
               }}
             >
-              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #dbe5f2", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #dbe5f2", borderRadius: 14, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Total SKUs</div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", lineHeight: 1 }}>{productKpis.totalSkus}</div>
               </div>
-              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #fde68a", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #fde68a", borderRadius: 14, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Low Stock</div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: "#b45309", lineHeight: 1 }}>{productKpis.lowStockCount}</div>
               </div>
-              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #fecaca", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #fecaca", borderRadius: 14, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#991b1b", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Out of Stock</div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: "#dc2626", lineHeight: 1 }}>{productKpis.outOfStockCount}</div>
               </div>
-              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #bfdbfe", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #bfdbfe", borderRadius: 14, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Inventory Value</div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: "#1e40af", lineHeight: 1 }}>₵{productKpis.inventoryValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
               </div>
-              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #bbf7d0", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #bbf7d0", borderRadius: 14, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Avg Margin</div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: "#15803d", lineHeight: 1 }}>{productKpis.averageMarginPercent.toFixed(1)}%</div>
               </div>
@@ -698,14 +706,15 @@ export default function App() {
             <div
               className="card"
               style={{
-                marginBottom: 16,
-                padding: 16,
+                marginBottom: 14,
+                padding: 14,
                 border: "1px solid #dbe5f2",
                 background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
                 boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)",
+                borderRadius: 14,
               }}
             >
-              <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, alignItems: "end" }}>
+              <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, alignItems: "end" }}>
                 <label style={{ margin: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Search Products
@@ -875,14 +884,14 @@ export default function App() {
                         display: "inline-flex",
                         alignItems: "center",
                         gap: 6,
-                        padding: "5px 10px",
+                        padding: "5px 11px",
                         borderRadius: 999,
                         border: "1px solid #cbd5e1",
                         background: "#f8fafc",
                         color: "#334155",
                         cursor: "pointer",
                         fontSize: 12,
-                        fontWeight: 700,
+                        fontWeight: 600,
                       }}
                     >
                       <span>{chip.label}</span>
@@ -901,7 +910,7 @@ export default function App() {
                     }}
                     style={{
                       padding: "6px 12px",
-                      background: "transparent",
+                      background: "#ffffff",
                       border: "1px solid #d8dce8",
                       borderRadius: 999,
                       cursor: "pointer",
