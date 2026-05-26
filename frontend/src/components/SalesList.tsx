@@ -7,9 +7,10 @@ type SalesListProps = {
   products: Product[];
   onDelete: (saleId: number) => void;
   onRefresh?: () => void;
+  allowDelete?: boolean;
 };
 
-export default function SalesList({ sales, products, onDelete, onRefresh }: SalesListProps) {
+export default function SalesList({ sales, products, onDelete, onRefresh, allowDelete = false }: SalesListProps) {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [returnSale, setReturnSale] = useState<Sale | null>(null);
 
@@ -30,6 +31,7 @@ export default function SalesList({ sales, products, onDelete, onRefresh }: Sale
   };
 
   const handleDelete = (saleId: number) => {
+    if (!allowDelete) return;
     setDeleteId(saleId);
   };
 
@@ -149,33 +151,39 @@ export default function SalesList({ sales, products, onDelete, onRefresh }: Sale
                 <td style={{ padding: 12, textAlign: "center" }}>
                   <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
                     <button
+                      type="button"
                       onClick={() => handleReturn(sale)}
                       style={{
-                        padding: "4px 12px",
+                        padding: "5px 12px",
                         borderRadius: 4,
                         border: "none",
-                        backgroundColor: "#f59e0b",
+                        backgroundColor: "#2563eb",
                         color: "white",
                         cursor: "pointer",
-                        fontSize: "0.875rem",
+                        fontSize: "0.8125rem",
+                        fontWeight: 600,
                       }}
                     >
                       Return
                     </button>
-                    <button
-                      onClick={() => handleDelete(sale.id)}
-                      style={{
-                        padding: "4px 12px",
-                        borderRadius: 4,
-                        border: "none",
-                        backgroundColor: "#ef4444",
-                        color: "white",
-                        cursor: "pointer",
-                        fontSize: "0.875rem",
-                      }}
-                    >
-                      Delete
-                    </button>
+                    {allowDelete && (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(sale.id)}
+                        style={{
+                          padding: "5px 10px",
+                          borderRadius: 4,
+                          border: "1px solid #fecaca",
+                          backgroundColor: "#fef2f2",
+                          color: "#b91c1c",
+                          cursor: "pointer",
+                          fontSize: "0.8125rem",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -195,7 +203,7 @@ export default function SalesList({ sales, products, onDelete, onRefresh }: Sale
       )}
 
       {/* Delete Confirmation Modal */}
-      {deleteId && (
+      {allowDelete && deleteId && (
         <div
           style={{
             position: "fixed",
