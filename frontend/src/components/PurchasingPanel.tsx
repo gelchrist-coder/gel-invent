@@ -44,6 +44,12 @@ const paymentMethodOptions = [
 ];
 
 const MAX_VISIBLE_SUPPLIER_RESULTS = 8;
+const DEFAULT_VISIBLE_SUPPLIERS = 6;
+const DEFAULT_VISIBLE_RESTOCK_PRODUCTS = 6;
+
+function normalizeText(value: string | null | undefined): string {
+  return (value || "").trim().toLowerCase();
+}
 
 function toISODate(date: Date): string {
   const yyyy = date.getFullYear();
@@ -505,6 +511,15 @@ type PurchaseOrderGroup = {
   nextReturnPurchase: Purchase | null;
 };
 
+type SupplierProductInsight = {
+  product: Product;
+  purchaseCount: number;
+  totalQuantity: number;
+  lastPurchaseTimestamp: number;
+  lastCostPrice: number | null;
+  lastSellingPrice: number | null;
+};
+
 function createOrderLineId(productId: number): string {
   return `${productId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -583,6 +598,7 @@ export default function PurchasingPanel({
 }: Props) {
   const paymentSectionRef = useRef<HTMLDivElement | null>(null);
   const returnSectionRef = useRef<HTMLDivElement | null>(null);
+  const previousPurchaseSupplierRef = useRef<number | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [payments, setPayments] = useState<SupplierPayment[]>([]);
@@ -596,6 +612,9 @@ export default function PurchasingPanel({
   const [orderItems, setOrderItems] = useState<PurchaseOrderLine[]>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [manualSupplierName, setManualSupplierName] = useState("");
+  const [showAllSuppliers, setShowAllSuppliers] = useState(false);
+  const [showAllSupplierProducts, setShowAllSupplierProducts] = useState(false);
+  const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [unitCostPrice, setUnitCostPrice] = useState("");
@@ -743,6 +762,68 @@ export default function PurchasingPanel({
     () => products.find((product) => product.id === selectedProductId) ?? null,
     [products, selectedProductId],
   );
+  const normalizedSupplierSearch = useMemo(
+    () => normalizeText(manualSupplierName),
+    [manualSupplierName],
+  );
+  const rankedSuppliers = useMemo(() => {
+    const supplierPurchaseStats = new Map<string, { purchaseCount: number; lastPurchaseTimestamp: number }>();
+
+    for (const purchase of purchases) {
+      const supplierKey = normalizeText(purchase.supplier_name);
+      if (!supplierKey) continue;
+
+      const existingStats = supplierPurchaseStats.get(supplierKey) ?? { purchaseCount: 0, lastPurchaseTimestamp: 0 };
+      supplierPurchaseStats.set(supplierKey, {
+        purchaseCount: existingStats.purchaseCount + 1,
+        lastPurchaseTimestamp: Math.max(existingStats.lastPurchaseTimestamp, getPurchaseDateValue(purchase)),
+      });
+    }
+
+    return [...suppliers].sort((left, right) => {
+      const leftStats = supplierPurchaseStats.get(normalizeText(left.name)) ?? { purchaseCount: 0, lastPurchaseTimestamp: 0 };
+      const rightStats = supplierPurchaseStats.get(normalizeText(right.name)) ?? { purchaseCount: 0, lastPurchaseTimestamp: 0 };
+
+      if (rightStats.purchaseCount !== leftStats.purchaseCount) {
+        return rightStats.purchaseCount - leftStats.purchaseCount;
+      }
+
+      if (rightStats.lastPurchaseTimestamp !== leftStats.lastPurchaseTimestamp) {
+        return rightStats.lastPurchaseTimestamp - leftStats.lastPurchaseTimestamp;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
+  }, [purchases, suppliers]);
+  const supplierDirectoryMatches = useMemo(() => {
+    if (!normalizedSupplierSearch) {
+      return rankedSuppliers;
+    }
+
+    return rankedSuppliers.filter((supplier) => {
+      return [supplier.name, supplier.contact_person, supplier.phone, supplier.email]
+        .map((value) => normalizeText(value || ""))
+        .some((value) => value.includes(normalizedSupplierSearch));
+    });
+  }, [normalizedSupplierSearch, rankedSuppliers]);
+  const visibleDirectorySuppliers = useMemo(() => {
+    if (normalizedSupplierSearch) {
+      return supplierDirectoryMatches;
+    }
+
+    if (showAllSuppliers) {
+      return rankedSuppliers;
+    }
+
+    return rankedSuppliers.slice(0, DEFAULT_VISIBLE_SUPPLIERS);
+  }, [normalizedSupplierSearch, rankedSuppliers, showAllSuppliers, supplierDirectoryMatches]);
+  const hiddenSupplierCount = useMemo(() => {
+    if (normalizedSupplierSearch || showAllSuppliers) {
+      return 0;
+    }
+
+    return Math.max(rankedSuppliers.length - DEFAULT_VISIBLE_SUPPLIERS, 0);
+  }, [normalizedSupplierSearch, rankedSuppliers.length, showAllSuppliers]);
   const isPerishableProduct = usesExpiryTracking && !!selectedProduct?.expiry_date;
   const totalPurchaseValue = useMemo(() => purchases.reduce((sum, purchase) => sum + Number(purchase.total_cost || 0), 0), [purchases]);
   const totalOutstandingBalance = useMemo(
@@ -770,6 +851,84 @@ export default function PurchasingPanel({
     () => suppliers.find((supplier) => supplier.id === selectedSupplierId) ?? null,
     [selectedSupplierId, suppliers],
   );
+  const supplierScopedProducts = useMemo(() => {
+    if (!matchedPurchaseSupplier) {
+      return [] as Product[];
+    }
+
+    const normalizedSupplierName = normalizeText(matchedPurchaseSupplier.name);
+    return products.filter((product) => normalizeText(product.supplier) === normalizedSupplierName);
+  }, [matchedPurchaseSupplier, products]);
+  const purchaseProductOptions = useMemo(() => {
+    if (!matchedPurchaseSupplier) {
+      return [] as Product[];
+    }
+
+    return showAllSupplierProducts ? products : supplierScopedProducts;
+  }, [matchedPurchaseSupplier, products, showAllSupplierProducts, supplierScopedProducts]);
+  const supplierProductInsights = useMemo(() => {
+    if (!matchedPurchaseSupplier) {
+      return [] as SupplierProductInsight[];
+    }
+
+    const supplierName = normalizeText(matchedPurchaseSupplier.name);
+    const productsById = new Map(products.map((product) => [product.id, product]));
+    const insightsByProductId = new Map<number, SupplierProductInsight>();
+
+    for (const purchase of purchases) {
+      const sameSupplier = purchase.supplier_id === matchedPurchaseSupplier.id || normalizeText(purchase.supplier_name) === supplierName;
+      if (!sameSupplier || purchase.product_id == null) {
+        continue;
+      }
+
+      const product = productsById.get(purchase.product_id);
+      if (!product) {
+        continue;
+      }
+
+      const existingInsight = insightsByProductId.get(product.id);
+      const quantity = Number(purchase.quantity || 0);
+      const purchaseTimestamp = getPurchaseDateValue(purchase);
+      const costPrice = purchase.unit_cost_price == null ? null : Number(purchase.unit_cost_price);
+      const sellingPrice = purchase.unit_selling_price == null ? null : Number(purchase.unit_selling_price);
+
+      if (existingInsight) {
+        existingInsight.purchaseCount += 1;
+        existingInsight.totalQuantity += Number.isFinite(quantity) ? quantity : 0;
+        if (purchaseTimestamp >= existingInsight.lastPurchaseTimestamp) {
+          existingInsight.lastPurchaseTimestamp = purchaseTimestamp;
+          existingInsight.lastCostPrice = costPrice;
+          existingInsight.lastSellingPrice = sellingPrice;
+        }
+        continue;
+      }
+
+      insightsByProductId.set(product.id, {
+        product,
+        purchaseCount: 1,
+        totalQuantity: Number.isFinite(quantity) ? quantity : 0,
+        lastPurchaseTimestamp: purchaseTimestamp,
+        lastCostPrice: costPrice,
+        lastSellingPrice: sellingPrice,
+      });
+    }
+
+    return Array.from(insightsByProductId.values()).sort((left, right) => {
+      if (right.purchaseCount !== left.purchaseCount) {
+        return right.purchaseCount - left.purchaseCount;
+      }
+
+      if (right.totalQuantity !== left.totalQuantity) {
+        return right.totalQuantity - left.totalQuantity;
+      }
+
+      return right.lastPurchaseTimestamp - left.lastPurchaseTimestamp;
+    });
+  }, [matchedPurchaseSupplier, products, purchases]);
+  const quickRestockProducts = useMemo(
+    () => supplierProductInsights.slice(0, DEFAULT_VISIBLE_RESTOCK_PRODUCTS),
+    [supplierProductInsights],
+  );
   const savedUnitCostPrice = useMemo(
     () => selectedProduct?.cost_price != null ? Number(selectedProduct.cost_price) : null,
     [selectedProduct],
@@ -778,6 +937,12 @@ export default function PurchasingPanel({
     () => selectedProduct?.selling_price != null ? Number(selectedProduct.selling_price) : null,
     [selectedProduct],
   );
+  const selectedProductSupplierInsight = useMemo(
+    () => selectedProduct == null ? null : supplierProductInsights.find((insight) => insight.product.id === selectedProduct.id) ?? null,
+    [selectedProduct, supplierProductInsights],
+  );
+  const lastPurchaseCostForSelectedProduct = selectedProductSupplierInsight?.lastCostPrice ?? savedUnitCostPrice;
+  const previousSellingPriceForSelectedProduct = selectedProductSupplierInsight?.lastSellingPrice ?? savedUnitSellingPrice;
   const requiresManualPriceEntry = isChangingLinePrice || savedUnitCostPrice == null;
   const effectiveUnitCostPrice = useMemo(() => {
     if (!requiresManualPriceEntry) {
@@ -829,17 +994,45 @@ export default function PurchasingPanel({
     setUnitSellingPrice(selectedProduct.selling_price != null ? String(selectedProduct.selling_price) : "");
     setIsChangingLinePrice(selectedProduct.cost_price == null);
     setExpiryDate("");
+  }, [selectedProduct]);
 
-    if (selectedSupplierId != null || manualSupplierName.trim() || orderItems.length > 0) {
+  useEffect(() => {
+    const previousSupplierId = previousPurchaseSupplierRef.current;
+    if (previousSupplierId != null && selectedSupplierId !== previousSupplierId && orderItems.length > 0) {
+      setOrderItems([]);
+      setNotice("Supplier changed. Draft order lines were cleared so this purchase order stays consistent.");
+    }
+
+    previousPurchaseSupplierRef.current = selectedSupplierId;
+  }, [orderItems.length, selectedSupplierId]);
+
+  useEffect(() => {
+    setShowAllSupplierProducts(false);
+  }, [selectedSupplierId]);
+
+  useEffect(() => {
+    if (!matchedPurchaseSupplier) {
+      setSelectedProductId(null);
       return;
     }
 
-    if (selectedProduct.supplier) {
-      handleSupplierNameChange(selectedProduct.supplier);
-    } else {
-      handleSupplierNameChange("");
+    if (purchaseProductOptions.length === 0) {
+      setSelectedProductId(null);
+      return;
     }
-  }, [handleSupplierNameChange, manualSupplierName, orderItems.length, selectedProduct, selectedSupplierId]);
+
+    setSelectedProductId((previousValue) => {
+      if (previousValue != null && purchaseProductOptions.some((product) => product.id === previousValue)) {
+        return previousValue;
+      }
+
+      if (initialProductId != null && purchaseProductOptions.some((product) => product.id === initialProductId)) {
+        return initialProductId;
+      }
+
+      return purchaseProductOptions[0].id;
+    });
+  }, [initialProductId, matchedPurchaseSupplier, purchaseProductOptions]);
 
   const paymentSuppliers = useMemo(
     () => suppliers.filter((supplier) => Number(supplier.outstanding_balance || 0) > 0 || Number(supplier.unpaid_purchases_count || 0) > 0),
@@ -1066,13 +1259,25 @@ export default function PurchasingPanel({
   }, [loadSupplierDetail, supplierDetail?.supplier.id]);
 
   const focusPurchaseSupplier = (supplier: Supplier) => {
-    handleSupplierNameChange(supplier.name);
+    setSelectedSupplierId(supplier.id);
+    setManualSupplierName(supplier.name);
+    setShowAllSuppliers(false);
     setNotice(`Supplier ${supplier.name} selected for the purchase order form`);
   };
 
   const handleAddOrderItem = () => {
+    if (!matchedPurchaseSupplier) {
+      setError("Select a supplier before adding order items");
+      return;
+    }
+
     if (!selectedProductId || !selectedProduct) {
       setError("Select a product first");
+      return;
+    }
+
+    if (!showAllSupplierProducts && supplierScopedProducts.length > 0 && !supplierScopedProducts.some((product) => product.id === selectedProduct.id)) {
+      setError(`Select a product linked to ${matchedPurchaseSupplier.name} or enable Show All Products`);
       return;
     }
 
@@ -1287,7 +1492,10 @@ export default function PurchasingPanel({
         contact_person: trimOrUndefined(supplierForm.contact_person),
       });
       setSupplierForm(emptySupplierForm);
-      handleSupplierNameChange(created.name);
+      setManualSupplierName(created.name);
+      setSelectedSupplierId(created.id);
+      setIsSupplierModalOpen(false);
+      setShowAllSuppliers(false);
       setNotice(`Supplier ${created.name} added`);
       await loadPanelData();
       await loadSupplierDetail(created.id);
@@ -1321,8 +1529,8 @@ export default function PurchasingPanel({
       return;
     }
 
-    if (!manualSupplierName.trim()) {
-      setError("Enter the supplier name");
+    if (selectedSupplierId == null || !matchedPurchaseSupplier) {
+      setError("Select a saved supplier before creating a purchase order");
       return;
     }
 
@@ -1331,8 +1539,7 @@ export default function PurchasingPanel({
     setNotice(null);
     try {
       const purchaseOrder = await createPurchaseOrder({
-        supplier_id: selectedSupplierId ?? undefined,
-        supplier_name: selectedSupplierId == null ? manualSupplierName.trim() : undefined,
+        supplier_id: selectedSupplierId,
         invoice_number: trimOrUndefined(invoiceNumber),
         amount_paid: amountPaidValue || undefined,
         payment_method: amountPaidValue > 0 ? purchasePaymentMethod : undefined,
@@ -1642,6 +1849,30 @@ export default function PurchasingPanel({
     fontWeight: 800,
   };
 
+  const supplierModalOverlayStyle: CSSProperties = {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15, 23, 42, 0.45)",
+    display: "flex",
+    justifyContent: "flex-end",
+    zIndex: 70,
+    padding: 12,
+  };
+
+  const supplierModalPanelStyle: CSSProperties = {
+    width: "min(440px, 100%)",
+    height: "100%",
+    background: "#ffffff",
+    borderRadius: 16,
+    border: "1px solid #dbe5f2",
+    padding: 22,
+    display: "grid",
+    gap: 14,
+    alignContent: "start",
+    overflowY: "auto",
+    boxShadow: "0 24px 48px rgba(15, 23, 42, 0.22)",
+  };
+
   return (
     <div style={rootLayoutStyle}>
       {error ? (
@@ -1702,57 +1933,143 @@ export default function PurchasingPanel({
           <div style={{ marginBottom: 20 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Supplier Directory</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-              Save suppliers once, then reuse them when recording purchases.
+              Start by selecting a supplier. The purchase builder appears only after a supplier is chosen.
             </p>
           </div>
 
           <div style={emphasisSectionStyle}>
-            <div style={{ display: "grid", gap: 6 }}>
-              <div style={subSectionLabelStyle}>Add Supplier</div>
-              <p style={helperTextStyle}>Capture supplier name and contact person once so future orders and payments need fewer manual fields.</p>
-            </div>
-
-            <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier Name</span>
-              <input
-                className="input"
-                value={supplierForm.name}
-                onChange={(e) => setSupplierForm((prev) => ({ ...prev, name: e.target.value }))}
-                placeholder="e.g. Kasapreko Distributor"
-              />
-            </label>
-
-            <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Contact Person</span>
-              <input
-                className="input"
-                value={supplierForm.contact_person}
-                onChange={(e) => setSupplierForm((prev) => ({ ...prev, contact_person: e.target.value }))}
-                placeholder="e.g. Kwame Mensah"
-              />
-            </label>
-
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={subSectionLabelStyle}>Find Supplier</div>
+                <p style={helperTextStyle}>Search suppliers with suggestions while typing, then select one to begin the order.</p>
+              </div>
               <button
                 type="button"
-                className="button"
-                onClick={() => void handleCreateSupplier()}
-                disabled={submittingSupplier}
+                onClick={() => {
+                  setSupplierForm(emptySupplierForm);
+                  setIsSupplierModalOpen(true);
+                }}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #0f172a",
+                  background: "#0f172a",
+                  color: "#ffffff",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
               >
-                {submittingSupplier ? "Saving..." : "Add Supplier"}
+                Add Supplier
               </button>
             </div>
+
+            <SupplierNameCombobox
+              suppliers={suppliers}
+              value={manualSupplierName}
+              selectedSupplier={matchedPurchaseSupplier}
+              onChange={handleSupplierNameChange}
+              disabled={submittingPurchase}
+            />
+
+            {matchedPurchaseSupplier ? (
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "12px 14px", borderRadius: 12, border: "1px solid #bfdbfe", background: "#eff6ff" }}>
+                <div style={{ fontSize: 13, color: "#1e3a8a" }}>
+                  Building purchase order for <strong>{matchedPurchaseSupplier.name}</strong>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => void openSupplierDetail(matchedPurchaseSupplier)}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #1d4ed8",
+                      background: "#1d4ed8",
+                      color: "#ffffff",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    View Details
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSupplierId(null);
+                      setManualSupplierName("");
+                      setShowAllSupplierProducts(false);
+                    }}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "white",
+                      color: "#334155",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Change Supplier
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div style={{ ...plainSectionStyle, marginTop: 22 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
               <div style={{ display: "grid", gap: 6 }}>
-                <div style={subSectionLabelStyle}>Saved Suppliers</div>
-                <p style={helperTextStyle}>Use an existing supplier for purchases, payments, or deeper account review.</p>
+                <div style={subSectionLabelStyle}>Recent and Frequent Suppliers</div>
+                <p style={helperTextStyle}>
+                  {normalizedSupplierSearch
+                    ? `Showing ${supplierDirectoryMatches.length} matching supplier${supplierDirectoryMatches.length === 1 ? "" : "s"}.`
+                    : "Showing the suppliers used most recently and most often. Use View All Suppliers to see the rest."}
+                </p>
               </div>
-              <span style={countPillStyle}>
-                {panelDataErrors.suppliers && suppliers.length === 0 ? "Unavailable" : `${suppliers.length} saved`}
-              </span>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={countPillStyle}>
+                  {panelDataErrors.suppliers && suppliers.length === 0 ? "Unavailable" : `${suppliers.length} saved`}
+                </span>
+                {!normalizedSupplierSearch && hiddenSupplierCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllSuppliers(true)}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "white",
+                      color: "#334155",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    View All Suppliers ({rankedSuppliers.length})
+                  </button>
+                ) : null}
+                {!normalizedSupplierSearch && showAllSuppliers && rankedSuppliers.length > DEFAULT_VISIBLE_SUPPLIERS ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllSuppliers(false)}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "white",
+                      color: "#334155",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Show Fewer
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             {loading && suppliers.length === 0 && !panelDataErrors.suppliers ? (
@@ -1780,9 +2097,11 @@ export default function PurchasingPanel({
               </div>
             ) : suppliers.length === 0 ? (
               <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>No suppliers yet.</p>
+            ) : visibleDirectorySuppliers.length === 0 ? (
+              <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>No supplier matched your search. Try a different name or add a new supplier.</p>
             ) : (
               <div style={listStackStyle}>
-                {suppliers.map((supplier) => (
+                {visibleDirectorySuppliers.map((supplier) => (
                   <div
                     key={supplier.id}
                     style={{
@@ -1832,7 +2151,7 @@ export default function PurchasingPanel({
                             cursor: "pointer",
                           }}
                         >
-                          Use for Purchase
+                          {supplier.id === selectedSupplierId ? "Selected" : "Select Supplier"}
                         </button>
                         <button
                           type="button"
@@ -1877,9 +2196,16 @@ export default function PurchasingPanel({
                 ))}
               </div>
             )}
+
+            {!normalizedSupplierSearch && hiddenSupplierCount > 0 && !showAllSuppliers ? (
+              <div style={{ fontSize: 12, color: "#64748b" }}>
+                {hiddenSupplierCount} more supplier{hiddenSupplierCount === 1 ? " is" : "s are"} hidden to keep this view clean.
+              </div>
+            ) : null}
           </div>
         </div>
 
+        {matchedPurchaseSupplier ? (
         <div className="card" style={primaryPanelStyle}>
           <div style={{ marginBottom: 20 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Build Purchase Order</h3>
@@ -1891,17 +2217,66 @@ export default function PurchasingPanel({
           <div style={{ display: "grid", gap: 18 }}>
             <div style={emphasisSectionStyle}>
               <div style={{ display: "grid", gap: 6 }}>
-                <div style={subSectionLabelStyle}>Order Details</div>
-                <p style={helperTextStyle}>Start with the supplier name only. The rest of the order details stay out of the way until you need them.</p>
+                <div style={subSectionLabelStyle}>Supplier Scope</div>
+                <p style={helperTextStyle}>Purchase order is now scoped to {matchedPurchaseSupplier.name}. Start with linked products, then expand only if needed.</p>
               </div>
 
-              <SupplierNameCombobox
-                suppliers={suppliers}
-                value={manualSupplierName}
-                selectedSupplier={matchedPurchaseSupplier}
-                onChange={handleSupplierNameChange}
-                disabled={submittingPurchase}
-              />
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 13, color: "#334155" }}>
+                  {showAllSupplierProducts
+                    ? `Showing all ${products.length} product${products.length === 1 ? "" : "s"}`
+                    : `Showing ${supplierScopedProducts.length} product${supplierScopedProducts.length === 1 ? "" : "s"} linked to ${matchedPurchaseSupplier.name}`}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAllSupplierProducts((previousValue) => !previousValue)}
+                  style={{
+                    padding: "7px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #d1d5db",
+                    background: "white",
+                    color: "#334155",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  {showAllSupplierProducts ? "Show Supplier Products Only" : "Show All Products"}
+                </button>
+              </div>
+
+              {!showAllSupplierProducts && supplierScopedProducts.length === 0 ? (
+                <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid #fcd34d", background: "#fffbeb", color: "#92400e", fontSize: 13 }}>
+                  No products are currently linked to this supplier. Use Show All Products to add a new supplier-product relationship through purchasing.
+                </div>
+              ) : null}
+
+              {quickRestockProducts.length > 0 ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Recently/Frequently Restocked</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {quickRestockProducts.map((insight) => (
+                      <button
+                        key={insight.product.id}
+                        type="button"
+                        onClick={() => setSelectedProductId(insight.product.id)}
+                        style={{
+                          padding: "7px 10px",
+                          borderRadius: 999,
+                          border: selectedProductId === insight.product.id ? "1px solid #2563eb" : "1px solid #dbe5f2",
+                          background: selectedProductId === insight.product.id ? "#eff6ff" : "#ffffff",
+                          color: "#1f2937",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {insight.product.name} · {insight.purchaseCount} restock{insight.purchaseCount === 1 ? "" : "s"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div style={emphasisSectionStyle}>
@@ -1913,12 +2288,12 @@ export default function PurchasingPanel({
               <div style={{ maxWidth: 720 }}>
                 <ProductSearchSelect
                   label="Product"
-                  products={products}
+                  products={purchaseProductOptions}
                   selectedProductId={selectedProductId}
                   onChange={setSelectedProductId}
                   disabled={submittingPurchase}
-                  searchPlaceholder="Search products for this purchase order"
-                  emptyLabel="No matching products found"
+                  searchPlaceholder={showAllSupplierProducts ? "Search all products for this purchase order" : `Search ${matchedPurchaseSupplier.name} products`}
+                  emptyLabel={showAllSupplierProducts ? "No matching products found" : "No linked products found for this supplier"}
                 />
               </div>
 
@@ -1929,20 +2304,24 @@ export default function PurchasingPanel({
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{Number(selectedProduct.current_stock || 0)}</div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Saved Cost Price</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Last Purchase Cost</div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
-                      {savedUnitCostPrice != null ? formatCurrency(savedUnitCostPrice) : "Not set"}
+                      {lastPurchaseCostForSelectedProduct != null ? formatCurrency(lastPurchaseCostForSelectedProduct) : "Not set"}
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Saved Selling Price</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Previous Selling Price</div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
-                      {savedUnitSellingPrice != null ? formatCurrency(savedUnitSellingPrice) : "Not set"}
+                      {previousSellingPriceForSelectedProduct != null ? formatCurrency(previousSellingPriceForSelectedProduct) : "Not set"}
                     </div>
                   </div>
                   <div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Draft Line Total</div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(draftLineTotal)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Supplier Restocks</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedProductSupplierInsight?.purchaseCount ?? 0}</div>
                   </div>
                 </div>
               ) : null}
@@ -2074,7 +2453,7 @@ export default function PurchasingPanel({
                   type="button"
                   className="button"
                   onClick={handleAddOrderItem}
-                  disabled={submittingPurchase || products.length === 0}
+                  disabled={submittingPurchase || purchaseProductOptions.length === 0}
                 >
                   Add Item to Order
                 </button>
@@ -2310,7 +2689,7 @@ export default function PurchasingPanel({
                   type="button"
                   className="button"
                   onClick={() => void handleRecordPurchase()}
-                  disabled={submittingPurchase || products.length === 0 || orderItems.length === 0}
+                  disabled={submittingPurchase || orderItems.length === 0}
                 >
                   {submittingPurchase ? "Recording..." : "Create Purchase Order"}
                 </button>
@@ -2318,7 +2697,103 @@ export default function PurchasingPanel({
             </div>
           </div>
         </div>
+        ) : null}
       </div>
+
+      {isSupplierModalOpen ? (
+        <div
+          style={supplierModalOverlayStyle}
+          role="presentation"
+          onClick={() => {
+            if (!submittingSupplier) {
+              setIsSupplierModalOpen(false);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add Supplier"
+            style={supplierModalPanelStyle}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+              <div>
+                <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800, color: "#0f172a" }}>Add Supplier</h3>
+                <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>Save supplier name and contact person, then continue the purchase workflow.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSupplierModalOpen(false)}
+                disabled={submittingSupplier}
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 999,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  color: "#334155",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+                aria-label="Close"
+              >
+                x
+              </button>
+            </div>
+
+            <label>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier Name</span>
+              <input
+                className="input"
+                value={supplierForm.name}
+                onChange={(e) => setSupplierForm((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="e.g. Kasapreko Distributor"
+                disabled={submittingSupplier}
+              />
+            </label>
+
+            <label>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Contact Person</span>
+              <input
+                className="input"
+                value={supplierForm.contact_person}
+                onChange={(e) => setSupplierForm((prev) => ({ ...prev, contact_person: e.target.value }))}
+                placeholder="e.g. Kwame Mensah"
+                disabled={submittingSupplier}
+              />
+            </label>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => setIsSupplierModalOpen(false)}
+                disabled={submittingSupplier}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  background: "white",
+                  color: "#334155",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={() => void handleCreateSupplier()}
+                disabled={submittingSupplier}
+              >
+                {submittingSupplier ? "Saving..." : "Save Supplier"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="card" style={{ marginBottom: 0 }}>
         <div style={{ marginBottom: 16 }}>
