@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Product } from "../types";
-import { fetchMovements, updateMyCategories } from "../api";
+import { updateMyCategories } from "../api";
 import { useAppCategories } from "../categories";
 import { useExpiryTracking } from "../settings";
 
@@ -10,17 +10,12 @@ type Props = {
   onSelect: (id: number) => void;
   onEdit: (id: number, updates: Partial<Product>) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
-  onStockAdjust: (
-    productId: number,
-    change: number,
-    reason: string,
-    expiry_date?: string,
-    unit_cost_price?: number | null,
-    unit_selling_price?: number | null,
-  ) => Promise<void>;
   searchTerm: string;
   filterCategory: string;
   filterExpiry: string;
+  filterStock: string;
+  filterSupplier: string;
+  sortBy: string;
   userRole?: string;
   onOpenInventory: () => void;
 };
@@ -29,10 +24,12 @@ export default function ProductList({
   products, 
   onEdit,
   onDelete,
-  onStockAdjust,
   searchTerm,
   filterCategory,
   filterExpiry,
+  filterStock,
+  filterSupplier,
+  sortBy,
   userRole = "Admin",
   onOpenInventory,
 }: Props) {
@@ -43,20 +40,9 @@ export default function ProductList({
   const effectiveFilterExpiry = showExpiryStatusFilter ? filterExpiry : "all";
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
-  const [adjustingId, setAdjustingId] = useState<number | null>(null);
-  const [adjustment, setAdjustment] = useState({
-    quantity: "",
-    reason: "",
-    expiry_date: "",
-    unit_type: "piece" as "piece" | "pack",
-    cost_price: "",
-    selling_price: "",
-  });
   const [stockData, setStockData] = useState<Record<number, number>>({});
   const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
-  const [damageId, setDamageId] = useState<number | null>(null);
-  const [damageForm, setDamageForm] = useState({ quantity: "", reason: "Damaged", details: "" });
   const [isCompactLayout, setIsCompactLayout] = useState(() => window.innerWidth < 980);
 
   useEffect(() => {
@@ -155,117 +141,6 @@ export default function ProductList({
     }
   };
 
-  const startAdjustment = (productId: number, presetReason?: string) => {
-    const product = products.find((p) => p.id === productId);
-    setAdjustingId(productId);
-    setAdjustment({
-      quantity: "",
-      reason: presetReason ?? "",
-      expiry_date: "",
-      unit_type: "piece",
-      cost_price: "",
-      selling_price: "",
-    });
-
-    // Prefill cost/selling for stock-in using product defaults when available.
-    if (presetReason === "New Stock" || presetReason === "Restock") {
-      setAdjustment((prev) => ({
-        ...prev,
-        cost_price: product?.cost_price != null ? String(product.cost_price) : "",
-        selling_price: product?.selling_price != null ? String(product.selling_price) : "",
-      }));
-    }
-  };
-
-  const cancelAdjustment = () => {
-    setAdjustingId(null);
-    setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "" });
-  };
-
-  const saveAdjustment = async (productId: number) => {
-    const product = products.find((p) => p.id === productId);
-    const packSize = product?.pack_size ?? null;
-
-    const rawQty = parseFloat(adjustment.quantity);
-    if (isNaN(rawQty) || rawQty === 0) {
-      alert("Please enter a valid quantity");
-      return;
-    }
-    if (!adjustment.reason.trim()) {
-      alert("Please provide a reason for the adjustment");
-      return;
-    }
-
-    // Normalize sign based on reason so staff can enter a positive quantity.
-    const negativeReasons = new Set(["Damaged", "Expired", "Lost/Stolen", "Write-off"]);
-    let qty = negativeReasons.has(adjustment.reason) ? -Math.abs(rawQty) : Math.abs(rawQty);
-
-    // Convert pack quantity into pieces for ledger accuracy.
-    // (We store all movement.change in pieces/units.)
-    const isStockIn = adjustment.reason === "New Stock" || adjustment.reason === "Restock";
-    let unitCostToSend: number | null = null;
-    let unitSellingToSend: number | null = null;
-
-    if (isStockIn && adjustment.unit_type === "pack") {
-      if (!packSize || packSize <= 0) {
-        alert("This product has no pack size. Set Pack Size on the product to stock by pack.");
-        return;
-      }
-      qty = qty * packSize;
-
-      const rawPackCost = parseFloat(adjustment.cost_price);
-      const rawPackSelling = parseFloat(adjustment.selling_price);
-
-      if (!isNaN(rawPackCost)) unitCostToSend = rawPackCost / packSize;
-      else if (product?.cost_price != null) unitCostToSend = Number(product.cost_price);
-      else if (product?.pack_cost_price != null) unitCostToSend = Number(product.pack_cost_price) / packSize;
-
-      if (!isNaN(rawPackSelling)) unitSellingToSend = rawPackSelling / packSize;
-      else if (product?.selling_price != null) unitSellingToSend = Number(product.selling_price);
-      else if (product?.pack_selling_price != null) unitSellingToSend = Number(product.pack_selling_price) / packSize;
-    } else if (isStockIn) {
-      // piece
-      const rawUnitCost = parseFloat(adjustment.cost_price);
-      const rawUnitSelling = parseFloat(adjustment.selling_price);
-
-      if (!isNaN(rawUnitCost)) unitCostToSend = rawUnitCost;
-      else if (product?.cost_price != null) unitCostToSend = Number(product.cost_price);
-      else if (product?.pack_cost_price != null && packSize && packSize > 0) unitCostToSend = Number(product.pack_cost_price) / packSize;
-
-      if (!isNaN(rawUnitSelling)) unitSellingToSend = rawUnitSelling;
-      else if (product?.selling_price != null) unitSellingToSend = Number(product.selling_price);
-      else if (product?.pack_selling_price != null && packSize && packSize > 0) unitSellingToSend = Number(product.pack_selling_price) / packSize;
-    }
-    // Only require expiry date if business uses expiry tracking AND product has expiry
-    const productTracksExpiry = usesExpiryTracking && !!product?.expiry_date;
-    if (adjustment.reason === "New Stock" && productTracksExpiry && !adjustment.expiry_date) {
-      alert("Please set an expiry date for new stock");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      await onStockAdjust(
-        productId,
-        qty,
-        adjustment.reason,
-        adjustment.expiry_date || undefined,
-        unitCostToSend,
-        unitSellingToSend,
-      );
-      setAdjustingId(null);
-      setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "" });
-      // Refresh stock data
-      const movements = await fetchMovements(productId);
-      const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
-      setStockData(prev => ({ ...prev, [productId]: Math.max(0, totalStock) }));
-    } catch (err) {
-      alert((err as Error).message || "Failed to adjust stock");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const calculateProfitMargin = (costPrice: number | null | undefined, sellingPrice: number | null | undefined): string => {
     if (!costPrice || !sellingPrice) return "-";
     const cost = Number(costPrice);
@@ -273,6 +148,26 @@ export default function ProductList({
     if (cost === 0) return "-";
     const margin = ((selling - cost) / cost) * 100;
     return `${margin.toFixed(1)}%`;
+  };
+
+  const getProductStock = (product: Product): number => {
+    const loadedStock = stockData[product.id];
+    if (typeof loadedStock === "number") {
+      return loadedStock;
+    }
+    return Math.max(0, Number(product.current_stock ?? 0));
+  };
+
+  const getProductMargin = (product: Product): number => {
+    if (!product.cost_price || !product.selling_price) {
+      return Number.NEGATIVE_INFINITY;
+    }
+    const cost = Number(product.cost_price);
+    const selling = Number(product.selling_price);
+    if (cost <= 0) {
+      return Number.NEGATIVE_INFINITY;
+    }
+    return ((selling - cost) / cost) * 100;
   };
 
   // Filter products based on search and filters
@@ -287,6 +182,10 @@ export default function ProductList({
 
     // Category filter
     const matchesCategory = filterCategory === "all" || p.category === filterCategory;
+
+    // Supplier filter
+    const supplier = p.supplier?.trim() || "";
+    const matchesSupplier = filterSupplier === "all" || supplier.toLowerCase() === filterSupplier.toLowerCase();
 
     // Expiry filter
     let matchesExpiry = true;
@@ -303,7 +202,35 @@ export default function ProductList({
         new Date(effectiveExpiry) > new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
     }
 
-    return matchesSearch && matchesCategory && matchesExpiry;
+    // Stock filter
+    const stock = getProductStock(p);
+    let matchesStock = true;
+    if (filterStock === "in_stock") {
+      matchesStock = stock > 5;
+    } else if (filterStock === "low_stock") {
+      matchesStock = stock > 0 && stock <= 5;
+    } else if (filterStock === "out_of_stock") {
+      matchesStock = stock <= 0;
+    }
+
+    return matchesSearch && matchesCategory && matchesSupplier && matchesExpiry && matchesStock;
+  }).sort((a, b) => {
+    if (sortBy === "name_desc") {
+      return b.name.localeCompare(a.name);
+    }
+    if (sortBy === "stock_desc") {
+      return getProductStock(b) - getProductStock(a);
+    }
+    if (sortBy === "stock_asc") {
+      return getProductStock(a) - getProductStock(b);
+    }
+    if (sortBy === "margin_desc") {
+      return getProductMargin(b) - getProductMargin(a);
+    }
+    if (sortBy === "newest") {
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    }
+    return a.name.localeCompare(b.name);
   });
 
   if (!products.length) {
@@ -562,326 +489,6 @@ export default function ProductList({
         </div>
       )}
 
-      {/* Stock Adjustment Modal */}
-      {adjustingId !== null && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-          onClick={cancelAdjustment}
-        >
-          <div
-            style={{
-              background: "white",
-              borderRadius: 12,
-              padding: 24,
-              maxWidth: 400,
-              width: "100%",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>
-              Adjust Stock - {products.find(p => p.id === adjustingId)?.name}
-            </h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <label>
-                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                  Quantity Change
-                </span>
-                <input
-                  className="input"
-                  type="number"
-                  step="1"
-                  value={adjustment.quantity}
-                  onChange={(e) => setAdjustment({ ...adjustment, quantity: e.target.value })}
-                  placeholder="50"
-                  autoFocus
-                  style={{ fontSize: 14, padding: 10 }}
-                />
-                <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
-                  Enter the number of units to add to inventory
-                </small>
-              </label>
-              <label>
-                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                  Reason
-                </span>
-                <select
-                  className="input"
-                  value={adjustment.reason}
-                  onChange={(e) => {
-                    const nextReason = e.target.value;
-                    setAdjustment((prev) => ({
-                      ...prev,
-                      reason: nextReason,
-                      expiry_date: nextReason === "New Stock" ? "" : prev.expiry_date,
-                    }));
-                  }}
-                  style={{ fontSize: 14, padding: 10 }}
-                >
-                  <option value="">Select reason...</option>
-                  <option value="New Stock">New Stock</option>
-                  <option value="Restock">Restock</option>
-                </select>
-              </label>
-
-              {(adjustment.reason === "New Stock" || adjustment.reason === "Restock") && (
-                <label>
-                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                    Quantity Type
-                  </span>
-                  <select
-                    className="input"
-                    value={adjustment.unit_type}
-                    onChange={(e) => setAdjustment({ ...adjustment, unit_type: e.target.value as "piece" | "pack" })}
-                    style={{ fontSize: 14, padding: 10 }}
-                  >
-                    <option value="piece">Piece</option>
-                    <option value="pack">Pack</option>
-                  </select>
-                  <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
-                    Pack requires the product Pack Size to be set.
-                  </small>
-                </label>
-              )}
-
-              {(adjustment.reason === "New Stock" || adjustment.reason === "Restock") && (
-                <label>
-                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                    Cost Price ({adjustment.unit_type === "pack" ? "per pack" : "per piece"})
-                  </span>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.01"
-                    value={adjustment.cost_price}
-                    onChange={(e) => setAdjustment({ ...adjustment, cost_price: e.target.value })}
-                    placeholder="e.g., 12.50"
-                    style={{ fontSize: 14, padding: 10 }}
-                  />
-                </label>
-              )}
-
-              {(adjustment.reason === "New Stock" || adjustment.reason === "Restock") && (
-                <label>
-                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                    Selling Price ({adjustment.unit_type === "pack" ? "per pack" : "per piece"})
-                  </span>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.01"
-                    value={adjustment.selling_price}
-                    onChange={(e) => setAdjustment({ ...adjustment, selling_price: e.target.value })}
-                    placeholder="e.g., 15.00"
-                    style={{ fontSize: 14, padding: 10 }}
-                  />
-                </label>
-              )}
-              {usesExpiryTracking && adjustment.reason === "New Stock" && adjustingId !== null && products.find((p) => p.id === adjustingId)?.expiry_date && (
-                <label>
-                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                    Expiry Date *
-                  </span>
-                  <input
-                    className="input"
-                    type="date"
-                    value={adjustment.expiry_date}
-                    onChange={(e) => setAdjustment({ ...adjustment, expiry_date: e.target.value })}
-                    style={{ fontSize: 14, padding: 10 }}
-                  />
-                  <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
-                    Set the expiry date for this new stock batch
-                  </small>
-                </label>
-              )}
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button
-                  className="button"
-                  onClick={() => saveAdjustment(adjustingId)}
-                  disabled={busy}
-                  style={{ flex: 1, background: "#10b981", fontSize: 14 }}
-                >
-                  Adjust Stock
-                </button>
-                <button
-                  onClick={cancelAdjustment}
-                  disabled={busy}
-                  style={{
-                    flex: 1,
-                    padding: "10px 16px",
-                    fontSize: 14,
-                    background: "transparent",
-                    border: "1px solid #d1d5db",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Report Damage Modal */}
-      {damageId !== null && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-          onClick={() => setDamageId(null)}
-        >
-          <div
-            style={{
-              background: "white",
-              borderRadius: 12,
-              padding: 24,
-              maxWidth: 400,
-              width: "100%",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600, color: "#dc2626" }}>
-              Report Damage - {products.find(p => p.id === damageId)?.name}
-            </h3>
-            <p style={{ margin: "0 0 16px", fontSize: 14, color: "#6b7280" }}>
-              This will deduct stock and record the loss. Current stock: <strong>{stockData[damageId] ?? 0}</strong>
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <label>
-                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                  Quantity Damaged *
-                </span>
-                <input
-                  className="input"
-                  type="number"
-                  step="1"
-                  min="1"
-                  max={stockData[damageId] ?? 0}
-                  value={damageForm.quantity}
-                  onChange={(e) => setDamageForm({ ...damageForm, quantity: e.target.value })}
-                  placeholder="Enter quantity"
-                  autoFocus
-                  style={{ fontSize: 14, padding: 10 }}
-                />
-              </label>
-              <label>
-                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                  Damage Type
-                </span>
-                <select
-                  className="input"
-                  value={damageForm.reason}
-                  onChange={(e) => setDamageForm({ ...damageForm, reason: e.target.value })}
-                  style={{ fontSize: 14, padding: 10 }}
-                >
-                  <option value="Damaged">Damaged (Physical damage)</option>
-                  <option value="Expired">Expired (Past expiry date)</option>
-                  <option value="Lost/Stolen">Lost/Stolen</option>
-                  <option value="Write-off">Write-off (Other reasons)</option>
-                </select>
-              </label>
-              <label>
-                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
-                  Details (Optional)
-                </span>
-                <textarea
-                  className="input"
-                  value={damageForm.details}
-                  onChange={(e) => setDamageForm({ ...damageForm, details: e.target.value })}
-                  placeholder="Describe what happened..."
-                  rows={2}
-                  style={{ fontSize: 14, padding: 10, resize: "vertical" }}
-                />
-              </label>
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button
-                  className="button"
-                  onClick={async () => {
-                    const qty = parseInt(damageForm.quantity);
-                    const available = stockData[damageId] ?? 0;
-                    
-                    if (isNaN(qty) || qty <= 0) {
-                      alert("Please enter a valid quantity");
-                      return;
-                    }
-                    if (qty > available) {
-                      alert(`Cannot report more than available stock (${available})`);
-                      return;
-                    }
-                    
-                    const reasonText = damageForm.details.trim() 
-                      ? `${damageForm.reason}: ${damageForm.details.trim()}`
-                      : damageForm.reason;
-                    
-                    setBusy(true);
-                    try {
-                      await onStockAdjust(
-                        damageId,
-                        -qty, // Negative to deduct
-                        reasonText,
-                        undefined,
-                        null,
-                        null,
-                      );
-                      setDamageId(null);
-                      setDamageForm({ quantity: "", reason: "Damaged", details: "" });
-                      // Refresh stock data
-                      const movements = await fetchMovements(damageId);
-                      const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
-                      setStockData(prev => ({ ...prev, [damageId]: Math.max(0, totalStock) }));
-                    } catch (err) {
-                      alert((err as Error).message || "Failed to record damage");
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                  disabled={busy}
-                  style={{ flex: 1, background: "#dc2626", fontSize: 14 }}
-                >
-                  {busy ? "Recording..." : "Record Loss"}
-                </button>
-                <button
-                  onClick={() => setDamageId(null)}
-                  disabled={busy}
-                  style={{
-                    flex: 1,
-                    padding: "10px 16px",
-                    fontSize: 14,
-                    background: "transparent",
-                    border: "1px solid #d1d5db",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         <h2 className="section-title" style={{ margin: 0 }}>Products</h2>
         <span style={{ fontSize: 14, color: "#6b7280" }}>
@@ -891,7 +498,7 @@ export default function ProductList({
       
       {filteredProducts.length === 0 ? (
         <p style={{ margin: 0, color: "#4a5368", textAlign: "center", padding: "40px 0" }}>
-          {searchTerm || filterCategory !== "all" || effectiveFilterExpiry !== "all" 
+          {searchTerm || filterCategory !== "all" || effectiveFilterExpiry !== "all" || filterSupplier !== "all" || filterStock !== "all"
             ? "No products match your filters" 
             : "No products yet. Create one to get started."}
         </p>
@@ -963,6 +570,23 @@ export default function ProductList({
                     gap: 8,
                   }}
                 >
+                  <button
+                    onClick={onOpenInventory}
+                    disabled={busy}
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: 13,
+                      background: "#0f766e",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 8,
+                      cursor: busy ? "not-allowed" : "pointer",
+                      fontWeight: 700,
+                    }}
+                    title="Open Inventory actions"
+                  >
+                    Open Inventory
+                  </button>
                   {isAdmin && (
                     <>
                       <button
@@ -982,42 +606,8 @@ export default function ProductList({
                       >
                         Edit
                       </button>
-                      <button
-                        onClick={() => startAdjustment(p.id)}
-                        disabled={busy}
-                        style={{
-                          padding: "8px 12px",
-                          fontSize: 13,
-                          background: "#0f766e",
-                          color: "white",
-                          border: "none",
-                          borderRadius: 8,
-                          cursor: busy ? "not-allowed" : "pointer",
-                          fontWeight: 600,
-                        }}
-                        title="Adjust stock"
-                      >
-                        Adjust
-                      </button>
                     </>
                   )}
-                  <button
-                    onClick={onOpenInventory}
-                    disabled={busy}
-                    style={{
-                      padding: "8px 12px",
-                      fontSize: 13,
-                      background: "#10b981",
-                      color: "white",
-                      border: "none",
-                      borderRadius: 8,
-                      cursor: busy ? "not-allowed" : "pointer",
-                      fontWeight: 600,
-                    }}
-                    title="Open Inventory actions"
-                  >
-                    Inventory Actions
-                  </button>
                   {isAdmin && (
                     <button
                       onClick={() => void handleDelete(p)}
@@ -1154,6 +744,23 @@ export default function ProductList({
                           justifyContent: "center",
                         }}
                       >
+                        <button
+                          onClick={onOpenInventory}
+                          disabled={busy}
+                          style={{
+                            padding: "6px 12px",
+                            fontSize: 12,
+                            background: "#0f766e",
+                            color: "white",
+                            border: "none",
+                            borderRadius: 6,
+                            cursor: busy ? "not-allowed" : "pointer",
+                            fontWeight: 700,
+                          }}
+                          title="Open Inventory actions"
+                        >
+                          Open Inventory
+                        </button>
                         {isAdmin && (
                           <>
                             <button
@@ -1173,42 +780,8 @@ export default function ProductList({
                             >
                               Edit
                             </button>
-                            <button
-                              onClick={() => startAdjustment(p.id)}
-                              disabled={busy}
-                              style={{
-                                padding: "6px 12px",
-                                fontSize: 12,
-                                background: "#0f766e",
-                                color: "white",
-                                border: "none",
-                                borderRadius: 6,
-                                cursor: busy ? "not-allowed" : "pointer",
-                                fontWeight: 500,
-                              }}
-                              title="Adjust stock"
-                            >
-                              Adjust
-                            </button>
                           </>
                         )}
-                        <button
-                          onClick={onOpenInventory}
-                          disabled={busy}
-                          style={{
-                            padding: "6px 12px",
-                            fontSize: 12,
-                            background: "#10b981",
-                            color: "white",
-                            border: "none",
-                            borderRadius: 6,
-                            cursor: busy ? "not-allowed" : "pointer",
-                            fontWeight: 500,
-                          }}
-                          title="Open Inventory actions"
-                        >
-                          Inventory Actions
-                        </button>
                         {isAdmin && (
                           <button
                             onClick={() => void handleDelete(p)}

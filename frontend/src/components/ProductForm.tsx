@@ -10,6 +10,7 @@ type Props = {
   userRole?: string;
   branches?: Branch[];
   activeBranchId?: number | null;
+  layoutMode?: "card" | "modal";
 };
 
 const UNITS = ["pcs", "box", "pack", "dozen", "carton", "bundle", "unit"];
@@ -20,6 +21,7 @@ export default function ProductForm({
   userRole = "Admin",
   branches,
   activeBranchId,
+  layoutMode = "card",
 }: Props) {
   const categoryOptions = useAppCategories();
 
@@ -64,6 +66,7 @@ export default function ProductForm({
   const [submittingMode, setSubmittingMode] = useState<"save" | "saveAndNew" | null>(null);
 
   const role = userRole;
+  const isModalLayout = layoutMode === "modal";
 
   const visibleBranches = useMemo(() => branches ?? [], [branches]);
 
@@ -175,20 +178,24 @@ export default function ProductForm({
   };
 
   return (
-    <div className="card" style={{ maxWidth: 900, margin: "0 auto" }}>
+    <div className={isModalLayout ? undefined : "card"} style={{ maxWidth: 900, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <h2 className="section-title" style={{ margin: 0 }}>Add New Product</h2>
         <button
           type="button"
           className="button"
           onClick={generateSKU}
-          style={{ background: "#6b7280", padding: "8px 14px" }}
+          style={{
+            background: "#6b7280",
+            padding: "8px 14px",
+            fontSize: isModalLayout ? 13 : undefined,
+          }}
         >
           Generate SKU
         </button>
       </div>
 
-      <form onSubmit={submit} className="grid" style={{ gap: 20 }}>
+      <form onSubmit={submit} className="grid" style={{ gap: isModalLayout ? 18 : 20 }}>
         {/* Basic Information */}
         <div>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>

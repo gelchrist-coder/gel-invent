@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { createMovement, createProduct, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, updateProduct, getCachedProducts, clearDataCache } from "./api";
+import { createProduct, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, updateProduct, getCachedProducts, clearDataCache } from "./api";
 import Layout from "./components/Layout";
 import { getSalesOutboxCount } from "./offline/storage";
 import { syncSalesOutboxOnce } from "./offline/sync";
@@ -52,6 +52,9 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterExpiry, setFilterExpiry] = useState("all");
+  const [filterStock, setFilterStock] = useState("all");
+  const [filterSupplier, setFilterSupplier] = useState("all");
+  const [sortBy, setSortBy] = useState("name_asc");
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [userName, setUserName] = useState(() => readStoredUser()?.name || "User");
   const [businessName, setBusinessName] = useState(() => readStoredUser()?.business_name || "Business");
@@ -75,11 +78,68 @@ export default function App() {
 
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
 
+  const supplierOptions = useMemo(() => {
+    const uniqueSuppliers = new Set<string>();
+    products.forEach((product) => {
+      const supplierName = product.supplier?.trim();
+      if (supplierName) {
+        uniqueSuppliers.add(supplierName);
+      }
+    });
+    return Array.from(uniqueSuppliers).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  const productKpis = useMemo(() => {
+    let lowStockCount = 0;
+    let outOfStockCount = 0;
+    let inventoryValue = 0;
+    let marginSum = 0;
+    let marginCount = 0;
+
+    products.forEach((product) => {
+      const stock = Math.max(0, Number(product.current_stock ?? 0));
+      const costPrice = Number(product.cost_price ?? 0);
+      const sellingPrice = Number(product.selling_price ?? 0);
+
+      if (stock === 0) {
+        outOfStockCount += 1;
+      } else if (stock <= 5) {
+        lowStockCount += 1;
+      }
+
+      if (stock > 0 && Number.isFinite(costPrice) && costPrice > 0) {
+        inventoryValue += stock * costPrice;
+      }
+
+      if (Number.isFinite(costPrice) && Number.isFinite(sellingPrice) && costPrice > 0 && sellingPrice > 0) {
+        marginSum += ((sellingPrice - costPrice) / costPrice) * 100;
+        marginCount += 1;
+      }
+    });
+
+    return {
+      totalSkus: products.length,
+      lowStockCount,
+      outOfStockCount,
+      inventoryValue,
+      averageMarginPercent: marginCount > 0 ? marginSum / marginCount : 0,
+    };
+  }, [products]);
+
   useEffect(() => {
     if (!showExpiryStatusFilter && filterExpiry !== "all") {
       setFilterExpiry("all");
     }
   }, [showExpiryStatusFilter, filterExpiry]);
+
+  useEffect(() => {
+    if (filterSupplier === "all") {
+      return;
+    }
+    if (!supplierOptions.includes(filterSupplier)) {
+      setFilterSupplier("all");
+    }
+  }, [filterSupplier, supplierOptions]);
 
   const logoutAndReset = () => {
     setIsAuthenticated(false);
@@ -474,28 +534,52 @@ export default function App() {
     }
   };
 
-  const handleStockAdjustment = async (
-    productId: number,
-    change: number,
-    reason: string,
-    expiry_date?: string,
-    unit_cost_price?: number | null,
-    unit_selling_price?: number | null,
-  ) => {
-    await createMovement(productId, {
-      change,
-      reason,
-      expiry_date: expiry_date || null,
-      unit_cost_price: unit_cost_price ?? null,
-      unit_selling_price: unit_selling_price ?? null,
-    });
-  };
-
   const renderView = (view: string) => {
     switch (view) {
       case "dashboard":
         return <Dashboard onNavigate={setActiveView} />;
-      case "products":
+      case "products": {
+        const stockFilterLabels: Record<string, string> = {
+          in_stock: "In stock",
+          low_stock: "Low stock",
+          out_of_stock: "Out of stock",
+        };
+        const expiryFilterLabels: Record<string, string> = {
+          expired: "Expired only",
+          expiring: "Expiring soon",
+          fresh: "Fresh items",
+        };
+        const sortLabels: Record<string, string> = {
+          name_asc: "Name A-Z",
+          name_desc: "Name Z-A",
+          stock_desc: "Stock high-low",
+          stock_asc: "Stock low-high",
+          margin_desc: "Margin high-low",
+          newest: "Newest first",
+        };
+
+        const activeFilterChips: Array<{ key: string; label: string; onClear: () => void }> = [];
+        if (searchTerm.trim()) {
+          activeFilterChips.push({ key: "search", label: `Search: ${searchTerm.trim()}`, onClear: () => setSearchTerm("") });
+        }
+        if (filterCategory !== "all") {
+          activeFilterChips.push({ key: "category", label: `Category: ${filterCategory}`, onClear: () => setFilterCategory("all") });
+        }
+        if (showExpiryStatusFilter && filterExpiry !== "all") {
+          activeFilterChips.push({ key: "expiry", label: `Expiry: ${expiryFilterLabels[filterExpiry] ?? filterExpiry}`, onClear: () => setFilterExpiry("all") });
+        }
+        if (filterStock !== "all") {
+          activeFilterChips.push({ key: "stock", label: `Stock: ${stockFilterLabels[filterStock] ?? filterStock}`, onClear: () => setFilterStock("all") });
+        }
+        if (filterSupplier !== "all") {
+          activeFilterChips.push({ key: "supplier", label: `Supplier: ${filterSupplier}`, onClear: () => setFilterSupplier("all") });
+        }
+        if (sortBy !== "name_asc") {
+          activeFilterChips.push({ key: "sort", label: `Sort: ${sortLabels[sortBy] ?? sortBy}`, onClear: () => setSortBy("name_asc") });
+        }
+
+        const hasActiveFilters = activeFilterChips.length > 0;
+
         return (
           <div className="app-shell">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
@@ -538,41 +622,77 @@ export default function App() {
                 <div
                   style={{
                     background: "white",
-                    borderRadius: 12,
-                    maxWidth: 600,
+                      borderRadius: 16,
+                      maxWidth: 840,
                     width: "100%",
                     maxHeight: "90vh",
                     overflow: "auto",
-                    padding: 24,
+                      padding: 18,
+                      position: "relative",
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                    <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Add New Product</h2>
                     <button
+                      type="button"
                       onClick={() => setShowAddProduct(false)}
                       style={{
+                        position: "sticky",
+                        top: 0,
+                        float: "right",
                         background: "transparent",
                         border: "none",
-                        fontSize: 24,
+                        fontSize: 13,
                         cursor: "pointer",
                         color: "#6b7280",
-                        padding: 4,
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        fontWeight: 700,
+                        zIndex: 2,
                       }}
                     >
-                      X
+                      Close
                     </button>
-                  </div>
                   <ProductForm
                     onCreate={handleCreateProduct}
                     onCancel={() => setShowAddProduct(false)}
                     userRole={userRole}
                     branches={branches}
                     activeBranchId={activeBranchId}
+                    layoutMode="modal"
                   />
                 </div>
               </div>
             )}
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+                gap: 12,
+                marginBottom: 16,
+              }}
+            >
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #dbe5f2", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Total SKUs</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", lineHeight: 1 }}>{productKpis.totalSkus}</div>
+              </div>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #fde68a", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Low Stock</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#b45309", lineHeight: 1 }}>{productKpis.lowStockCount}</div>
+              </div>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #fecaca", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#991b1b", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Out of Stock</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#dc2626", lineHeight: 1 }}>{productKpis.outOfStockCount}</div>
+              </div>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #bfdbfe", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Inventory Value</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#1e40af", lineHeight: 1 }}>₵{productKpis.inventoryValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+              </div>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #bbf7d0", boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Avg Margin</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#15803d", lineHeight: 1 }}>{productKpis.averageMarginPercent.toFixed(1)}%</div>
+              </div>
+            </div>
             
             {/* Search and Filter Bar */}
             <div
@@ -601,6 +721,22 @@ export default function App() {
                 </label>
                 <label style={{ margin: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                    Stock Status
+                  </span>
+                  <select
+                    className="input"
+                    value={filterStock}
+                    onChange={(e) => setFilterStock(e.target.value)}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="all">All Stock Levels</option>
+                    <option value="in_stock">In Stock</option>
+                    <option value="low_stock">Low Stock (1-5)</option>
+                    <option value="out_of_stock">Out of Stock</option>
+                  </select>
+                </label>
+                <label style={{ margin: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Category
                   </span>
                   <select
@@ -624,6 +760,24 @@ export default function App() {
                       </option>
                     ))}
                     <option value="__add_new__">+ Add new category…</option>
+                  </select>
+                </label>
+                <label style={{ margin: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                    Supplier
+                  </span>
+                  <select
+                    className="input"
+                    value={filterSupplier}
+                    onChange={(e) => setFilterSupplier(e.target.value)}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="all">All Suppliers</option>
+                    {supplierOptions.map((supplier) => (
+                      <option key={supplier} value={supplier}>
+                        {supplier}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 {addingCategory && (
@@ -691,29 +845,75 @@ export default function App() {
                     </select>
                   </label>
                 ) : null}
+                <label style={{ margin: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                    Sort By
+                  </span>
+                  <select
+                    className="input"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="name_asc">Name (A-Z)</option>
+                    <option value="name_desc">Name (Z-A)</option>
+                    <option value="stock_desc">Stock (High-Low)</option>
+                    <option value="stock_asc">Stock (Low-High)</option>
+                    <option value="margin_desc">Margin (High-Low)</option>
+                    <option value="newest">Newest First</option>
+                  </select>
+                </label>
               </div>
-              {(searchTerm || filterCategory !== "all" || filterExpiry !== "all") && (
-                <button
-                  onClick={() => {
-                    setSearchTerm("");
-                    setFilterCategory("all");
-                    setFilterExpiry("all");
-                  }}
-                  style={{
-                    marginTop: 12,
-                    padding: "6px 12px",
-                    background: "transparent",
-                    border: "1px solid #d8dce8",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#4a5368",
-                  }}
-                >
-                  Clear Filters
-                </button>
-              )}
+              {hasActiveFilters ? (
+                <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                  {activeFilterChips.map((chip) => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      onClick={chip.onClear}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "5px 10px",
+                        borderRadius: 999,
+                        border: "1px solid #cbd5e1",
+                        background: "#f8fafc",
+                        color: "#334155",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      <span>{chip.label}</span>
+                      <span style={{ color: "#64748b", fontWeight: 900 }}>x</span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm("");
+                      setFilterCategory("all");
+                      setFilterExpiry("all");
+                      setFilterStock("all");
+                      setFilterSupplier("all");
+                      setSortBy("name_asc");
+                    }}
+                    style={{
+                      padding: "6px 12px",
+                      background: "transparent",
+                      border: "1px solid #d8dce8",
+                      borderRadius: 999,
+                      cursor: "pointer",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "#4a5368",
+                    }}
+                  >
+                    Clear All
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             <div className="grid" style={{ gap: 16 }}>
@@ -723,16 +923,19 @@ export default function App() {
                 onSelect={(id: number) => setSelectedId(id)}
                 onEdit={handleEditProduct}
                 onDelete={handleDeleteProduct}
-                onStockAdjust={handleStockAdjustment}
                 onOpenInventory={() => setActiveView("inventory")}
                 searchTerm={searchTerm}
                 filterCategory={filterCategory}
                 filterExpiry={filterExpiry}
+                filterStock={filterStock}
+                filterSupplier={filterSupplier}
+                sortBy={sortBy}
                 userRole={userRole}
               />
             </div>
           </div>
         );
+      }
       case "inventory":
         return <Inventory />;
       case "sales":
