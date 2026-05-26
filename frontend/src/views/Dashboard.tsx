@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSystemSettingsCached, getCachedProducts } from "../api";
 import { Product } from "../types";
@@ -50,6 +50,61 @@ type TrendPoint = {
   revenue: number;
 };
 
+type GlobalRangeKey = "today" | "7d" | "30d" | "all" | "custom";
+
+type KpiItem = {
+  label: string;
+  value: string;
+  accent: string;
+  helper: string;
+};
+
+const rangeOptions: Array<{ key: GlobalRangeKey; label: string }> = [
+  { key: "today", label: "Today" },
+  { key: "7d", label: "Last 7 Days" },
+  { key: "30d", label: "Last 30 Days" },
+  { key: "all", label: "All Time" },
+  { key: "custom", label: "Custom" },
+];
+
+function toISODateOnly(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function getRangeStartDate(range: GlobalRangeKey, customStartDate: string): string | undefined {
+  if (range === "all") {
+    return undefined;
+  }
+
+  if (range === "custom") {
+    return customStartDate || undefined;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (range === "today") {
+    return toISODateOnly(today);
+  }
+
+  if (range === "7d") {
+    const start = new Date(today);
+    start.setDate(today.getDate() - 6);
+    return toISODateOnly(start);
+  }
+
+  const start = new Date(today);
+  start.setDate(today.getDate() - 29);
+  return toISODateOnly(start);
+}
+
+function toCurrency(value: number): string {
+  return `GHS ${value.toFixed(2)}`;
+}
+
 export default function Dashboard({ onNavigate }: Props) {
   // Initialize from cache for instant display
   const cachedProducts = getCachedProducts();
@@ -61,10 +116,20 @@ export default function Dashboard({ onNavigate }: Props) {
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
   const [expiryWarningDays, setExpiryWarningDays] = useState<number>(180);
   const usesExpiryTracking = useExpiryTracking();
-  
-  // Top Products date filter
-  const [topProductsDate, setTopProductsDate] = useState<string>("");
-  const [topProductsLoading, setTopProductsLoading] = useState(false);
+  const [selectedRange, setSelectedRange] = useState<GlobalRangeKey>("30d");
+  const [customRangeStartDate, setCustomRangeStartDate] = useState<string>("");
+  const rangeStartDate = useMemo(
+    () => getRangeStartDate(selectedRange, customRangeStartDate),
+    [customRangeStartDate, selectedRange],
+  );
+
+  const rangeLabel = useMemo(() => {
+    if (selectedRange === "today") return "Today";
+    if (selectedRange === "7d") return "Last 7 Days";
+    if (selectedRange === "30d") return "Last 30 Days";
+    if (selectedRange === "custom") return customRangeStartDate ? `Since ${customRangeStartDate}` : "Custom Range";
+    return "All Time";
+  }, [customRangeStartDate, selectedRange]);
 
   // Check if current user is Admin
   const currentUser = localStorage.getItem("user");
@@ -72,127 +137,63 @@ export default function Dashboard({ onNavigate }: Props) {
   const isAdmin = userRole === "Admin";
   const token = localStorage.getItem("token");
 
-  const reloadDashboardData = async () => {
+  const loadDashboardData = useCallback(async () => {
     if (!token) {
       setLoading(false);
       setDashboardLoading(false);
       return;
     }
 
+    setDashboardLoading(true);
+
     try {
-      const [productData, salesData] = await Promise.all([
+      const [productsData, settingsData, dashboardResponse, salesData] = await Promise.all([
         fetchProductsCached((fresh) => setProducts(fresh)),
-        isAdmin ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])) : Promise.resolve([]),
+        fetchSystemSettingsCached((fresh) => {
+          setLowStockThreshold(fresh.low_stock_threshold);
+          setExpiryWarningDays(fresh.expiry_warning_days);
+        }).catch(() => null),
+        isAdmin ? fetchSalesDashboard(rangeStartDate) : Promise.resolve(null),
+        isAdmin ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])).catch(() => []) : Promise.resolve([]),
       ]);
-      setProducts(productData);
+
+      setProducts(productsData);
+
+      if (settingsData) {
+        setLowStockThreshold(settingsData.low_stock_threshold);
+        setExpiryWarningDays(settingsData.expiry_warning_days);
+      }
+
       if (isAdmin) {
+        if (dashboardResponse) {
+          setDashboardData(dashboardResponse);
+        }
         setSalesForTrend(salesData as TrendSale[]);
+      } else {
+        setDashboardData(null);
+        setSalesForTrend([]);
       }
     } catch (error) {
       if (import.meta.env.DEV) {
-        console.warn("Dashboard refresh skipped due to temporary error:", error);
+        console.warn("Dashboard load degraded due to temporary error:", error);
       }
     } finally {
       setLoading(false);
-    }
-
-    // Only fetch dashboard if admin
-    if (!isAdmin) {
-      setDashboardLoading(false);
-      return;
-    }
-    setDashboardLoading(true);
-    try {
-      const data = await fetchSalesDashboard(topProductsDate || undefined);
-      setDashboardData(data);
-    } catch (error) {
-      console.error("Error loading dashboard:", error);
-    } finally {
       setDashboardLoading(false);
     }
-  };
+  }, [isAdmin, rangeStartDate, token]);
 
   useEffect(() => {
-    if (!token) {
-      setLoading(false);
-      setDashboardLoading(false);
-      return;
-    }
-
-    const loadData = async () => {
-      try {
-        const [productsData, settingsData, dashboardResponse, salesData] = await Promise.all([
-          fetchProductsCached((fresh) => setProducts(fresh)),
-          fetchSystemSettingsCached((fresh) => {
-            setLowStockThreshold(fresh.low_stock_threshold);
-            setExpiryWarningDays(fresh.expiry_warning_days);
-          }).catch(() => null),
-          isAdmin ? fetchSalesDashboard() : Promise.resolve(null),
-          isAdmin ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])).catch(() => []) : Promise.resolve([]),
-        ]);
-
-        setProducts(productsData);
-
-        if (settingsData) {
-          setLowStockThreshold(settingsData.low_stock_threshold);
-          setExpiryWarningDays(settingsData.expiry_warning_days);
-        }
-
-        if (isAdmin && dashboardResponse) {
-          setDashboardData(dashboardResponse);
-        }
-
-        if (isAdmin) {
-          setSalesForTrend(salesData as TrendSale[]);
-        }
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.warn("Dashboard startup load degraded due to temporary error:", error);
-        }
-      } finally {
-        setLoading(false);
-        setDashboardLoading(false);
-      }
-    };
-    void loadData();
-  }, [token, isAdmin]);
+    void loadDashboardData();
+  }, [loadDashboardData]);
 
   useEffect(() => {
     const handler = () => {
-      void reloadDashboardData();
+      void loadDashboardData();
     };
     window.addEventListener("activeBranchChanged", handler as EventListener);
     return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, isAdmin, topProductsDate]);
-
-  // Reload top products with date filter
-  const handleFilterTopProducts = async () => {
-    if (!token || !isAdmin) return;
-    setTopProductsLoading(true);
-    try {
-      const data = await fetchSalesDashboard(topProductsDate || undefined);
-      setDashboardData(data);
-    } catch (error) {
-      console.error("Error filtering top products:", error);
-    } finally {
-      setTopProductsLoading(false);
-    }
-  };
-
-  // Clear date filter
-  const handleClearFilter = async () => {
-    setTopProductsDate("");
-    setTopProductsLoading(true);
-    try {
-      const data = await fetchSalesDashboard();
-      setDashboardData(data);
-    } catch (error) {
-      console.error("Error loading dashboard:", error);
-    } finally {
-      setTopProductsLoading(false);
-    }
-  };
+  }, [loadDashboardData]);
 
   const dashboardTopProducts = dashboardData?.top_products;
   const dashboardRecentSales = dashboardData?.recent_sales;
@@ -203,13 +204,51 @@ export default function Dashboard({ onNavigate }: Props) {
   // Recent sales from dashboard data
   const recentSales = useMemo(() => dashboardRecentSales ?? [], [dashboardRecentSales]);
 
+  const rangeStartTimestamp = useMemo(() => {
+    if (!rangeStartDate) {
+      return null;
+    }
+    const parsed = new Date(`${rangeStartDate}T00:00:00`).getTime();
+    return Number.isNaN(parsed) ? null : parsed;
+  }, [rangeStartDate]);
+
+  const salesInSelectedRange = useMemo<TrendSale[]>(() => {
+    const source = salesForTrend.length > 0
+      ? salesForTrend
+      : recentSales.map((sale) => ({ created_at: sale.created_at, total_price: sale.total_price }));
+
+    if (rangeStartTimestamp == null) {
+      return source;
+    }
+
+    return source.filter((sale) => {
+      const saleTime = new Date(sale.created_at).getTime();
+      return Number.isFinite(saleTime) && saleTime >= rangeStartTimestamp;
+    });
+  }, [rangeStartTimestamp, recentSales, salesForTrend]);
+
+  const trendWindowDays = useMemo(() => {
+    if (selectedRange === "today") return 1;
+    if (selectedRange === "7d") return 7;
+    if (selectedRange === "30d") return 30;
+
+    if (selectedRange === "custom" && rangeStartTimestamp != null) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diffDays = Math.floor((today.getTime() - rangeStartTimestamp) / (1000 * 60 * 60 * 24)) + 1;
+      return Math.min(Math.max(diffDays, 1), 30);
+    }
+
+    return 14;
+  }, [rangeStartTimestamp, selectedRange]);
+
   const salesTrend = useMemo<TrendPoint[]>(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const points: TrendPoint[] = [];
     const dayMap = new Map<string, number>();
 
-    for (let i = 13; i >= 0; i -= 1) {
+    for (let i = trendWindowDays - 1; i >= 0; i -= 1) {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
       const key = d.toISOString().slice(0, 10);
@@ -218,11 +257,7 @@ export default function Dashboard({ onNavigate }: Props) {
       dayMap.set(key, 0);
     }
 
-    const source = salesForTrend.length > 0
-      ? salesForTrend
-      : recentSales.map((s) => ({ created_at: s.created_at, total_price: s.total_price }));
-
-    for (const sale of source) {
+    for (const sale of salesInSelectedRange) {
       const saleDate = new Date(sale.created_at);
       if (Number.isNaN(saleDate.getTime())) continue;
       const key = saleDate.toISOString().slice(0, 10);
@@ -232,13 +267,13 @@ export default function Dashboard({ onNavigate }: Props) {
     }
 
     return points.map((p) => ({ ...p, revenue: dayMap.get(p.key) ?? 0 }));
-  }, [salesForTrend, recentSales]);
+  }, [salesInSelectedRange, trendWindowDays]);
 
   const topProductsBars = useMemo(
     () => topProducts.slice(0, 6).map((p) => ({
       name: p.name,
-      revenue: Number(p.revenue),
-      qty: Number(p.quantity_sold),
+      revenue: Number.isFinite(Number(p.revenue)) ? Number(p.revenue) : 0,
+      qty: Number.isFinite(Number(p.quantity_sold)) ? Number(p.quantity_sold) : 0,
     })),
     [topProducts]
   );
@@ -276,6 +311,90 @@ export default function Dashboard({ onNavigate }: Props) {
       new Date(p.expiry_date) <= new Date(Date.now() + expiryWarningDays * 24 * 60 * 60 * 1000)
   ) : [];
 
+  const totalRangeRevenue = useMemo(
+    () => salesInSelectedRange.reduce((sum, sale) => {
+      const amount = Number(sale.total_price ?? 0);
+      return sum + (Number.isFinite(amount) ? amount : 0);
+    }, 0),
+    [salesInSelectedRange],
+  );
+
+  const averageOrderValue = salesInSelectedRange.length > 0
+    ? totalRangeRevenue / salesInSelectedRange.length
+    : 0;
+
+  const kpiItems = useMemo<KpiItem[]>(() => {
+    if (isAdmin) {
+      return [
+        {
+          label: `Revenue (${rangeLabel})`,
+          value: toCurrency(totalRangeRevenue),
+          accent: "#047857",
+          helper: `${salesInSelectedRange.length} order${salesInSelectedRange.length === 1 ? "" : "s"}`,
+        },
+        {
+          label: "Average Order",
+          value: toCurrency(averageOrderValue),
+          accent: "#1d4ed8",
+          helper: "Per transaction",
+        },
+        {
+          label: "Top Product",
+          value: topProducts[0]?.name ?? "No sales yet",
+          accent: "#7c3aed",
+          helper: topProducts[0] ? `${Number(topProducts[0].quantity_sold || 0)} units sold` : "Awaiting sales",
+        },
+        {
+          label: "Stock Alerts",
+          value: String(lowStockItems.length + expiredProducts.length + expiringSoonProducts.length),
+          accent: "#b45309",
+          helper: `${lowStockItems.length} low stock, ${expiredProducts.length} expired`,
+        },
+      ];
+    }
+
+    return [
+      {
+        label: "Products",
+        value: String(products.length),
+        accent: "#1d4ed8",
+        helper: "Active catalog",
+      },
+      {
+        label: "Low Stock",
+        value: String(lowStockItems.length),
+        accent: "#b45309",
+        helper: `Threshold ${lowStockThreshold}`,
+      },
+      {
+        label: "Expired",
+        value: String(expiredProducts.length),
+        accent: "#b91c1c",
+        helper: usesExpiryTracking ? "Needs removal" : "Expiry tracking off",
+      },
+      {
+        label: "Expiring Soon",
+        value: String(expiringSoonProducts.length),
+        accent: "#92400e",
+        helper: `Within ${expiryWarningDays} days`,
+      },
+    ];
+  }, [
+    averageOrderValue,
+    expiringSoonProducts.length,
+    expiryWarningDays,
+    expiredProducts.length,
+    isAdmin,
+    lowStockItems.length,
+    lowStockThreshold,
+    products.length,
+    rangeLabel,
+    salesInSelectedRange.length,
+    topProducts,
+    totalRangeRevenue,
+    usesExpiryTracking,
+  ]);
+
   const quickActions = [
     { label: "Add Product", icon: "+", color: "#1f7aff", action: "products" },
     { label: "Record Sale", icon: "$", color: "#10b981", action: "sales" },
@@ -285,7 +404,61 @@ export default function Dashboard({ onNavigate }: Props) {
 
   return (
     <div className="app-shell">
-      <h1 className="page-title" style={{ marginBottom: 24 }}>Dashboard</h1>
+      <div className="page-header" style={{ marginBottom: 14 }}>
+        <h1 className="page-title" style={{ marginBottom: 0 }}>Dashboard</h1>
+      </div>
+
+      <div className="card" style={{ marginBottom: 24, padding: 14 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginRight: 4 }}>Range</span>
+          {rangeOptions.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => setSelectedRange(option.key)}
+              style={{
+                padding: "7px 11px",
+                borderRadius: 999,
+                border: selectedRange === option.key ? "1px solid #1d4ed8" : "1px solid #dbe5f2",
+                background: selectedRange === option.key ? "#eff6ff" : "#ffffff",
+                color: selectedRange === option.key ? "#1d4ed8" : "#334155",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+          {selectedRange === "custom" ? (
+            <input
+              type="date"
+              value={customRangeStartDate}
+              onChange={(event) => setCustomRangeStartDate(event.target.value)}
+              className="input"
+              style={{ width: "auto", minWidth: 190, marginLeft: 6 }}
+            />
+          ) : null}
+          <span style={{ marginLeft: "auto", fontSize: 12, color: "#64748b" }}>Viewing {rangeLabel}</span>
+        </div>
+      </div>
+
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: 12,
+          marginBottom: 24,
+        }}
+      >
+        {kpiItems.map((item) => (
+          <div key={item.label} className="card" style={{ padding: "14px 16px" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 6 }}>{item.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: item.accent, lineHeight: 1.2, marginBottom: 6 }}>{item.value}</div>
+            <div style={{ fontSize: 12, color: "#64748b" }}>{item.helper}</div>
+          </div>
+        ))}
+      </div>
 
       {/* Quick Actions */}
       <div className="card" style={{ marginBottom: 24 }}>
@@ -314,9 +487,9 @@ export default function Dashboard({ onNavigate }: Props) {
       </div>
 
       {isAdmin && (
-        <div className="grid" style={{ gridTemplateColumns: "1.2fr 1fr", gap: 16, marginBottom: 24 }}>
+        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 24 }}>
           <div className="card">
-            <h2 className="section-title" style={{ marginBottom: 10 }}>Sales Over Time (Last 14 Days)</h2>
+            <h2 className="section-title" style={{ marginBottom: 10 }}>Sales Over Time ({rangeLabel})</h2>
             {dashboardLoading ? (
               <p style={{ margin: 0, color: "#4a5368" }}>Loading chart...</p>
             ) : (
@@ -347,11 +520,11 @@ export default function Dashboard({ onNavigate }: Props) {
           </div>
 
           <div className="card">
-            <h2 className="section-title" style={{ marginBottom: 10 }}>Top Products (Revenue)</h2>
-            {dashboardLoading || topProductsLoading ? (
+            <h2 className="section-title" style={{ marginBottom: 10 }}>Top Products (Revenue, {rangeLabel})</h2>
+            {dashboardLoading ? (
               <p style={{ margin: 0, color: "#4a5368" }}>Loading chart...</p>
             ) : topProductsBars.length === 0 ? (
-              <p style={{ margin: 0, color: "#4a5368" }}>No data yet</p>
+              <p style={{ margin: 0, color: "#4a5368" }}>No data for the selected range</p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {topProductsBars.map((item) => (
@@ -379,176 +552,55 @@ export default function Dashboard({ onNavigate }: Props) {
         </div>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        {/* Top Products */}
-        <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h2 className="section-title" style={{ margin: 0 }}>Top Products</h2>
-          </div>
-          
-          {/* Date Filter */}
-          {isAdmin && (
-            <div style={{ 
-              display: "flex", 
-              gap: 8, 
-              marginBottom: 16, 
-              alignItems: "center",
-              padding: 12,
-              background: "#f9fbff",
-              borderRadius: 8,
-              border: "1px solid #e6e9f2"
-            }}>
-              <span style={{ color: "#4a5368", fontSize: 13, fontWeight: 500 }}>Date:</span>
-              <input
-                type="date"
-                value={topProductsDate}
-                onChange={(e) => setTopProductsDate(e.target.value)}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <h2 className="section-title">
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            Stock Alerts
+            {lowStockItems.length > 0 && (
+              <span
+                className="badge"
+                style={{ background: "#fee2e2", color: "#dc2626", fontSize: 12 }}
+              >
+                {lowStockItems.length}
+              </span>
+            )}
+          </span>
+        </h2>
+        {loading ? (
+          <p style={{ margin: 0, color: "#4a5368" }}>Loading...</p>
+        ) : lowStockItems.length === 0 ? (
+          <p style={{ margin: 0, color: "#4a5368" }}>All stock levels are good!</p>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+            {lowStockItems.map((item) => (
+              <div
+                key={item.id}
                 style={{
-                  padding: "8px 12px",
-                  borderRadius: 6,
-                  border: "1px solid #d1d5db",
-                  fontSize: 13,
-                  flex: 1,
-                }}
-              />
-              <button
-                onClick={handleFilterTopProducts}
-                disabled={topProductsLoading}
-                style={{
-                  padding: "8px 16px",
-                  borderRadius: 6,
-                  border: "none",
-                  background: "#1f7aff",
-                  color: "white",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: topProductsLoading ? "wait" : "pointer",
-                  opacity: topProductsLoading ? 0.7 : 1,
+                  padding: 12,
+                  background: "#fef2f2",
+                  border: "1px solid #fecaca",
+                  borderRadius: 10,
                 }}
               >
-                {topProductsLoading ? "..." : "Filter"}
-              </button>
-              {topProductsDate && (
-                <button
-                  onClick={handleClearFilter}
-                  disabled={topProductsLoading}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 6,
-                    border: "1px solid #d1d5db",
-                    background: "white",
-                    color: "#6b7280",
-                    fontSize: 13,
-                    cursor: topProductsLoading ? "wait" : "pointer",
-                  }}
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-          )}
-          
-          {dashboardLoading || topProductsLoading ? (
-            <p style={{ margin: 0, color: "#4a5368" }}>Loading...</p>
-          ) : !isAdmin ? (
-            <p style={{ margin: 0, color: "#4a5368" }}>Admin access required</p>
-          ) : topProducts.length === 0 ? (
-            <p style={{ margin: 0, color: "#4a5368" }}>No sales data for selected period</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {topProducts.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: 12,
-                    background: "#f9fbff",
-                    borderRadius: 10,
-                    border: "1px solid #e6e9f2",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: "50%",
-                      background: idx === 0 ? "#ffd700" : idx === 1 ? "#c0c0c0" : idx === 2 ? "#cd7f32" : "#e6e9f2",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 700,
-                      fontSize: 14,
-                    }}
-                  >
-                    {idx + 1}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
-                    <div style={{ fontSize: 12, color: "#5f6475" }}>Qty sold: {item.quantity_sold}</div>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 700, color: "#10b981" }}>GHS {Number(item.revenue).toFixed(2)}</div>
-                    <div style={{ fontSize: 12, color: "#5f6475" }}>Revenue</div>
-                  </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
+                  <span className="badge" style={{ background: "#dc2626", color: "#fff" }}>
+                    Low Stock
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Stock Alerts */}
-        <div className="card">
-          <h2 className="section-title">
-            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              Stock Alerts
-              {lowStockItems.length > 0 && (
-                <span
-                  className="badge"
-                  style={{ background: "#fee2e2", color: "#dc2626", fontSize: 12 }}
-                >
-                  {lowStockItems.length}
-                </span>
-              )}
-            </span>
-          </h2>
-          {loading ? (
-            <p style={{ margin: 0, color: "#4a5368" }}>Loading...</p>
-          ) : lowStockItems.length === 0 ? (
-            <p style={{ margin: 0, color: "#4a5368" }}>All stock levels are good!</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {lowStockItems.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    padding: 12,
-                    background: "#fef2f2",
-                    border: "1px solid #fecaca",
-                    borderRadius: 10,
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
-                    <span className="badge" style={{ background: "#dc2626", color: "#fff" }}>
-                      Low Stock
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 13, color: "#991b1b" }}>
-                    Current: {item.currentStock} | Min: {item.minStock}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#5f6475", marginTop: 4 }}>SKU: {item.sku}</div>
+                <div style={{ fontSize: 13, color: "#991b1b" }}>
+                  Current: {item.currentStock} | Min: {item.minStock}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+                <div style={{ fontSize: 12, color: "#5f6475", marginTop: 4 }}>SKU: {item.sku}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Expiry Tracking */}
       {(expiredProducts.length > 0 || expiringSoonProducts.length > 0) && (
-        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginBottom: 24 }}>
           {/* Expired Products */}
           {expiredProducts.length > 0 && (
             <div className="card">
