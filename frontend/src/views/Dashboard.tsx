@@ -64,6 +64,12 @@ type KpiItem = {
   helper: string;
 };
 
+type PaymentFilterOption = {
+  key: string;
+  label: string;
+  count: number;
+};
+
 const rangeOptions: Array<{ key: GlobalRangeKey; label: string }> = [
   { key: "today", label: "Today" },
   { key: "7d", label: "Last 7 Days" },
@@ -117,6 +123,36 @@ function toCompactCurrency(value: number): string {
   }).format(value)}`;
 }
 
+function normalizePaymentMethod(paymentMethod: string | null | undefined): string {
+  const normalized = String(paymentMethod ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+
+  if (!normalized) return "unknown";
+  if (normalized.includes("cash")) return "cash";
+  if (normalized.includes("credit")) return "credit";
+  if (normalized.includes("mobile")) return "mobile_money";
+  if (normalized.includes("card")) return "card";
+  return "other";
+}
+
+function getPaymentMeta(paymentMethod: string): { label: string; background: string; color: string } {
+  if (paymentMethod === "cash") {
+    return { label: "Cash", background: "#dcfce7", color: "#166534" };
+  }
+  if (paymentMethod === "credit") {
+    return { label: "Credit", background: "#fee2e2", color: "#991b1b" };
+  }
+  if (paymentMethod === "mobile_money") {
+    return { label: "Mobile Money", background: "#dbeafe", color: "#1e3a8a" };
+  }
+  if (paymentMethod === "card") {
+    return { label: "Card", background: "#ede9fe", color: "#5b21b6" };
+  }
+  return { label: "Other", background: "#fef3c7", color: "#92400e" };
+}
+
 export default function Dashboard({ onNavigate }: Props) {
   // Initialize from cache for instant display
   const cachedProducts = getCachedProducts();
@@ -131,6 +167,9 @@ export default function Dashboard({ onNavigate }: Props) {
   const [selectedRange, setSelectedRange] = useState<GlobalRangeKey>("30d");
   const [customRangeStartDate, setCustomRangeStartDate] = useState<string>("");
   const [hoveredTrendPointKey, setHoveredTrendPointKey] = useState<string | null>(null);
+  const [recentSalesSearch, setRecentSalesSearch] = useState<string>("");
+  const [recentSalesPaymentFilter, setRecentSalesPaymentFilter] = useState<string>("all");
+  const [recentSalesLimit, setRecentSalesLimit] = useState<number>(8);
   const rangeStartDate = useMemo(
     () => getRangeStartDate(selectedRange, customRangeStartDate),
     [customRangeStartDate, selectedRange],
@@ -407,6 +446,25 @@ export default function Dashboard({ onNavigate }: Props) {
       minStock: lowStockThreshold,
     }));
 
+  const lowStockActionItems = useMemo(
+    () => lowStockItems
+      .map((item) => ({
+        ...item,
+        shortfall: Math.max(item.minStock - item.currentStock, 0),
+        isOutOfStock: item.currentStock === 0,
+      }))
+      .sort((a, b) => {
+        if (a.isOutOfStock !== b.isOutOfStock) {
+          return Number(b.isOutOfStock) - Number(a.isOutOfStock);
+        }
+        if (a.shortfall !== b.shortfall) {
+          return b.shortfall - a.shortfall;
+        }
+        return a.currentStock - b.currentStock;
+      }),
+    [lowStockItems],
+  );
+
   // Calculate expired and expiring soon products (only if expiry tracking is enabled)
   const expiredProducts = usesExpiryTracking ? products.filter(
     (p) => p.expiry_date && new Date(p.expiry_date) < new Date()
@@ -508,6 +566,82 @@ export default function Dashboard({ onNavigate }: Props) {
     { label: "Stock Movement", icon: "#", color: "#8246ff", action: "inventory" },
     { label: "View Reports", icon: "~", color: "#f59e0b", action: "reports", adminOnly: true },
   ].filter(action => !action.adminOnly || isAdmin);
+
+  const paymentCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const sale of recentSales) {
+      const normalized = normalizePaymentMethod(sale.payment_method);
+      counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+    }
+    return counts;
+  }, [recentSales]);
+
+  const paymentFilterOptions = useMemo<PaymentFilterOption[]>(() => {
+    const orderedKeys = ["cash", "credit", "mobile_money", "card", "other"];
+    const dynamicOptions = orderedKeys
+      .filter((key) => (paymentCounts.get(key) ?? 0) > 0)
+      .map((key) => ({
+        key,
+        label: getPaymentMeta(key).label,
+        count: paymentCounts.get(key) ?? 0,
+      }));
+
+    return [{ key: "all", label: "All", count: recentSales.length }, ...dynamicOptions];
+  }, [paymentCounts, recentSales.length]);
+
+  useEffect(() => {
+    if (paymentFilterOptions.some((option) => option.key === recentSalesPaymentFilter)) {
+      return;
+    }
+    setRecentSalesPaymentFilter("all");
+  }, [paymentFilterOptions, recentSalesPaymentFilter]);
+
+  const filteredRecentSales = useMemo(() => {
+    const query = recentSalesSearch.trim().toLowerCase();
+
+    return recentSales.filter((sale) => {
+      const paymentKey = normalizePaymentMethod(sale.payment_method);
+      const matchesPayment = recentSalesPaymentFilter === "all" || paymentKey === recentSalesPaymentFilter;
+      if (!matchesPayment) return false;
+
+      if (!query) return true;
+
+      const productName = (sale.product?.name ?? `Product #${sale.product_id ?? ""}`).toLowerCase();
+      const customerName = (sale.customer_name ?? "Walk-in").toLowerCase();
+      const paymentName = getPaymentMeta(paymentKey).label.toLowerCase();
+      return productName.includes(query) || customerName.includes(query) || paymentName.includes(query);
+    });
+  }, [recentSales, recentSalesPaymentFilter, recentSalesSearch]);
+
+  const visibleRecentSales = useMemo(
+    () => filteredRecentSales.slice(0, recentSalesLimit),
+    [filteredRecentSales, recentSalesLimit],
+  );
+
+  const recentSalesSummary = useMemo(() => {
+    const today = new Date().toDateString();
+    let transactionsToday = 0;
+    let revenueToday = 0;
+    let overallRevenue = 0;
+
+    for (const sale of recentSales) {
+      const amount = Number(sale.total_price ?? 0);
+      const safeAmount = Number.isFinite(amount) ? amount : 0;
+      overallRevenue += safeAmount;
+
+      const saleDate = new Date(sale.created_at);
+      if (!Number.isNaN(saleDate.getTime()) && saleDate.toDateString() === today) {
+        transactionsToday += 1;
+        revenueToday += safeAmount;
+      }
+    }
+
+    return {
+      transactionsToday,
+      revenueToday,
+      averageTicket: recentSales.length > 0 ? overallRevenue / recentSales.length : 0,
+    };
+  }, [recentSales]);
 
   return (
     <div className="app-shell">
@@ -726,51 +860,78 @@ export default function Dashboard({ onNavigate }: Props) {
         </div>
       )}
 
-      <div className="card" style={{ marginBottom: 24 }}>
-        <h2 className="section-title">
-          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            Stock Alerts
-            {lowStockItems.length > 0 && (
-              <span
-                className="badge"
-                style={{ background: "#fee2e2", color: "#dc2626", fontSize: 12 }}
-              >
-                {lowStockItems.length}
+      {(loading || lowStockActionItems.length > 0) && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 10,
+              marginBottom: 12,
+            }}
+          >
+            <h2 className="section-title" style={{ margin: 0 }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                Low Stock Action Queue
+                <span className="badge" style={{ background: "#fee2e2", color: "#dc2626", fontSize: 12 }}>
+                  {lowStockActionItems.length}
+                </span>
               </span>
-            )}
-          </span>
-        </h2>
-        {loading ? (
-          <p style={{ margin: 0, color: "#4a5368" }}>Loading...</p>
-        ) : lowStockItems.length === 0 ? (
-          <p style={{ margin: 0, color: "#4a5368" }}>All stock levels are good!</p>
-        ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-            {lowStockItems.map((item) => (
-              <div
-                key={item.id}
-                style={{
-                  padding: 12,
-                  background: "#fef2f2",
-                  border: "1px solid #fecaca",
-                  borderRadius: 10,
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
-                  <span className="badge" style={{ background: "#dc2626", color: "#fff" }}>
-                    Low Stock
-                  </span>
-                </div>
-                <div style={{ fontSize: 13, color: "#991b1b" }}>
-                  Current: {item.currentStock} | Min: {item.minStock}
-                </div>
-                <div style={{ fontSize: 12, color: "#5f6475", marginTop: 4 }}>SKU: {item.sku}</div>
-              </div>
-            ))}
+            </h2>
+            <button
+              type="button"
+              className="button"
+              onClick={() => onNavigate("inventory")}
+              style={{ background: "#1f7aff", fontSize: 12, padding: "8px 12px" }}
+            >
+              Open Inventory
+            </button>
           </div>
-        )}
-      </div>
+          {loading ? (
+            <p style={{ margin: 0, color: "#4a5368" }}>Loading...</p>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+                {lowStockActionItems.slice(0, 8).map((item) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      padding: 12,
+                      background: item.isOutOfStock ? "#fef2f2" : "#fff7ed",
+                      border: item.isOutOfStock ? "1px solid #fecaca" : "1px solid #fed7aa",
+                      borderRadius: 10,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{item.name}</div>
+                      <span
+                        className="badge"
+                        style={{
+                          background: item.isOutOfStock ? "#dc2626" : "#f97316",
+                          color: "#fff",
+                        }}
+                      >
+                        {item.isOutOfStock ? "Out" : "Low"}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 13, color: "#9a3412", marginBottom: 4 }}>
+                      Current {item.currentStock} | Min {item.minStock} | Shortfall {item.shortfall}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#5f6475" }}>SKU: {item.sku}</div>
+                  </div>
+                ))}
+              </div>
+              {lowStockActionItems.length > 8 && (
+                <p style={{ margin: "12px 0 0", fontSize: 12, color: "#64748b" }}>
+                  Showing 8 of {lowStockActionItems.length} low stock alerts.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Expiry Tracking */}
       {(expiredProducts.length > 0 || expiringSoonProducts.length > 0) && (
@@ -866,46 +1027,132 @@ export default function Dashboard({ onNavigate }: Props) {
       {/* Recent Sales */}
       {isAdmin && (
         <div className="card">
-          <h2 className="section-title">Recent Sales</h2>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+            <h2 className="section-title" style={{ margin: 0 }}>Recent Sales</h2>
+            <button
+              type="button"
+              className="button"
+              style={{ background: "#0f766e", fontSize: 12, padding: "8px 12px" }}
+              onClick={() => onNavigate("sales")}
+            >
+              View All Sales
+            </button>
+          </div>
           {dashboardLoading ? (
             <p style={{ margin: 0, color: "#4a5368" }}>Loading...</p>
           ) : (
             <>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>Customer</th>
-                    <th>Quantity</th>
-                    <th>Total</th>
-                    <th>Payment</th>
-                    <th>Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentSales.map((sale) => (
-                    <tr key={sale.id}>
-                      <td style={{ fontWeight: 600 }}>{sale.product?.name || `Product #${sale.product_id}`}</td>
-                      <td>{sale.customer_name || "Walk-in"}</td>
-                      <td>{sale.quantity}</td>
-                      <td style={{ fontWeight: 700, color: "#10b981" }}>GHS {Number(sale.total_price).toFixed(2)}</td>
-                      <td>
-                        <span className="badge" style={{ 
-                          background: sale.payment_method === 'cash' ? '#dcfce7' : 
-                                     sale.payment_method === 'credit' ? '#fee2e2' : '#fef3c7',
-                          color: sale.payment_method === 'cash' ? '#166534' : 
-                                sale.payment_method === 'credit' ? '#991b1b' : '#92400e'
-                        }}>
-                          {sale.payment_method}
-                        </span>
-                      </td>
-                      <td style={{ color: "#5f6475" }}>{new Date(sale.created_at).toLocaleDateString()}</td>
-                    </tr>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+                  gap: 10,
+                  marginBottom: 12,
+                }}
+              >
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 12px", background: "#f8fafc" }}>
+                  <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>Transactions Today</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>{recentSalesSummary.transactionsToday}</div>
+                </div>
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 12px", background: "#f8fafc" }}>
+                  <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>Revenue Today</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#047857" }}>{toCurrency(recentSalesSummary.revenueToday)}</div>
+                </div>
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 12px", background: "#f8fafc" }}>
+                  <div style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>Average Ticket</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#1d4ed8" }}>{toCurrency(recentSalesSummary.averageTicket)}</div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 12 }}>
+                <input
+                  type="text"
+                  value={recentSalesSearch}
+                  onChange={(event) => setRecentSalesSearch(event.target.value)}
+                  placeholder="Search product or customer"
+                  className="input"
+                  style={{ minWidth: 210, flex: "1 1 220px" }}
+                />
+                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                  {paymentFilterOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => setRecentSalesPaymentFilter(option.key)}
+                      style={{
+                        borderRadius: 999,
+                        border: recentSalesPaymentFilter === option.key ? "1px solid #1d4ed8" : "1px solid #dbe5f2",
+                        background: recentSalesPaymentFilter === option.key ? "#eff6ff" : "#ffffff",
+                        color: recentSalesPaymentFilter === option.key ? "#1d4ed8" : "#334155",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        padding: "7px 10px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {option.label} ({option.count})
+                    </button>
                   ))}
-                </tbody>
-              </table>
-              {recentSales.length === 0 && (
-                <p style={{ margin: "16px 0 0", color: "#4a5368", textAlign: "center" }}>No sales yet</p>
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#64748b", fontWeight: 700 }}>
+                  Rows
+                  <select
+                    value={recentSalesLimit}
+                    onChange={(event) => setRecentSalesLimit(Number(event.target.value))}
+                    className="input"
+                    style={{ width: 82, minWidth: 82, height: 34, padding: "0 10px" }}
+                  >
+                    {[5, 8, 12].map((limit) => (
+                      <option key={limit} value={limit}>
+                        {limit}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              {filteredRecentSales.length === 0 ? (
+                <p style={{ margin: "8px 0 0", color: "#4a5368", textAlign: "center" }}>No sales match the current filters.</p>
+              ) : (
+                <>
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="table" style={{ minWidth: 760 }}>
+                      <thead>
+                        <tr>
+                          <th>Product</th>
+                          <th>Customer</th>
+                          <th style={{ textAlign: "right" }}>Qty</th>
+                          <th style={{ textAlign: "right" }}>Total</th>
+                          <th>Payment</th>
+                          <th>Date & Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleRecentSales.map((sale) => {
+                          const paymentKey = normalizePaymentMethod(sale.payment_method);
+                          const paymentMeta = getPaymentMeta(paymentKey);
+                          return (
+                            <tr key={sale.id}>
+                              <td style={{ fontWeight: 700, color: "#0f172a" }}>{sale.product?.name || `Product #${sale.product_id}`}</td>
+                              <td>{sale.customer_name || "Walk-in"}</td>
+                              <td style={{ textAlign: "right", fontWeight: 600 }}>{sale.quantity}</td>
+                              <td style={{ textAlign: "right", fontWeight: 800, color: "#047857" }}>GHS {Number(sale.total_price).toFixed(2)}</td>
+                              <td>
+                                <span className="badge" style={{ background: paymentMeta.background, color: paymentMeta.color }}>
+                                  {paymentMeta.label}
+                                </span>
+                              </td>
+                              <td style={{ color: "#5f6475", fontSize: 12 }}>{new Date(sale.created_at).toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p style={{ margin: "10px 0 0", fontSize: 12, color: "#64748b" }}>
+                    Showing {visibleRecentSales.length} of {filteredRecentSales.length} filtered sales.
+                  </p>
+                </>
               )}
             </>
           )}
