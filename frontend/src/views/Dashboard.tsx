@@ -50,6 +50,11 @@ type TrendPoint = {
   revenue: number;
 };
 
+type TrendCoordinate = TrendPoint & {
+  x: number;
+  y: number;
+};
+
 type GlobalRangeKey = "today" | "7d" | "30d" | "all" | "custom";
 
 type KpiItem = {
@@ -105,6 +110,13 @@ function toCurrency(value: number): string {
   return `GHS ${value.toFixed(2)}`;
 }
 
+function toCompactCurrency(value: number): string {
+  return `GHS ${new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value)}`;
+}
+
 export default function Dashboard({ onNavigate }: Props) {
   // Initialize from cache for instant display
   const cachedProducts = getCachedProducts();
@@ -118,6 +130,7 @@ export default function Dashboard({ onNavigate }: Props) {
   const usesExpiryTracking = useExpiryTracking();
   const [selectedRange, setSelectedRange] = useState<GlobalRangeKey>("30d");
   const [customRangeStartDate, setCustomRangeStartDate] = useState<string>("");
+  const [hoveredTrendPointKey, setHoveredTrendPointKey] = useState<string | null>(null);
   const rangeStartDate = useMemo(
     () => getRangeStartDate(selectedRange, customRangeStartDate),
     [customRangeStartDate, selectedRange],
@@ -242,6 +255,58 @@ export default function Dashboard({ onNavigate }: Props) {
     return 14;
   }, [rangeStartTimestamp, selectedRange]);
 
+  const trendComparisonSource = useMemo<TrendSale[]>(() => (
+    salesForTrend.length > 0
+      ? salesForTrend
+      : recentSales.map((sale) => ({ created_at: sale.created_at, total_price: sale.total_price }))
+  ), [recentSales, salesForTrend]);
+
+  const chartWindowBounds = useMemo(() => {
+    const end = new Date();
+    end.setHours(24, 0, 0, 0);
+
+    const start = new Date(end);
+    start.setDate(end.getDate() - trendWindowDays);
+
+    const previousStart = new Date(start);
+    previousStart.setDate(start.getDate() - trendWindowDays);
+
+    return {
+      startMs: start.getTime(),
+      endMs: end.getTime(),
+      previousStartMs: previousStart.getTime(),
+    };
+  }, [trendWindowDays]);
+
+  const chartComparison = useMemo(() => {
+    let currentRevenue = 0;
+    let previousRevenue = 0;
+
+    for (const sale of trendComparisonSource) {
+      const saleTime = new Date(sale.created_at).getTime();
+      if (!Number.isFinite(saleTime)) continue;
+
+      const amount = Number(sale.total_price ?? 0);
+      const safeAmount = Number.isFinite(amount) ? amount : 0;
+
+      if (saleTime >= chartWindowBounds.startMs && saleTime < chartWindowBounds.endMs) {
+        currentRevenue += safeAmount;
+      } else if (saleTime >= chartWindowBounds.previousStartMs && saleTime < chartWindowBounds.startMs) {
+        previousRevenue += safeAmount;
+      }
+    }
+
+    const delta = currentRevenue - previousRevenue;
+    const percentChange = previousRevenue > 0 ? (delta / previousRevenue) * 100 : null;
+
+    return {
+      currentRevenue,
+      previousRevenue,
+      delta,
+      percentChange,
+    };
+  }, [chartWindowBounds, trendComparisonSource]);
+
   const salesTrend = useMemo<TrendPoint[]>(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -279,13 +344,55 @@ export default function Dashboard({ onNavigate }: Props) {
   );
 
   const trendMax = Math.max(...salesTrend.map((d) => d.revenue), 1);
-  const trendPoints = salesTrend
-    .map((d, i) => {
-      const x = salesTrend.length > 1 ? (i / (salesTrend.length - 1)) * 100 : 0;
-      const y = 100 - (d.revenue / trendMax) * 100;
-      return `${x},${y}`;
-    })
-    .join(" ");
+  const trendCoordinates = useMemo<TrendCoordinate[]>(
+    () => salesTrend.map((point, index) => {
+      const x = salesTrend.length > 1 ? (index / (salesTrend.length - 1)) * 100 : 0;
+      const y = 100 - (point.revenue / trendMax) * 100;
+      return {
+        ...point,
+        x,
+        y,
+      };
+    }),
+    [salesTrend, trendMax],
+  );
+  const trendPoints = trendCoordinates.map((point) => `${point.x},${point.y}`).join(" ");
+  const trendYAxisTicks = useMemo(
+    () => [trendMax, trendMax / 2, 0],
+    [trendMax],
+  );
+  const hoveredTrendPoint = useMemo(
+    () => hoveredTrendPointKey
+      ? trendCoordinates.find((point) => point.key === hoveredTrendPointKey) ?? null
+      : null,
+    [hoveredTrendPointKey, trendCoordinates],
+  );
+  const chartComparisonLabel = useMemo(() => {
+    if (chartComparison.previousRevenue <= 0) {
+      if (chartComparison.currentRevenue <= 0) {
+        return `No change vs previous ${trendWindowDays}d`;
+      }
+      return `New activity vs previous ${trendWindowDays}d`;
+    }
+
+    const sign = chartComparison.delta >= 0 ? "+" : "";
+    return `${sign}${(chartComparison.percentChange ?? 0).toFixed(1)}% vs previous ${trendWindowDays}d`;
+  }, [chartComparison.currentRevenue, chartComparison.delta, chartComparison.percentChange, chartComparison.previousRevenue, trendWindowDays]);
+  const chartComparisonColor = chartComparison.delta > 0
+    ? "#15803d"
+    : chartComparison.delta < 0
+      ? "#b91c1c"
+      : "#475569";
+
+  useEffect(() => {
+    if (!hoveredTrendPointKey) {
+      return;
+    }
+
+    if (!salesTrend.some((point) => point.key === hoveredTrendPointKey)) {
+      setHoveredTrendPointKey(null);
+    }
+  }, [hoveredTrendPointKey, salesTrend]);
 
   const topRevenueMax = Math.max(...topProductsBars.map((p) => p.revenue), 1);
 
@@ -489,31 +596,98 @@ export default function Dashboard({ onNavigate }: Props) {
       {isAdmin && (
         <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 24 }}>
           <div className="card">
-            <h2 className="section-title" style={{ marginBottom: 10 }}>Sales Over Time ({rangeLabel})</h2>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+              <h2 className="section-title" style={{ margin: 0 }}>Sales Over Time ({rangeLabel})</h2>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: chartComparisonColor }}>{chartComparisonLabel}</div>
+                <div style={{ fontSize: 11, color: "#64748b" }}>
+                  {toCurrency(chartComparison.currentRevenue)} now · {toCurrency(chartComparison.previousRevenue)} previous
+                </div>
+              </div>
+            </div>
             {dashboardLoading ? (
               <p style={{ margin: 0, color: "#4a5368" }}>Loading chart...</p>
             ) : (
               <>
-                <div style={{ width: "100%", height: 220, background: "#f8fbff", border: "1px solid #e6e9f2", borderRadius: 10, padding: 12 }}>
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }}>
-                    <line x1="0" y1="100" x2="100" y2="100" stroke="#cbd5e1" strokeWidth="0.8" />
-                    <line x1="0" y1="0" x2="0" y2="100" stroke="#cbd5e1" strokeWidth="0.8" />
-                    <polyline
-                      fill="none"
-                      stroke="#2563eb"
-                      strokeWidth="2"
-                      points={trendPoints}
-                    />
-                    {salesTrend.map((d, i) => {
-                      const x = salesTrend.length > 1 ? (i / (salesTrend.length - 1)) * 100 : 0;
-                      const y = 100 - (d.revenue / trendMax) * 100;
-                      return <circle key={d.key} cx={x} cy={y} r="1.5" fill="#1d4ed8" />;
-                    })}
-                  </svg>
+                <div style={{ width: "100%", background: "#f8fbff", border: "1px solid #e6e9f2", borderRadius: 10, padding: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "56px minmax(0, 1fr)", gap: 10, alignItems: "stretch" }}>
+                    <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", fontSize: 11, color: "#64748b", padding: "4px 0" }}>
+                      {trendYAxisTicks.map((tick, index) => (
+                        <span key={`${tick}-${index}`}>{toCompactCurrency(tick)}</span>
+                      ))}
+                    </div>
+                    <div
+                      style={{ position: "relative", height: 220 }}
+                      onMouseLeave={() => setHoveredTrendPointKey(null)}
+                    >
+                      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }} aria-label="Sales trend chart">
+                        <defs>
+                          <linearGradient id="salesTrendArea" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#60a5fa" stopOpacity="0.3" />
+                            <stop offset="100%" stopColor="#60a5fa" stopOpacity="0" />
+                          </linearGradient>
+                        </defs>
+                        <line x1="0" y1="0" x2="100" y2="0" stroke="#e2e8f0" strokeWidth="0.8" />
+                        <line x1="0" y1="50" x2="100" y2="50" stroke="#e2e8f0" strokeWidth="0.8" />
+                        <line x1="0" y1="100" x2="100" y2="100" stroke="#cbd5e1" strokeWidth="0.8" />
+                        <line x1="0" y1="0" x2="0" y2="100" stroke="#cbd5e1" strokeWidth="0.8" />
+                        {trendCoordinates.length > 1 ? (
+                          <polygon
+                            points={`0,100 ${trendPoints} 100,100`}
+                            fill="url(#salesTrendArea)"
+                          />
+                        ) : null}
+                        {hoveredTrendPoint ? (
+                          <line x1={hoveredTrendPoint.x} y1="0" x2={hoveredTrendPoint.x} y2="100" stroke="#93c5fd" strokeDasharray="2 2" strokeWidth="0.7" />
+                        ) : null}
+                        <polyline
+                          fill="none"
+                          stroke="#2563eb"
+                          strokeWidth="2"
+                          points={trendPoints}
+                        />
+                        {trendCoordinates.map((point) => (
+                          <circle
+                            key={point.key}
+                            cx={point.x}
+                            cy={point.y}
+                            r={hoveredTrendPoint?.key === point.key ? "2.4" : "1.8"}
+                            fill={hoveredTrendPoint?.key === point.key ? "#1e3a8a" : "#1d4ed8"}
+                            style={{ cursor: "pointer" }}
+                            tabIndex={0}
+                            onMouseEnter={() => setHoveredTrendPointKey(point.key)}
+                            onFocus={() => setHoveredTrendPointKey(point.key)}
+                            onBlur={() => setHoveredTrendPointKey(null)}
+                          />
+                        ))}
+                      </svg>
+                      {hoveredTrendPoint ? (
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: `${Math.min(Math.max(hoveredTrendPoint.x, 10), 90)}%`,
+                            top: `${Math.max(hoveredTrendPoint.y - 4, 4)}%`,
+                            transform: "translate(-50%, -100%)",
+                            background: "#0f172a",
+                            color: "#f8fafc",
+                            borderRadius: 8,
+                            padding: "8px 10px",
+                            boxShadow: "0 12px 28px rgba(15, 23, 42, 0.25)",
+                            pointerEvents: "none",
+                            minWidth: 130,
+                          }}
+                        >
+                          <div style={{ fontSize: 11, color: "#bfdbfe", marginBottom: 2 }}>{hoveredTrendPoint.label}</div>
+                          <div style={{ fontSize: 13, fontWeight: 800 }}>{toCurrency(hoveredTrendPoint.revenue)}</div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 12, color: "#64748b" }}>
-                  <span>{salesTrend[0]?.label}</span>
-                  <span>{salesTrend[salesTrend.length - 1]?.label}</span>
+                  <span>{trendCoordinates[0]?.label}</span>
+                  <span>{trendCoordinates[Math.floor((trendCoordinates.length - 1) / 2)]?.label}</span>
+                  <span>{trendCoordinates[trendCoordinates.length - 1]?.label}</span>
                 </div>
               </>
             )}
