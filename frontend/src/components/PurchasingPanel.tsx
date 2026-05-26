@@ -1854,14 +1854,15 @@ export default function PurchasingPanel({
     inset: 0,
     background: "rgba(15, 23, 42, 0.45)",
     display: "flex",
-    justifyContent: "flex-end",
+    alignItems: "center",
+    justifyContent: "center",
     zIndex: 70,
-    padding: 12,
+    padding: 16,
   };
 
   const supplierModalPanelStyle: CSSProperties = {
-    width: "min(440px, 100%)",
-    height: "100%",
+    width: "min(460px, 100%)",
+    maxHeight: "calc(100vh - 32px)",
     background: "#ffffff",
     borderRadius: 16,
     border: "1px solid #dbe5f2",
