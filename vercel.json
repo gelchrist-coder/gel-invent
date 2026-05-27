@@ -1,11 +1,4 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/index.py": {
-      "maxDuration": 60,
-      "excludeFiles": "{frontend/**,migrations/**,scripts/**,README.md,PARTIAL_PAYMENT_GUIDE.md,backup_*.sql,create_tables.py,init_db.py,test_*.py,__pycache__/**,.pytest_cache/**}"
-    }
-  },
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index.py" }
   ]
