@@ -10,6 +10,10 @@ type Props = {
   initialProductId?: number | null;
   usesExpiryTracking?: boolean;
   onPurchaseRecorded?: () => Promise<void> | void;
+  mode?: "purchasing" | "returns";
+  onOpenReturnsView?: (purchaseId: number | null) => void;
+  initialReturnPurchaseId?: number | null;
+  onInitialReturnPurchaseIdHandled?: () => void;
 };
 
 const emptySupplierForm = {
@@ -580,7 +584,13 @@ export default function PurchasingPanel({
   initialProductId = null,
   usesExpiryTracking = true,
   onPurchaseRecorded,
+  mode = "purchasing",
+  onOpenReturnsView,
+  initialReturnPurchaseId = null,
+  onInitialReturnPurchaseIdHandled,
 }: Props) {
+  const isReturnsMode = mode === "returns";
+  const isPurchasingMode = !isReturnsMode;
   const paymentSectionRef = useRef<HTMLDivElement | null>(null);
   const returnSectionRef = useRef<HTMLDivElement | null>(null);
   const previousPurchaseSupplierRef = useRef<number | null>(null);
@@ -1176,6 +1186,42 @@ export default function PurchasingPanel({
     });
   }, [selectedReturnPurchase]);
 
+  useEffect(() => {
+    if (!isReturnsMode || initialReturnPurchaseId == null || loading) {
+      return;
+    }
+
+    const targetOrder = returnableOrders.find((order) => order.items.some((purchase) => purchase.id === initialReturnPurchaseId)) ?? null;
+    const targetPurchase = targetOrder?.items.find((purchase) => purchase.id === initialReturnPurchaseId) ?? null;
+
+    if (!targetOrder || !targetPurchase) {
+      setNotice("That purchase line is no longer returnable. Choose another purchase order.");
+      onInitialReturnPurchaseIdHandled?.();
+      return;
+    }
+
+    setError(null);
+    setNotice(`Ready to return ${targetPurchase.product_name} to ${targetOrder.supplier_name}`);
+    setReturnSupplierId(resolveSupplierIdForOrder(targetOrder));
+    setReturnPurchaseId(targetPurchase.id);
+
+    const availableQuantity = Number(targetPurchase.quantity || 0);
+    const suggestedQuantity = availableQuantity >= 1 ? 1 : availableQuantity;
+    setReturnQuantity(suggestedQuantity > 0 ? String(suggestedQuantity) : "");
+    setReturnDate(toISODate(new Date()));
+    setReturnReason("");
+    setReturnNotes("");
+    onInitialReturnPurchaseIdHandled?.();
+    scrollSectionIntoView(returnSectionRef);
+  }, [
+    initialReturnPurchaseId,
+    isReturnsMode,
+    loading,
+    onInitialReturnPurchaseIdHandled,
+    resolveSupplierIdForOrder,
+    returnableOrders,
+  ]);
+
   const resetPaymentForm = () => {
     setPaymentSupplierId(null);
     setPaymentPurchaseId(null);
@@ -1337,6 +1383,12 @@ export default function PurchasingPanel({
     setReturnDate(toISODate(new Date()));
     setReturnReason("");
     setReturnNotes("");
+
+    if (isPurchasingMode && onOpenReturnsView) {
+      onOpenReturnsView(purchase.id);
+      return;
+    }
+
     scrollSectionIntoView(returnSectionRef);
   };
 
@@ -1782,6 +1834,7 @@ export default function PurchasingPanel({
         ) : null}
       </div>
 
+      {isPurchasingMode ? (
       <div style={topSectionGridStyle}>
         <div className="card" style={primaryPanelStyle}>
           <div style={{ marginBottom: 20 }}>
@@ -2521,6 +2574,7 @@ export default function PurchasingPanel({
         </div>
         ) : null}
       </div>
+      ) : null}
 
       {isSupplierModalOpen ? (
         <div
@@ -2618,7 +2672,20 @@ export default function PurchasingPanel({
       ) : null}
 
 
+      {isReturnsMode && !purchaseReturnsSupported ? (
+        <div className="card" style={{ marginBottom: 0 }}>
+          <div style={{ display: "grid", gap: 8 }}>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Returns Unavailable</h3>
+            <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>
+              This deployment does not support supplier returns yet. Upgrade the backend before using this page.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {isPurchasingMode || (isReturnsMode && purchaseReturnsSupported) ? (
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 20, alignItems: "start" }}>
+        {isPurchasingMode ? (
         <div className="card" style={{ marginBottom: 0 }} ref={paymentSectionRef}>
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Record Supplier Payment</h3>
@@ -2832,8 +2899,9 @@ export default function PurchasingPanel({
             </div>
           )}
         </div>
+        ) : null}
 
-        {purchaseReturnsSupported ? (
+        {isReturnsMode && purchaseReturnsSupported ? (
           <div className="card" style={{ marginBottom: 0 }} ref={returnSectionRef}>
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Return to Supplier</h3>
@@ -3021,7 +3089,7 @@ export default function PurchasingPanel({
           </div>
         ) : null}
 
-        {purchaseReturnsSupported ? (
+        {isReturnsMode && purchaseReturnsSupported ? (
           <div className="card" style={{ marginBottom: 0 }}>
           <div style={{ marginBottom: 16 }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Recent Supplier Returns</h3>
@@ -3091,7 +3159,9 @@ export default function PurchasingPanel({
           </div>
         ) : null}
       </div>
+      ) : null}
 
+      {isPurchasingMode ? (
       <div className="card" style={{ marginBottom: 0 }}>
         <div style={{ marginBottom: 16 }}>
           <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Recent Purchase Orders</h3>
@@ -3345,7 +3415,7 @@ export default function PurchasingPanel({
                             cursor: order.nextReturnPurchase ? "pointer" : "not-allowed",
                           }}
                         >
-                          {order.nextReturnPurchase ? "Return to Supplier" : "No Returnable Items"}
+                          {order.nextReturnPurchase ? "Open Supplier Returns" : "No Returnable Items"}
                         </button>
                       ) : null}
                       <button
@@ -3373,6 +3443,7 @@ export default function PurchasingPanel({
           </div>
         )}
       </div>
+      ) : null}
     </div>
   );
 }

@@ -12,7 +12,7 @@ import { readStoredUser } from "../user-storage";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
-type InventoryTab = "overview" | "alerts" | "actions" | "purchasing" | "history";
+type InventoryTab = "overview" | "alerts" | "actions" | "purchasing" | "returns" | "history";
 
 export default function Inventory() {
   // Check if current user is Admin
@@ -23,6 +23,7 @@ export default function Inventory() {
   const [analytics, setAnalytics] = useState<InventoryAnalytics | null>(null);
   const [movements, setMovements] = useState<MovementHistoryRow[]>([]);
   const [activeTab, setActiveTab] = useState<InventoryTab>("overview");
+  const [pendingSupplierReturnPurchaseId, setPendingSupplierReturnPurchaseId] = useState<number | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
@@ -326,7 +327,12 @@ export default function Inventory() {
     {
       id: "purchasing",
       label: "Purchasing",
-      description: "Use this for supplier-backed restocks, invoices, and recent buying activity.",
+      description: "Use this for supplier-backed restocks, invoices, payments, and recent buying activity.",
+    },
+    {
+      id: "returns",
+      label: "Supplier Returns",
+      description: "Handle stock sent back to suppliers without crowding the purchasing workflow.",
     },
     {
       id: "history",
@@ -805,6 +811,23 @@ export default function Inventory() {
           initialProductId={selectedProductId}
           usesExpiryTracking={usesExpiryTracking}
           onPurchaseRecorded={loadData}
+          mode="purchasing"
+          onOpenReturnsView={(purchaseId) => {
+            setPendingSupplierReturnPurchaseId(purchaseId ?? null);
+            setActiveTab("returns");
+          }}
+        />
+      ) : null}
+
+      {activeTab === "returns" ? (
+        <PurchasingPanel
+          products={products}
+          initialProductId={selectedProductId}
+          usesExpiryTracking={usesExpiryTracking}
+          onPurchaseRecorded={loadData}
+          mode="returns"
+          initialReturnPurchaseId={pendingSupplierReturnPurchaseId}
+          onInitialReturnPurchaseIdHandled={() => setPendingSupplierReturnPurchaseId(null)}
         />
       ) : null}
 
