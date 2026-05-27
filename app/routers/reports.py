@@ -110,25 +110,34 @@ def get_sales_dashboard(
         .group_by(Sale.payment_method)
     ).all()
     
-    # Top selling products (filtered by date range)
-    top_products = db.execute(
+    # Top selling products (filtered by date range).
+    # Aggregate from sales first so legacy/misaligned product rows do not hide valid sales.
+    top_product_rows = db.execute(
         select(
-            Product.name,
+            Sale.product_id,
             func.sum(Sale.quantity).label("quantity_sold"),
             func.coalesce(func.sum(Sale.total_price), 0).label("revenue")
-        ).join(Sale, Sale.product_id == Product.id)
+        )
         .where(and_(
             Sale.created_at >= top_products_start,
             Sale.created_at <= top_products_end,
             Sale.user_id.in_(tenant_user_ids),
             Sale.branch_id == active_branch_id,
-            Product.user_id.in_(tenant_user_ids),
-            Product.branch_id == active_branch_id,
         ))
-        .group_by(Product.id, Product.name)
+        .group_by(Sale.product_id)
         .order_by(func.sum(Sale.quantity).desc())
         .limit(10)
     ).all()
+
+    top_product_ids = sorted({int(tp.product_id) for tp in top_product_rows})
+    top_product_records = db.scalars(
+        select(Product).where(
+            Product.id.in_(top_product_ids),
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        )
+    ).all() if top_product_ids else []
+    top_product_by_id = {int(product.id): product for product in top_product_records}
     
     # Recent sales with product details in one query (avoids N+1 lookups)
     recent_sales_rows = db.execute(
@@ -196,11 +205,11 @@ def get_sales_dashboard(
         ],
         "top_products": [
             {
-                "name": tp.name,
+                "name": (top_product_by_id.get(int(tp.product_id)).name if top_product_by_id.get(int(tp.product_id)) else f"Product #{tp.product_id}"),
                 "quantity_sold": float(tp.quantity_sold),
                 "revenue": float(tp.revenue)
             }
-            for tp in top_products
+            for tp in top_product_rows
         ],
         "recent_sales": recent_sales_data
     }
