@@ -4,6 +4,7 @@ import { fetchProductsCached } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import { cacheProducts, loadCachedProducts } from "../offline/storage";
 import { NewSale, Product } from "../types";
+import { readStoredUser } from "../user-storage";
 
 type UiMessage = { type: "error" | "info"; text: string } | null;
 
@@ -18,8 +19,7 @@ export default function Invoice() {
   const [invoiceToken, setInvoiceToken] = useState<string | null>(null);
   const [uiMessage, setUiMessage] = useState<UiMessage>(null);
 
-  const currentUser = localStorage.getItem("user");
-  const userData = currentUser ? JSON.parse(currentUser) : null;
+  const userData = readStoredUser();
   const businessName = userData?.business_name || "Your Business";
   const businessLogoUrl = userData?.business_logo_url || "";
   const salesPerson = userData?.name || "Sales Person";

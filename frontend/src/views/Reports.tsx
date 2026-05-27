@@ -6,6 +6,7 @@ import {
   fetchSalesDashboard,
 } from "../api";
 import { useExpiryTracking } from "../settings";
+import { readStoredUser } from "../user-storage";
 
 // SVG Icons for KPI Cards
 const CalendarIcon = () => (
@@ -311,8 +312,7 @@ function DailyTrendBarChart({
 
 export default function Reports() {
   // Check if current user is Admin
-  const currentUser = localStorage.getItem("user");
-  const userRole = currentUser ? JSON.parse(currentUser).role : null;
+  const userRole = readStoredUser()?.role ?? null;
   const isAdmin = userRole === "Admin";
   const usesExpiryTracking = useExpiryTracking();
 

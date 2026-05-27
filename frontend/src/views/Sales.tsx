@@ -12,6 +12,7 @@ import {
   loadCachedProducts,
 } from "../offline/storage";
 import { syncSalesOutboxOnce } from "../offline/sync";
+import { readStoredUser } from "../user-storage";
 
 type SalesPaymentFilterOption = {
   key: string;
@@ -87,8 +88,7 @@ export default function Sales() {
   const hasLoadedOnce = useRef(false);
 
   // Get user and business info for receipt
-  const currentUser = localStorage.getItem("user");
-  const userData = currentUser ? JSON.parse(currentUser) : null;
+  const userData = readStoredUser();
   const businessName = userData?.business_name || "Your Business";
   const businessLogoUrl = userData?.business_logo_url || "";
   const salesPerson = userData?.name || "Sales Person";

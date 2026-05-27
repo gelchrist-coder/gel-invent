@@ -4,6 +4,7 @@ import RevenueMetrics from "../components/RevenueMetrics";
 import RevenueTrend from "../components/RevenueTrend";
 import TopProducts from "../components/TopProducts";
 import PaymentMethodBreakdown from "../components/PaymentMethodBreakdown";
+import { readStoredUser } from "../user-storage";
 
 type RevenueMetricsData = {
   total_revenue: number;
@@ -50,8 +51,7 @@ type RevenueAnalyticsResponse = {
 
 export default function RevenueAnalysis() {
   // Check if current user is Admin
-  const currentUser = localStorage.getItem("user");
-  const userRole = currentUser ? JSON.parse(currentUser).role : null;
+  const userRole = readStoredUser()?.role ?? null;
   const isAdmin = userRole === "Admin";
 
   const [data, setData] = useState<RevenueAnalyticsResponse | null>(null);

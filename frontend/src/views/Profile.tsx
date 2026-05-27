@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { changePassword, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings, uploadBusinessLogo } from "../api";
 import { Branch } from "../types";
+import { readStoredUser } from "../user-storage";
 
 type PasswordInputProps = {
   label: string;
@@ -49,8 +50,7 @@ function getPasswordRuleError(password: string): string | null {
 
 export default function Profile() {
   // Get user role from localStorage
-  const currentUserStr = localStorage.getItem("user");
-  const currentUserData = currentUserStr ? JSON.parse(currentUserStr) : null;
+  const currentUserData = readStoredUser();
   const userRole = currentUserData?.role || "Admin";
   const isAdmin = userRole === "Admin";
 

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSystemSettingsCached, getCachedProducts } from "../api";
 import { Product } from "../types";
 import { useExpiryTracking } from "../settings";
+import { readStoredUser } from "../user-storage";
 
 type Props = {
   onNavigate: (view: string) => void;
@@ -184,8 +185,7 @@ export default function Dashboard({ onNavigate }: Props) {
   }, [customRangeStartDate, selectedRange]);
 
   // Check if current user is Admin
-  const currentUser = localStorage.getItem("user");
-  const userRole = currentUser ? JSON.parse(currentUser).role : null;
+  const userRole = readStoredUser()?.role ?? null;
   const isAdmin = userRole === "Admin";
   const token = localStorage.getItem("token");
 

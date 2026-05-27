@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { API_BASE, buildAuthHeaders, createBranch, fetchBranches, resilientFetch } from "../api";
 import { Branch } from "../types";
+import { readStoredUser } from "../user-storage";
 
 type Employee = {
   id: number;
@@ -23,8 +24,7 @@ export default function UserManagement() {
   const visibleBranches = branches;
   
   // Check if current user is Admin
-  const currentUser = localStorage.getItem("user");
-  const userRole = currentUser ? JSON.parse(currentUser).role : null;
+  const userRole = readStoredUser()?.role ?? null;
   const [formData, setFormData] = useState({
     name: "",
     email: "",

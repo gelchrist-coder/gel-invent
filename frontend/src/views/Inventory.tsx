@@ -8,6 +8,7 @@ import PurchasingPanel from "../components/PurchasingPanel";
 import ProductSearchSelect from "../components/ProductSearchSelect";
 import { useExpiryTracking } from "../settings";
 import type { Branch, Product } from "../types";
+import { readStoredUser } from "../user-storage";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
@@ -15,8 +16,7 @@ type InventoryTab = "overview" | "alerts" | "actions" | "purchasing" | "history"
 
 export default function Inventory() {
   // Check if current user is Admin
-  const currentUser = localStorage.getItem("user");
-  const userRole = currentUser ? JSON.parse(currentUser).role : null;
+  const userRole = readStoredUser()?.role ?? null;
   const isAdmin = userRole === "Admin";
   const usesExpiryTracking = useExpiryTracking();
 
