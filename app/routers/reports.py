@@ -47,7 +47,7 @@ def get_sales_dashboard(
 ):
     """
     Get sales dashboard with key metrics (Owner/Admin only).
-    Optional filter_date (YYYY-MM-DD format) to filter top products for a specific date.
+    Optional filter_date (YYYY-MM-DD format) to filter top products since that date.
     """
     # Restrict access to Admin/Owner only
     if current_user.role != "Admin":
@@ -64,14 +64,15 @@ def get_sales_dashboard(
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
     
-    # Parse custom date for top products if provided (filters for that specific day)
+    # Parse custom date for top products if provided (interpreted as range start).
+    # The dashboard passes the selected range start date (e.g., last 7/30 days).
     top_products_start = month_start
     top_products_end = now
     if filter_date:
         try:
             parsed_date = datetime.strptime(filter_date, "%Y-%m-%d")
             top_products_start = parsed_date.replace(hour=0, minute=0, second=0, microsecond=0)
-            top_products_end = parsed_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+            top_products_end = now
         except ValueError:
             pass
     
