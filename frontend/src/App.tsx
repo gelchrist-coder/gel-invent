@@ -1054,7 +1054,7 @@ export default function App() {
       case "revenue":
         return <RevenueAnalysis />;
       case "reports":
-        return <Reports />;
+        return <Reports onNavigate={setActiveView} />;
       case "creditors":
         return <Creditors />;
       case "profile":

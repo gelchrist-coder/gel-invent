@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   fetchCreditorsSummaryReport,
   fetchInventoryStatusReport,
-  fetchRevenueAnalytics,
   fetchSalesDashboard,
 } from "../api";
 import { useExpiryTracking } from "../settings";
@@ -158,31 +157,6 @@ interface CreditorsSummary {
   }>;
 }
 
-interface RevenueAnalytics {
-  period: {
-    start: string;
-    end: string;
-    label: string;
-  };
-  metrics: {
-    total_revenue: number;
-    cash_revenue: number;
-    credit_revenue: number;
-    total_profit: number;
-    total_losses: number;
-    actual_profit: number;
-    total_cost: number;
-    profit_margin: number;
-    actual_profit_margin: number;
-    sales_count: number;
-    avg_transaction: number;
-    revenue_growth: number;
-  };
-  payment_methods: Array<{ method: string; revenue: number }>;
-  top_products: Array<{ product_name: string; quantity_sold: number; revenue: number; profit: number }>;
-  daily_trend: Array<{ date: string; revenue: number }>;
-}
-
 type BarChartItem = {
   label: string;
   value: number;
@@ -264,54 +238,11 @@ function HorizontalBarChart({
   );
 }
 
-function DailyTrendBarChart({
-  points,
-  formatCurrency,
-  formatDate,
-}: {
-  points: Array<{ date: string; revenue: number }>;
-  formatCurrency: (value: number) => string;
-  formatDate: (value: string) => string;
-}) {
-  if (points.length === 0) {
-    return <p style={{ textAlign: "center", color: "#6b7280", padding: 20 }}>No revenue trend data</p>;
-  }
+type Props = {
+  onNavigate?: (view: string) => void;
+};
 
-  const maxRevenue = Math.max(...points.map((p) => p.revenue), 0);
-
-  return (
-    <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, backgroundColor: "white", padding: 16, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
-      <div style={{ overflowX: "auto", overflowY: "hidden", paddingBottom: 10 }}>
-        <div style={{ minWidth: Math.max(points.length * 18, 560), height: 240, display: "flex", alignItems: "flex-end", gap: 6 }}>
-          {points.map((point, index) => {
-            const ratio = maxRevenue > 0 ? point.revenue / maxRevenue : 0;
-            const barHeight = Math.max(4, Math.round(ratio * 190));
-            const showTick = index === 0 || index === points.length - 1 || points.length <= 14 || index % 7 === 0;
-            return (
-              <div key={point.date} style={{ width: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <div
-                  title={`${formatDate(point.date)}: ${formatCurrency(point.revenue)}`}
-                  style={{
-                    width: "100%",
-                    height: barHeight,
-                    borderRadius: 4,
-                    background: "linear-gradient(180deg, #22d3ee 0%, #0ea5e9 60%, #2563eb 100%)",
-                  }}
-                />
-                <span style={{ fontSize: 10, color: "#6b7280", whiteSpace: "nowrap", transform: "rotate(-35deg)", transformOrigin: "top left", height: showTick ? 28 : 0, opacity: showTick ? 1 : 0 }}>
-                  {showTick ? formatDate(point.date) : ""}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function Reports() {
-  // Check if current user is Admin
+export default function Reports({ onNavigate }: Props) {
   const userRole = readStoredUser()?.role ?? null;
   const isAdmin = userRole === "Admin";
   const usesExpiryTracking = useExpiryTracking();
@@ -320,8 +251,6 @@ export default function Reports() {
   const [salesData, setSalesData] = useState<SalesDashboard | null>(null);
   const [inventoryData, setInventoryData] = useState<InventoryStatus | null>(null);
   const [creditorsData, setCreditorsData] = useState<CreditorsSummary | null>(null);
-  const [revenueData, setRevenueData] = useState<RevenueAnalytics | null>(null);
-  const [revenuePeriod, setRevenuePeriod] = useState<"today" | "7d" | "30d" | "90d" | "all">("30d");
   const [loading, setLoading] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -331,10 +260,6 @@ export default function Reports() {
         if (!salesData) {
           const data = await fetchSalesDashboard();
           setSalesData(data as SalesDashboard);
-        }
-        if (!revenueData) {
-          const data = await fetchRevenueAnalytics(revenuePeriod);
-          setRevenueData(data as RevenueAnalytics);
         }
       } else if (activeTab === "inventory" && !inventoryData) {
         const data = await fetchInventoryStatusReport();
@@ -348,7 +273,7 @@ export default function Reports() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, creditorsData, inventoryData, revenueData, revenuePeriod, salesData]);
+  }, [activeTab, creditorsData, inventoryData, salesData]);
 
   useEffect(() => {
     // Only load data if user is Admin
@@ -363,7 +288,6 @@ export default function Reports() {
       setSalesData(null);
       setInventoryData(null);
       setCreditorsData(null);
-      setRevenueData(null);
     };
 
     window.addEventListener("activeBranchChanged", handleBranchChange);
@@ -427,33 +351,29 @@ export default function Reports() {
         <div style={{ textAlign: "center", padding: 36, color: "#6b7280", background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 14 }}>Loading...</div>
       )}
 
-      {activeTab === "sales" && (
+      {activeTab === "sales" && onNavigate ? (
         <div style={{ marginBottom: 18, display: "flex", justifyContent: "flex-end" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155", background: "#ffffff", border: "1px solid #dbe5f2", borderRadius: 10, padding: "8px 10px" }}>
-            Revenue Period
-            <select
-              value={revenuePeriod}
-              onChange={(e) => {
-                const next = e.target.value as "today" | "7d" | "30d" | "90d" | "all";
-                setRevenuePeriod(next);
-                setRevenueData(null);
-              }}
-              style={{
-                padding: "8px 10px",
-                border: "1px solid #cfd8e5",
-                borderRadius: 8,
-                background: "#f8fafc",
-              }}
-            >
-              <option value="today">Today</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
-              <option value="90d">Last 90 days</option>
-              <option value="all">All time</option>
-            </select>
-          </label>
+          <button
+            type="button"
+            onClick={() => onNavigate("revenue")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 14px",
+              border: "1px solid #0f172a",
+              borderRadius: 10,
+              background: "#ffffff",
+              color: "#0f172a",
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            Open Revenue Analysis
+          </button>
         </div>
-      )}
+      ) : null}
 
       {/* Sales Dashboard */}
       {activeTab === "sales" && salesData && salesData.today && (
@@ -592,92 +512,34 @@ export default function Reports() {
             </div>
           </div>
 
-          {/* Revenue Summary (merged into Sales) */}
-          {revenueData && (
-            <div style={{ marginTop: 24 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Revenue & Profitability</h2>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 16, marginBottom: 24 }}>
-                <div style={{ padding: 20, backgroundColor: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", color: "#2563eb", flexShrink: 0 }}>
-                      <DollarIcon />
-                    </div>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: 13, color: "#1e40af", marginBottom: 4 }}>Total Revenue</h3>
-                      <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#1e3a8a" }}>
-                        {formatCurrency(revenueData.metrics.total_revenue)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ padding: 20, backgroundColor: "#f0fdf4", borderRadius: 8, border: "1px solid #bbf7d0" }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", color: "#16a34a", flexShrink: 0 }}>
-                      <DollarIcon />
-                    </div>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: 13, color: "#15803d", marginBottom: 4 }}>Actual Profit</h3>
-                      <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#166534" }}>
-                        {formatCurrency(revenueData.metrics.actual_profit)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ padding: 20, backgroundColor: "#fff7ed", borderRadius: 8, border: "1px solid #fed7aa" }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#ffedd5", display: "flex", alignItems: "center", justifyContent: "center", color: "#ea580c", flexShrink: 0 }}>
-                      <CalendarWeekIcon />
-                    </div>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: 13, color: "#9a3412", marginBottom: 4 }}>Sales Count</h3>
-                      <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#c2410c" }}>
-                        {revenueData.metrics.sales_count}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ padding: 20, backgroundColor: "#fef2f2", borderRadius: 8, border: "1px solid #fecaca" }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: "#fee2e2", display: "flex", alignItems: "center", justifyContent: "center", color: "#dc2626", flexShrink: 0 }}>
-                      <AlertCircleIcon />
-                    </div>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: 13, color: "#991b1b", marginBottom: 4 }}>Losses</h3>
-                      <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: "#b91c1c" }}>
-                        {formatCurrency(revenueData.metrics.total_losses)}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 24 }}>
-                <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Daily Revenue Trend</h2>
-                <p style={{ margin: "0 0 12px", fontSize: 12, color: "#6b7280" }}>
-                  Showing trend from {formatDate(revenueData.period.start)} to {formatDate(revenueData.period.end)}.
-                </p>
-                <DailyTrendBarChart
-                  points={revenueData.daily_trend}
-                  formatCurrency={formatCurrency}
-                  formatDate={formatDate}
-                />
-              </div>
-
-              <div style={{ padding: 16, backgroundColor: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8 }}>
-                <p style={{ margin: 0, fontSize: 14, color: "#374151" }}>
-                  Profit margin: <strong>{revenueData.metrics.actual_profit_margin.toFixed(2)}%</strong>
-                  {"  •  "}
-                  Average transaction: <strong>{formatCurrency(revenueData.metrics.avg_transaction)}</strong>
-                  {"  •  "}
-                  Revenue growth: <strong>{revenueData.metrics.revenue_growth.toFixed(2)}%</strong>
+          <div style={{ marginTop: 24, padding: 18, borderRadius: 14, border: "1px solid #dbe5f2", background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#0f172a" }}>Need profitability and trend analysis?</h2>
+                <p style={{ margin: 0, fontSize: 13, color: "#64748b", maxWidth: 620 }}>
+                  Revenue, margin, growth, and daily trend charts now live on the dedicated Revenue Analysis page so this report stays focused on operational sales reporting.
                 </p>
               </div>
+              {onNavigate ? (
+                <button
+                  type="button"
+                  onClick={() => onNavigate("revenue")}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid #0f172a",
+                    background: "#0f172a",
+                    color: "#ffffff",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  Go to Revenue Analysis
+                </button>
+              ) : null}
             </div>
-          )}
+          </div>
         </div>
       )}
 
