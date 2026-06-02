@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .database import Base, engine, mark_critical_schema_ready
 from .auth import get_current_active_user
+from .permissions import ensure_permission
 from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns
 from . import models
 
@@ -580,8 +581,7 @@ async def health_runtime(
     current_user: models.User = Depends(get_current_active_user),
 ) -> dict[str, object]:
     """Admin-only runtime health/status snapshot for production diagnostics."""
-    if current_user.role != "Admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Admin can access runtime health")
+    ensure_permission(current_user, "view_runtime_health", "Only Admin can access runtime health")
 
     db_ok = True
     db_error = ""
