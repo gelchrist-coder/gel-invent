@@ -324,11 +324,60 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
   const formData = new FormData();
   formData.append("logo", file);
 
-  const response = await resilientFetch(`${API_BASE}/auth/me/logo`, {
-    method: "POST",
-    headers: buildAuthHeaders(),
-    body: formData,
-  });
+  const requestUpload = () => resilientFetch(
+    `${API_BASE}/auth/me/logo`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(),
+      body: formData,
+    },
+    {
+      timeoutMs: 45000,
+      retries: 0,
+    },
+  );
+
+  let response: Response;
+
+  try {
+    response = await requestUpload();
+
+    if (response.status >= 500) {
+      const isReady = await warmBackend("/health/db", true, {
+        timeoutMs: 30000,
+        probeTimeoutMs: 10000,
+        retryIntervalMs: 1500,
+      });
+
+      if (!isReady) {
+        throw new Error("Logo upload is temporarily unavailable while the server starts up. Please try again in a moment.");
+      }
+
+      response = await requestUpload();
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    const shouldWarmAndRetry =
+      isTemporaryServerDelayError(error)
+      || message.includes("unable to reach the server right now")
+      || message.includes("server is taking longer than expected");
+
+    if (!shouldWarmAndRetry) {
+      throw error;
+    }
+
+    const isReady = await warmBackend("/health/db", true, {
+      timeoutMs: 30000,
+      probeTimeoutMs: 10000,
+      retryIntervalMs: 1500,
+    });
+
+    if (!isReady) {
+      throw new Error("Logo upload is temporarily unavailable while the server starts up. Please try again in a moment.");
+    }
+
+    response = await requestUpload();
+  }
 
   if (!response.ok) {
     if (response.status === 401) {
