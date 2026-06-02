@@ -258,6 +258,8 @@ class SaleCreate(SaleBase):
 class SaleRead(SaleBase):
     id: int
     client_sale_id: str | None = None
+    amount_paid: Decimal | None = None
+    partial_payment_method: str | None = None
     created_at: datetime
     created_by_name: str | None = None
     deducted_batches: list[dict[str, object]] | None = None

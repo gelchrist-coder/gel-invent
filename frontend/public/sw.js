@@ -1,13 +1,17 @@
-const SHELL_CACHE = "gel-invent-shell-v1";
-const ASSET_CACHE = "gel-invent-assets-v1";
+const SHELL_CACHE = "gel-invent-shell-v3";
+const ASSET_CACHE = "gel-invent-assets-v3";
 const APP_SHELL_URLS = [
-  "/",
-  "/index.html",
   "/offline.html",
   "/manifest.webmanifest",
   "/favicon.ico",
   "/pwa-icon.svg",
 ];
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    void self.skipWaiting();
+  }
+});
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -36,7 +40,7 @@ self.addEventListener("activate", (event) => {
 async function networkFirst(request) {
   const cache = await caches.open(SHELL_CACHE);
   try {
-    const response = await fetch(request);
+    const response = await fetch(request, { cache: "no-store" });
     if (response && response.ok) {
       cache.put(request, response.clone()).catch(() => {
         // Ignore cache write failures.

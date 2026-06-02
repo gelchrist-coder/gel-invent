@@ -57,6 +57,7 @@ export type NewMovement = {
 
 export type Sale = {
   id: number;
+  client_sale_id?: string | null;
   product_id: number;
   quantity: number;
   sale_unit_type?: "piece" | "pack";
@@ -65,6 +66,8 @@ export type Sale = {
   total_price: number;
   customer_name?: string | null;
   payment_method: string;
+  amount_paid?: number | null;
+  partial_payment_method?: string | null;
   notes?: string | null;
   created_at: string;
   created_by_name?: string | null;

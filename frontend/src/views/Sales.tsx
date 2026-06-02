@@ -4,6 +4,7 @@ import { assignSaleCustomer, fetchSalesCached, createSalesBulk, deleteSale, fetc
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
+import { SaleTransaction, groupSalesIntoTransactions } from "../sales-transactions";
 import {
   applyLocalSaleToCachedProducts,
   cacheProducts,
@@ -78,7 +79,7 @@ export default function Sales() {
   const [salesSearchTerm, setSalesSearchTerm] = useState("");
   const [salesPaymentFilter, setSalesPaymentFilter] = useState("all");
   const [salesRowsLimit, setSalesRowsLimit] = useState<number>(5);
-  const [assignCustomerSale, setAssignCustomerSale] = useState<Sale | null>(null);
+  const [assignCustomerTransaction, setAssignCustomerTransaction] = useState<SaleTransaction | null>(null);
   const [assignCustomerName, setAssignCustomerName] = useState("");
   const [assignCustomerPhone, setAssignCustomerPhone] = useState("");
   const [assignCustomerEmail, setAssignCustomerEmail] = useState("");
@@ -228,7 +229,7 @@ export default function Sales() {
           setOfflineNotice("Sale queued for sync. We'll retry automatically.");
         }
       })();
-    } catch (err) {
+    } catch {
       // Network issue: queue sale locally and sync later.
       enqueueSales(pendingSales);
       setConfirmedSales([]);
@@ -422,16 +423,33 @@ export default function Sales() {
     handleDone();
   };
 
-  const reprintSaleReceipt = (sale: Sale) => {
-    const product = productById.get(sale.product_id);
-    const productName = product?.name || `Product #${sale.product_id}`;
-    const qtyDisplay = sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number"
-      ? `${sale.pack_quantity} pack`
-      : `${sale.quantity} units`;
+  const reprintSaleReceipt = (transaction: SaleTransaction) => {
+    const salesSorted = [...transaction.sales].sort((left, right) => {
+      const timeDiff = new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return left.id - right.id;
+    });
     const logoHtml = businessLogoUrl
       ? `<div style="margin-bottom:8px;"><img src="${businessLogoUrl}" alt="Logo" style="height:40px;max-width:140px;object-fit:contain;" /></div>`
       : "";
     const watermarkHtml = businessLogoUrl ? "" : '<div class="watermark">Gel Invent</div>';
+    const itemsHTML = salesSorted
+      .map((sale) => {
+        const product = productById.get(sale.product_id);
+        const productName = product?.name || `Product #${sale.product_id}`;
+        const qtyDisplay = sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number"
+          ? `${sale.pack_quantity} pack`
+          : `${sale.quantity} units`;
+
+        return `
+          <div class="item-row"><div><strong>${productName}</strong></div></div>
+          <div class="item-row"><div>${qtyDisplay} × GHS ${Number(sale.unit_price).toFixed(2)}</div><div>GHS ${Number(sale.total_price).toFixed(2)}</div></div>
+        `;
+      })
+      .join("");
+    const totalPaid = Number(transaction.amount_paid || 0);
+    const paymentMethod = String(transaction.payment_method || "cash");
+    const remainingBalance = Math.max(0, Number(transaction.total_price || 0) - totalPaid);
 
     const receiptHTML = `
       <!DOCTYPE html>
@@ -460,18 +478,18 @@ export default function Sales() {
           <div>Sales Receipt</div>
         </div>
         <div class="receipt-info">
-          <div>Receipt No: #${String(sale.id).padStart(6, "0")}</div>
-          <div>Date: ${new Date(sale.created_at).toLocaleString()}</div>
-          <div>Served by: ${sale.created_by_name || salesPerson}</div>
-          ${sale.customer_name ? `<div>Customer: ${sale.customer_name}</div>` : ""}
+          <div>Receipt No: #${transaction.receiptNumber}</div>
+          <div>Date: ${new Date(transaction.created_at).toLocaleString()}</div>
+          <div>Served by: ${transaction.created_by_name || salesPerson}</div>
+          ${transaction.customer_name ? `<div>Customer: ${transaction.customer_name}</div>` : "<div>Customer: Walk-in</div>"}
         </div>
-        <div class="items">
-          <div class="item-row"><div><strong>${productName}</strong></div></div>
-          <div class="item-row"><div>${qtyDisplay} × GHS ${Number(sale.unit_price).toFixed(2)}</div><div>GHS ${Number(sale.total_price).toFixed(2)}</div></div>
-        </div>
+        <div class="items">${itemsHTML}</div>
         <div class="total-section">
-          <div class="total-row"><div>TOTAL:</div><div>GHS ${Number(sale.total_price).toFixed(2)}</div></div>
-          <div class="item-row"><div>Payment:</div><div>${String(sale.payment_method || "cash").toUpperCase()}</div></div>
+          <div class="total-row"><div>TOTAL:</div><div>GHS ${Number(transaction.total_price || 0).toFixed(2)}</div></div>
+          <div class="item-row"><div>Payment:</div><div>${paymentMethod.toUpperCase()}</div></div>
+          ${totalPaid > 0 ? `<div class="item-row"><div>Paid:</div><div>GHS ${totalPaid.toFixed(2)}</div></div>` : ""}
+          ${transaction.partial_payment_method ? `<div class="item-row"><div>Received via:</div><div>${String(transaction.partial_payment_method).toUpperCase()}</div></div>` : ""}
+          ${remainingBalance > 0 ? `<div class="item-row"><div>Balance:</div><div>GHS ${remainingBalance.toFixed(2)}</div></div>` : ""}
         </div>
         <div class="footer">
           <div>Thank you for your business!</div>
@@ -504,7 +522,7 @@ export default function Sales() {
   };
 
   const closeAssignCustomerModal = () => {
-    setAssignCustomerSale(null);
+    setAssignCustomerTransaction(null);
     setAssignCustomerName("");
     setAssignCustomerPhone("");
     setAssignCustomerEmail("");
@@ -512,9 +530,9 @@ export default function Sales() {
     setAssignCustomerError(null);
   };
 
-  const openAssignCustomerModal = (sale: Sale) => {
-    setAssignCustomerSale(sale);
-    setAssignCustomerName(isWalkInCustomerName(sale.customer_name) ? "" : String(sale.customer_name || ""));
+  const openAssignCustomerModal = (transaction: SaleTransaction) => {
+    setAssignCustomerTransaction(transaction);
+    setAssignCustomerName(isWalkInCustomerName(transaction.customer_name) ? "" : String(transaction.customer_name || ""));
     setAssignCustomerPhone("");
     setAssignCustomerEmail("");
     setAssignCustomerNotes("");
@@ -523,7 +541,7 @@ export default function Sales() {
 
   const submitAssignCustomer = async (event: FormEvent) => {
     event.preventDefault();
-    if (!assignCustomerSale) return;
+    if (!assignCustomerTransaction) return;
 
     const customerName = assignCustomerName.trim();
     const customerPhone = assignCustomerPhone.trim();
@@ -538,7 +556,7 @@ export default function Sales() {
     setAssigningCustomer(true);
     setAssignCustomerError(null);
     try {
-      await assignSaleCustomer(assignCustomerSale.id, {
+      await assignSaleCustomer(assignCustomerTransaction.primarySale.id, {
         customer_name: customerName,
         phone: customerPhone || undefined,
         email: customerEmail || undefined,
@@ -576,10 +594,15 @@ export default function Sales() {
     return sales.filter((sale) => new Date(sale.created_at).getTime() >= startTime);
   }, [sales, periodStart]);
 
+  const periodTransactions = useMemo(
+    () => groupSalesIntoTransactions(periodFilteredSales, productById),
+    [periodFilteredSales, productById],
+  );
+
   const paymentFilterOptions = useMemo<SalesPaymentFilterOption[]>(() => {
     const paymentCounts = new Map<string, number>();
 
-    for (const sale of periodFilteredSales) {
+    for (const sale of periodTransactions) {
       const key = normalizeSalePaymentMethod(sale.payment_method);
       paymentCounts.set(key, (paymentCounts.get(key) ?? 0) + 1);
     }
@@ -592,8 +615,8 @@ export default function Sales() {
         count,
       }));
 
-    return [{ key: "all", label: "All", count: periodFilteredSales.length }, ...dynamicOptions];
-  }, [periodFilteredSales]);
+    return [{ key: "all", label: "All", count: periodTransactions.length }, ...dynamicOptions];
+  }, [periodTransactions]);
 
   useEffect(() => {
     if (paymentFilterOptions.some((option) => option.key === salesPaymentFilter)) {
@@ -605,30 +628,20 @@ export default function Sales() {
   const filteredSales = useMemo(() => {
     const query = salesSearchTerm.trim().toLowerCase();
 
-    return periodFilteredSales.filter((sale) => {
+    return periodTransactions.filter((sale) => {
       const paymentKey = normalizeSalePaymentMethod(sale.payment_method);
       const matchesPayment = salesPaymentFilter === "all" || paymentKey === salesPaymentFilter;
       if (!matchesPayment) return false;
 
       if (!query) return true;
 
-      const productName = (productById.get(sale.product_id)?.name || `Product #${sale.product_id}`).toLowerCase();
-      const customerName = (sale.customer_name || "walk-in").toLowerCase();
-      const recordedBy = (sale.created_by_name || "").toLowerCase();
-      const paymentLabel = formatPaymentLabel(paymentKey).toLowerCase();
-
-      return (
-        productName.includes(query) ||
-        customerName.includes(query) ||
-        recordedBy.includes(query) ||
-        paymentLabel.includes(query)
-      );
+      return sale.searchText.includes(query) || formatPaymentLabel(paymentKey).toLowerCase().includes(query);
     });
-  }, [periodFilteredSales, productById, salesPaymentFilter, salesSearchTerm]);
+  }, [periodTransactions, salesPaymentFilter, salesSearchTerm]);
 
   const periodSalesTotal = useMemo(
-    () => periodFilteredSales.reduce((sum, sale) => sum + Number(sale.total_price || 0), 0),
-    [periodFilteredSales]
+    () => periodTransactions.reduce((sum, sale) => sum + Number(sale.total_price || 0), 0),
+    [periodTransactions]
   );
 
   const filteredSalesTotal = useMemo(
@@ -657,12 +670,12 @@ export default function Sales() {
     () => [
       {
         label: "Transactions",
-        value: String(periodFilteredSales.length),
+        value: String(periodTransactions.length),
         helper: SALES_PERIOD_LABEL[salesPeriod],
         accent: "#0f172a",
       },
       {
-        label: "Filtered Rows",
+        label: "Filtered Transactions",
         value: String(filteredSales.length),
         helper: "After current filters",
         accent: "#1d4ed8",
@@ -680,17 +693,12 @@ export default function Sales() {
         accent: "#b45309",
       },
     ],
-    [filteredCreditSalesCount, filteredSales.length, periodFilteredSales.length, salesAverageTicket, salesPeriod],
+    [filteredCreditSalesCount, filteredSales.length, periodTransactions.length, salesAverageTicket, salesPeriod],
   );
 
   // PDF Export function
-  const exportSalesPDF = (list: Sale[]) => {
+  const exportSalesPDF = (list: SaleTransaction[]) => {
     if (list.length === 0) return;
-
-    const getProductName = (productId: number) => {
-      const product = productById.get(productId);
-      return product ? product.name : `Product #${productId}`;
-    };
 
     const formatDate = (dateString: string) => {
       const date = new Date(dateString);
@@ -711,17 +719,21 @@ export default function Sales() {
       return;
     }
 
-    const rowsHTML = list.map(sale => `
+    const rowsHTML = list.map((sale) => {
+      const itemsHTML = sale.items
+        .map((item) => `${item.productName} (${item.quantityLabel})`)
+        .join("<br />");
+
+      return `
       <tr>
         <td>${formatDate(sale.created_at)}</td>
-        <td>${getProductName(sale.product_id)}</td>
-        <td style="text-align:right">${sale.quantity}</td>
-        <td style="text-align:right">GHS ${Number(sale.unit_price).toFixed(2)}</td>
-        <td style="text-align:right;font-weight:600">GHS ${Number(sale.total_price).toFixed(2)}</td>
-        <td>${sale.customer_name || "-"}</td>
+        <td>${sale.customer_name || "Walk-in"}</td>
+        <td>${itemsHTML}</td>
         <td>${sale.payment_method}</td>
+        <td style="text-align:right;font-weight:600">GHS ${Number(sale.total_price).toFixed(2)}</td>
       </tr>
-    `).join("");
+    `;
+    }).join("");
 
     const html = `
       <!DOCTYPE html>
@@ -753,20 +765,18 @@ export default function Sales() {
           <thead>
             <tr>
               <th>Date</th>
-              <th>Product</th>
-              <th style="text-align:right">Qty</th>
-              <th style="text-align:right">Price</th>
-              <th style="text-align:right">Total</th>
               <th>Customer</th>
+              <th>Items</th>
               <th>Payment</th>
+              <th style="text-align:right">Total</th>
             </tr>
           </thead>
           <tbody>
             ${rowsHTML}
             <tr class="total-row">
-              <td colspan="4" style="text-align:right"><strong>Grand Total:</strong></td>
+              <td colspan="3" style="text-align:right"><strong>Grand Total:</strong></td>
+              <td></td>
               <td style="text-align:right"><strong>GHS ${totalRevenue.toFixed(2)}</strong></td>
-              <td colspan="2"></td>
             </tr>
           </tbody>
         </table>
@@ -924,7 +934,7 @@ export default function Sales() {
               type="text"
               value={salesSearchTerm}
               onChange={(event) => setSalesSearchTerm(event.target.value)}
-              placeholder="Search product, customer, payment"
+              placeholder="Search customer, items, payment"
               className="input"
               style={{ minWidth: 220, flex: "1 1 240px" }}
             />
@@ -1005,7 +1015,7 @@ export default function Sales() {
       </div>
 
       {/* Assign Customer Modal */}
-      {assignCustomerSale && (
+      {assignCustomerTransaction && (
         <div
           style={{
             position: "fixed",
@@ -1041,7 +1051,7 @@ export default function Sales() {
             <div style={{ padding: "16px 18px", borderBottom: "1px solid #e5e7eb", background: "#f8fafc" }}>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#0f172a" }}>Assign Customer to Sale</h3>
               <p style={{ margin: "6px 0 0", fontSize: 12, color: "#64748b" }}>
-                Sale #{assignCustomerSale.id} · {productById.get(assignCustomerSale.product_id)?.name || `Product #${assignCustomerSale.product_id}`} · {toCurrency(Number(assignCustomerSale.total_price || 0))}
+                Receipt #{assignCustomerTransaction.receiptNumber} · {assignCustomerTransaction.item_count} item{assignCustomerTransaction.item_count === 1 ? "" : "s"} · {toCurrency(Number(assignCustomerTransaction.total_price || 0))}
               </p>
             </div>
 
@@ -1534,7 +1544,7 @@ export default function Sales() {
               <div>
                 <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Sales History</h2>
                 <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-                  {filteredSales.length} total sales
+                  {filteredSales.length} total transactions
                 </p>
               </div>
               <div style={{ display: "flex", gap: 8 }}>

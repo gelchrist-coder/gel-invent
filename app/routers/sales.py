@@ -5,7 +5,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
@@ -715,6 +715,22 @@ def assign_sale_customer(
     if not sale:
         raise HTTPException(status_code=404, detail="Sale not found")
 
+    transaction_token = ((sale.client_sale_id or "").strip().split(":")[0] if sale.client_sale_id else "")
+    related_sales = [sale]
+    if transaction_token:
+        grouped_sales = db.scalars(
+            select(models.Sale).where(
+                models.Sale.user_id.in_(tenant_user_ids),
+                models.Sale.branch_id == active_branch_id,
+                or_(
+                    models.Sale.client_sale_id == transaction_token,
+                    models.Sale.client_sale_id.like(f"{transaction_token}:%"),
+                ),
+            )
+        ).all()
+        if grouped_sales:
+            related_sales = grouped_sales
+
     normalized_customer_name = _normalized_customer_name(payload.customer_name)
     if not normalized_customer_name or _is_walk_in_customer_name(normalized_customer_name):
         raise HTTPException(status_code=400, detail="Please provide a valid customer name")
@@ -722,11 +738,6 @@ def assign_sale_customer(
     normalized_phone = _normalized_customer_name(payload.phone) if payload.phone else None
     normalized_email = str(payload.email).strip() if payload.email else None
 
-    if payload.notes and payload.notes.strip():
-        appended_note = payload.notes.strip()
-        sale.notes = f"{sale.notes} | {appended_note}" if sale.notes else appended_note
-
-    sale.customer_name = normalized_customer_name
     creditor = _get_or_create_creditor(
         db=db,
         tenant_user_ids=tenant_user_ids,
@@ -737,51 +748,58 @@ def assign_sale_customer(
         email=normalized_email,
     )
 
-    # For legacy credit sales that were recorded as walk-in, create missing debt/payment ledger entries.
-    if sale.payment_method in {"credit", "partial"}:
-        existing_debt = db.scalar(
-            select(models.CreditTransaction).where(
-                models.CreditTransaction.sale_id == sale.id,
-                models.CreditTransaction.user_id.in_(tenant_user_ids),
-                models.CreditTransaction.branch_id == active_branch_id,
-                models.CreditTransaction.transaction_type == "debt",
+    for related_sale in related_sales:
+        if payload.notes and payload.notes.strip():
+            appended_note = payload.notes.strip()
+            related_sale.notes = f"{related_sale.notes} | {appended_note}" if related_sale.notes else appended_note
+
+        related_sale.customer_name = normalized_customer_name
+
+        # For legacy credit sales that were recorded as walk-in, create missing debt/payment ledger entries.
+        if related_sale.payment_method in {"credit", "partial"}:
+            existing_debt = db.scalar(
+                select(models.CreditTransaction).where(
+                    models.CreditTransaction.sale_id == related_sale.id,
+                    models.CreditTransaction.user_id.in_(tenant_user_ids),
+                    models.CreditTransaction.branch_id == active_branch_id,
+                    models.CreditTransaction.transaction_type == "debt",
+                )
             )
-        )
-        if not existing_debt:
-            sale_total = Decimal(sale.total_price or 0)
-            amount_paid = Decimal(sale.amount_paid or 0)
-            if sale.payment_method == "partial":
-                debt_amount = sale_total - amount_paid
-            else:
-                debt_amount = sale_total
+            if not existing_debt:
+                sale_total = Decimal(related_sale.total_price or 0)
+                amount_paid = Decimal(related_sale.amount_paid or 0)
+                if related_sale.payment_method == "partial":
+                    debt_amount = sale_total - amount_paid
+                else:
+                    debt_amount = sale_total
 
-            if debt_amount > 0:
-                creditor.total_debt += debt_amount
-                db.add(
-                    models.CreditTransaction(
-                        user_id=current_user.id,
-                        branch_id=active_branch_id,
-                        creditor_id=creditor.id,
-                        sale_id=sale.id,
-                        amount=debt_amount,
-                        transaction_type="debt",
-                        notes="Debt added after walk-in customer conversion",
+                if debt_amount > 0:
+                    creditor.total_debt += debt_amount
+                    db.add(
+                        models.CreditTransaction(
+                            user_id=current_user.id,
+                            branch_id=active_branch_id,
+                            creditor_id=creditor.id,
+                            sale_id=related_sale.id,
+                            amount=debt_amount,
+                            transaction_type="debt",
+                            notes="Debt added after walk-in customer conversion",
+                        )
                     )
-                )
 
-            if sale.payment_method == "credit" and amount_paid > 0:
-                creditor.total_debt -= amount_paid
-                db.add(
-                    models.CreditTransaction(
-                        user_id=current_user.id,
-                        branch_id=active_branch_id,
-                        creditor_id=creditor.id,
-                        sale_id=sale.id,
-                        amount=amount_paid,
-                        transaction_type="payment",
-                        notes="Initial payment recorded after walk-in customer conversion",
+                if related_sale.payment_method == "credit" and amount_paid > 0:
+                    creditor.total_debt -= amount_paid
+                    db.add(
+                        models.CreditTransaction(
+                            user_id=current_user.id,
+                            branch_id=active_branch_id,
+                            creditor_id=creditor.id,
+                            sale_id=related_sale.id,
+                            amount=amount_paid,
+                            transaction_type="payment",
+                            notes="Initial payment recorded after walk-in customer conversion",
+                        )
                     )
-                )
 
     db.commit()
     db.refresh(sale)
