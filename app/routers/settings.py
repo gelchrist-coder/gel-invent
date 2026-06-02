@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_active_user
 from ..database import get_db
 from ..models import CreditTransaction, Creditor, Product, Sale, SaleReturn, StockMovement, SystemSettings, User
+from app.permissions import ensure_permission, is_admin
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -16,7 +17,7 @@ ALLOWED_CURRENCIES = {"GHS", "USD", "EUR", "GBP"}
 
 
 def _get_tenant_owner_id(user: User) -> int:
-    if user.role == "Admin":
+    if is_admin(user):
         return user.id
     return user.created_by or user.id
 
@@ -153,11 +154,7 @@ def update_system_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can update system settings",
-        )
+    ensure_permission(current_user, "manage_settings", "Only business owners can update system settings")
 
     settings = _get_or_create_settings(db, current_user.id)
     currency_code = _validate_currency(payload.currency_code)
@@ -188,11 +185,7 @@ def convert_system_currency(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can change business currency",
-        )
+    ensure_permission(current_user, "manage_settings", "Only business owners can change business currency")
 
     settings = _get_or_create_settings(db, current_user.id)
     previous_currency = _normalize_currency(getattr(settings, "currency_code", "GHS") or "GHS")

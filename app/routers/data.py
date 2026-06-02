@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover
 from app.database import get_db
 from app.auth import get_current_active_user
 from app import models
+from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
 
 
@@ -26,8 +27,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 
 def _require_admin(current_user: models.User) -> None:
-    if getattr(current_user, "role", None) != "Admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+    ensure_permission(current_user, "manage_data", "Admin access required")
 
 
 def _serialize_dt(value: Any) -> Any:

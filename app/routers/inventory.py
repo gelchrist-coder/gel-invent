@@ -12,6 +12,7 @@ from ..database import get_db
 from .. import schemas
 from ..models import Product, StockMovement, Sale, User, SystemSettings, Branch, Supplier, Purchase, SupplierPayment, PurchaseReturn
 from ..auth import get_current_active_user
+from app.permissions import ensure_permission, is_admin
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.movement_reasons import classify_movement, validate_reason_and_change
@@ -24,7 +25,7 @@ MONEY_ZERO = Decimal("0.00")
 
 
 def _get_tenant_owner_id(user: User) -> int:
-    if user.role == "Admin":
+    if is_admin(user):
         return user.id
     return user.created_by or user.id
 
@@ -630,6 +631,7 @@ def list_suppliers(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     suppliers = db.scalars(
         select(Supplier)
@@ -649,6 +651,7 @@ def create_supplier(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
+    ensure_permission(current_user, "manage_procurement", "Only Admin and Manager can manage suppliers and purchases")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     normalized_name = payload.name.strip().lower()
 
@@ -678,6 +681,7 @@ def get_supplier_detail(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     supplier = _get_supplier_or_404(db, tenant_user_ids, supplier_id)
     _attach_supplier_financials([supplier], db, tenant_user_ids, active_branch_id)
@@ -733,6 +737,7 @@ def update_supplier(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_procurement", "Only Admin and Manager can manage suppliers and purchases")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     supplier = _get_supplier_or_404(db, tenant_user_ids, supplier_id)
 
@@ -806,6 +811,7 @@ def deactivate_supplier(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_procurement", "Only Admin and Manager can manage suppliers and purchases")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     supplier = _get_supplier_or_404(db, tenant_user_ids, supplier_id)
     _attach_supplier_financials([supplier], db, tenant_user_ids, active_branch_id)
@@ -825,6 +831,7 @@ def list_purchases(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     purchases = db.scalars(
         select(Purchase)
@@ -847,6 +854,7 @@ def list_supplier_payments(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     payments = db.scalars(
         select(SupplierPayment)
@@ -869,6 +877,7 @@ def list_purchase_returns(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     returns = db.scalars(
         select(PurchaseReturn)
@@ -891,6 +900,7 @@ def create_purchase_order(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_procurement", "Only Admin and Manager can manage suppliers and purchases")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     purchases = _create_purchase_records(
@@ -924,6 +934,7 @@ def create_purchase(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_procurement", "Only Admin and Manager can manage suppliers and purchases")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     purchases = _create_purchase_records(
@@ -964,6 +975,7 @@ def create_supplier_payment(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_procurement", "Only Admin and Manager can manage suppliers and purchases")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     if payload.purchase_id is None and not (payload.order_number or "").strip():
         raise HTTPException(status_code=400, detail="Select a purchase or purchase order to pay")
@@ -1062,6 +1074,7 @@ def create_purchase_return(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_procurement", "Only Admin and Manager can manage suppliers and purchases")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     purchase = db.scalar(
         select(Purchase).where(
@@ -1152,8 +1165,7 @@ def transfer_stock_between_branches(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
-    if current_user.role != "Admin":
-        raise HTTPException(status_code=403, detail="Only Admin can transfer stock between branches")
+    ensure_permission(current_user, "transfer_stock_between_branches", "Only Admin can transfer stock between branches")
 
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     owner_user_id = _get_tenant_owner_id(current_user)
@@ -1283,6 +1295,7 @@ def get_inventory_analytics(
     - Movement summary
     - Stock value
     """
+    ensure_permission(current_user, "view_inventory")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     owner_user_id = _get_tenant_owner_id(current_user)
     settings = _get_or_create_settings(db, owner_user_id)
@@ -1532,6 +1545,7 @@ def get_all_movements(
     """
     Get all stock movements with optional filters.
     """
+    ensure_permission(current_user, "view_inventory")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     query = select(
         StockMovement.id,
@@ -1621,6 +1635,7 @@ def export_movements_pdf(
     - sale: Sales transactions
     - all: All movements
     """
+    ensure_permission(current_user, "view_inventory")
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle

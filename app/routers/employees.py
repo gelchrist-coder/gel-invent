@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User, Branch
 from app.auth import get_current_active_user, get_password_hash, get_password_rule_error
+from app.permissions import ensure_permission
 from app.utils.branch import get_owner_user_id
 from app.utils.supabase_auth import (
     SupabaseAuthError,
@@ -73,12 +74,7 @@ def create_employee(
     db: Session = Depends(get_db)
 ):
     """Create a new employee (Owner only)"""
-    # Only Owner/Admin can create employees
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can add employees"
-        )
+    ensure_permission(current_user, "manage_employees", "Only business owners can add employees")
     
     email = str(employee_data.email).strip().lower()
     phone = normalize_phone(employee_data.phone)
@@ -182,12 +178,7 @@ def list_employees(
     db: Session = Depends(get_db)
 ):
     """List all employees for the current business owner"""
-    # Only Owner/Admin can view employee list
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can view employees"
-        )
+    ensure_permission(current_user, "manage_employees", "Only business owners can view employees")
     
     # Get all employees created by this owner
     employees = db.query(User).filter(User.created_by == current_user.id).all()
@@ -201,11 +192,7 @@ def get_employee(
     db: Session = Depends(get_db)
 ):
     """Get a specific employee's details"""
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can view employee details"
-        )
+    ensure_permission(current_user, "manage_employees", "Only business owners can view employee details")
     
     employee = db.query(User).filter(
         User.id == employee_id,
@@ -229,11 +216,7 @@ def update_employee(
     db: Session = Depends(get_db)
 ):
     """Update employee details"""
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can update employees"
-        )
+    ensure_permission(current_user, "manage_employees", "Only business owners can update employees")
     
     employee = db.query(User).filter(
         User.id == employee_id,
@@ -295,11 +278,7 @@ def delete_employee(
     db: Session = Depends(get_db)
 ):
     """Delete/deactivate an employee"""
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can delete employees"
-        )
+    ensure_permission(current_user, "manage_employees", "Only business owners can delete employees")
     
     employee = db.query(User).filter(
         User.id == employee_id,

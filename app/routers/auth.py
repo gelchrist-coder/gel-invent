@@ -32,6 +32,7 @@ from app.utils.supabase_auth import (
 from app.utils.email import send_email, smtp_configured
 from app.utils.phone import is_valid_phone, normalize_phone
 from app.utils.supabase_storage import is_supabase_storage_enabled, upload_public_logo
+from app.permissions import ensure_permission, get_effective_role_name, get_role_permissions, is_admin
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,6 +57,7 @@ class UserResponse(BaseModel):
     phone: Optional[str] = None
     name: str
     role: str
+    permissions: list[str]
     business_name: Optional[str] = None
     business_logo_url: Optional[str] = None
     categories: Optional[list[str]] = None
@@ -136,7 +138,8 @@ def _serialize_user(user: User) -> UserResponse:
         email=user.email,
         phone=getattr(user, "phone", None),
         name=user.name,
-        role=user.role,
+        role=get_effective_role_name(user),
+        permissions=get_role_permissions(user),
         business_name=user.business_name,
         business_logo_url=getattr(user, "business_logo_url", None),
         categories=_parse_categories(getattr(user, "categories", None)),
@@ -412,7 +415,7 @@ def get_current_user_info(
     """Get current user information"""
     # Employees should see the business categories configured by the owner.
     categories = _parse_categories(getattr(current_user, "categories", None))
-    if not categories and current_user.role != "Admin" and current_user.created_by:
+    if not categories and not is_admin(current_user) and current_user.created_by:
         owner = db.query(User).filter(User.id == current_user.created_by).first()
         if owner:
             categories = _parse_categories(getattr(owner, "categories", None))
@@ -422,7 +425,8 @@ def get_current_user_info(
         email=current_user.email,
         phone=getattr(current_user, "phone", None),
         name=current_user.name,
-        role=current_user.role,
+        role=get_effective_role_name(current_user),
+        permissions=get_role_permissions(current_user),
         business_name=current_user.business_name,
         business_logo_url=getattr(current_user, "business_logo_url", None),
         categories=categories,
@@ -444,8 +448,7 @@ def update_current_user_info(
     if payload.categories is None:
         return _serialize_user(current_user)
 
-    if current_user.role != "Admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Admin can update categories")
+    ensure_permission(current_user, "manage_business_profile", "Only Admin can update categories")
 
     cleaned: list[str] = []
     seen = set()
@@ -472,6 +475,8 @@ async def upload_business_logo(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
+    ensure_permission(current_user, "manage_business_profile", "Only Admin can update business logo")
+
     if not is_supabase_storage_enabled():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo upload is not configured")
 

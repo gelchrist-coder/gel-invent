@@ -12,6 +12,7 @@ from ..auth import get_current_active_user
 from ..database import get_db
 from .. import models
 from ..schemas import SaleCreate, SaleRead
+from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.expiry import get_batch_balances, writeoff_expired_batches
@@ -125,6 +126,7 @@ def create_sale(
     If payment method is credit or partial, create a credit transaction.
     For partial payments, only the unpaid portion is recorded as credit.
     """
+    ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     # Auto-writeoff expired batches for this product before checking availability.
@@ -438,8 +440,7 @@ def send_sale_receipt_email(
 
     Owner-only action to avoid staff sending customer emails without approval.
     """
-    if current_user.role != "Admin":
-        raise HTTPException(status_code=403, detail="Only business owners can email receipts")
+    ensure_permission(current_user, "send_sale_receipts", "Only business owners can email receipts")
 
     if not smtp_configured():
         raise HTTPException(status_code=400, detail="Email service is not configured")
@@ -648,6 +649,7 @@ def list_sales(
     """
     Retrieve all sales for the current user's tenant.
     """
+    ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     sales = db.scalars(
         select(models.Sale)
@@ -677,6 +679,7 @@ def get_sale(
     """
     Retrieve a specific sale by ID for the current user's tenant.
     """
+    ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     sale = db.scalar(
         select(models.Sale).where(
@@ -704,6 +707,7 @@ def assign_sale_customer(
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     """Attach a named customer to an existing sale (useful for converting rushed walk-in checkout)."""
+    ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     sale = db.scalar(
         select(models.Sale).where(
@@ -820,6 +824,7 @@ def delete_sale(
     Delete a sale and restore the stock.
     If the sale was on credit, reverse the credit transaction.
     """
+    ensure_permission(current_user, "delete_sales", "Only business owners can delete sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     sale = db.scalar(
         select(models.Sale).where(

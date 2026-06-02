@@ -9,6 +9,7 @@ from decimal import Decimal
 from app import models, schemas
 from app.deps import get_db
 from app.auth import get_current_active_user
+from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.movement_reasons import validate_reason_and_change
@@ -39,6 +40,7 @@ def create_product(
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_catalog", "Only Admin and Manager can manage products")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     # Check for duplicate SKU within the branch's products
     existing = db.query(models.Product).filter(
@@ -105,6 +107,7 @@ def list_products(
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_catalog")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     # Auto-writeoff any expired batches so stock totals stay accurate.
@@ -165,6 +168,7 @@ def get_product(
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_catalog")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     writeoff_expired_batches(
@@ -211,6 +215,7 @@ def record_movement(
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_inventory", "Only Admin and Manager can change stock movements")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     # Before any new movement, write off expired batches for this product.
@@ -281,6 +286,7 @@ def list_movements(
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_inventory")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     product = db.query(models.Product).filter(
         models.Product.id == product_id,
@@ -310,6 +316,7 @@ def update_product(
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_catalog", "Only Admin and Manager can manage products")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     product = db.query(models.Product).filter(
         models.Product.id == product_id,
@@ -372,6 +379,7 @@ def delete_product(
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_catalog", "Only Admin and Manager can manage products")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     product = db.query(models.Product).filter(
         models.Product.id == product_id,

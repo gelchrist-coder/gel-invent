@@ -9,6 +9,7 @@ from ..database import get_db
 from ..models import Creditor, CreditTransaction, Sale
 from ..auth import get_current_active_user
 from ..models import User
+from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 
@@ -116,6 +117,7 @@ async def get_creditors(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_creditors")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditors = db.scalars(
         select(Creditor).where(
@@ -214,6 +216,7 @@ async def get_creditor(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_creditors")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditor = db.scalar(
         select(Creditor).where(
@@ -287,6 +290,7 @@ async def create_creditor(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_creditors")
     new_creditor = Creditor(
         name=creditor.name,
         phone=creditor.phone,
@@ -309,6 +313,7 @@ async def update_creditor(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_creditors")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     existing = db.scalar(
         select(Creditor).where(
@@ -341,6 +346,7 @@ async def delete_creditor(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_creditors")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     existing = db.scalar(
         select(Creditor).where(
@@ -371,6 +377,7 @@ async def add_transaction(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "manage_creditors")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditor = db.scalar(
         select(Creditor).where(
@@ -412,6 +419,7 @@ async def get_creditor_transactions(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_creditors")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditor = db.scalar(
         select(Creditor).where(
@@ -483,6 +491,7 @@ async def get_creditor_statement(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_creditors")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditor = db.scalar(
         select(Creditor).where(
@@ -559,6 +568,7 @@ async def get_creditors_summary(
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
+    ensure_permission(current_user, "view_creditors")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     creditors = db.scalars(
         select(Creditor).where(

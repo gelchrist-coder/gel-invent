@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Sale, Product, StockMovement, Creditor, CreditTransaction, User, SystemSettings
 from ..auth import get_current_active_user
+from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 
@@ -49,12 +50,7 @@ def get_sales_dashboard(
     Get sales dashboard with key metrics (Owner/Admin only).
     Optional filter_date (YYYY-MM-DD format) to filter top products since that date.
     """
-    # Restrict access to Admin/Owner only
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can access sales reports"
-        )
+    ensure_permission(current_user, "view_reports", "Only Admin and Manager can access sales reports")
     
     # Get tenant user IDs for multi-tenant filtering
     tenant_user_ids = get_tenant_user_ids(current_user, db)
@@ -224,12 +220,7 @@ def get_inventory_status(
     """
     Get current inventory status with stock levels and alerts (Owner/Admin only).
     """
-    # Restrict access to Admin/Owner only  
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can access inventory reports"
-        )
+    ensure_permission(current_user, "view_reports", "Only Admin and Manager can access inventory reports")
     
     # Get tenant user IDs for multi-tenant filtering
     tenant_user_ids = get_tenant_user_ids(current_user, db)
@@ -353,12 +344,7 @@ def get_creditors_summary(
     """
     Get summary of all creditors with outstanding debts (Owner/Admin only).
     """
-    # Restrict access to Admin/Owner only
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can access creditor reports"
-        )
+    ensure_permission(current_user, "view_reports", "Only Admin and Manager can access creditor reports")
     
     # Get tenant user IDs for multi-tenant filtering
     tenant_user_ids = get_tenant_user_ids(current_user, db)
@@ -450,12 +436,7 @@ def get_sales_by_period(
     """
     Get detailed sales report for a specific period (Owner/Admin only).
     """
-    # Restrict access to Admin/Owner only
-    if current_user.role != "Admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only business owners can access sales reports"
-        )
+    ensure_permission(current_user, "view_reports", "Only Admin and Manager can access sales reports")
     
     # Get tenant user IDs for multi-tenant filtering
     tenant_user_ids = get_tenant_user_ids(current_user, db)

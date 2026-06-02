@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.deps import get_db
 from app.auth import get_current_active_user
+from app.permissions import ensure_permission
 from app.utils.branch import get_owner_user_id
 
 router = APIRouter(prefix="/branches", tags=["branches"])
@@ -89,8 +90,7 @@ def create_branch(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    if current_user.role != "Admin":
-        raise HTTPException(status_code=403, detail="Only Admin can create branches")
+    ensure_permission(current_user, "manage_branches", "Only Admin can create branches")
 
     owner_user_id = get_owner_user_id(current_user)
     branch_name = payload.name.strip()
@@ -141,8 +141,7 @@ def update_branch(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    if current_user.role != "Admin":
-        raise HTTPException(status_code=403, detail="Only Admin can update branches")
+    ensure_permission(current_user, "manage_branches", "Only Admin can update branches")
 
     owner_user_id = get_owner_user_id(current_user)
 
@@ -183,8 +182,7 @@ def delete_branch(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    if current_user.role != "Admin":
-        raise HTTPException(status_code=403, detail="Only Admin can delete branches")
+    ensure_permission(current_user, "manage_branches", "Only Admin can delete branches")
 
     owner_user_id = get_owner_user_id(current_user)
 
