@@ -438,9 +438,9 @@ def send_sale_receipt_email(
 ):
     """Email a receipt for one or more sales.
 
-    Owner-only action to avoid staff sending customer emails without approval.
+    Allowed for roles that can send sale receipts.
     """
-    ensure_permission(current_user, "send_sale_receipts", "Only business owners can email receipts")
+    ensure_permission(current_user, "send_sale_receipts", "You do not have permission to email receipts")
 
     if not smtp_configured():
         raise HTTPException(status_code=400, detail="Email service is not configured")
