@@ -6,7 +6,7 @@ import {
 } from "../api";
 import RevenueAnalysis from "./RevenueAnalysis";
 import { useExpiryTracking } from "../settings";
-import { readStoredUser } from "../user-storage";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 // SVG Icons for KPI Cards
 const CalendarIcon = () => (
@@ -247,9 +247,13 @@ type Props = {
 };
 
 export default function Reports({ initialTab = "sales" }: Props) {
-  const userRole = readStoredUser()?.role ?? null;
-  const isAdmin = userRole === "Admin";
+  const currentUser = readStoredUser();
+  const canViewReports = hasUserPermission("view_reports", currentUser);
+  const canViewRevenue = hasUserPermission("view_revenue", currentUser);
   const usesExpiryTracking = useExpiryTracking();
+  const availableTabs = canViewRevenue
+    ? (["sales", "inventory", "creditors", "revenue"] as const)
+    : (["sales", "inventory", "creditors"] as const);
 
   const [activeTab, setActiveTab] = useState<ReportTab>(initialTab);
   const [salesData, setSalesData] = useState<SalesDashboard | null>(null);
@@ -286,15 +290,14 @@ export default function Reports({ initialTab = "sales" }: Props) {
   }, [activeTab, creditorsData, inventoryData, salesData]);
 
   useEffect(() => {
-    // Only load data if user is Admin
-    if (isAdmin) {
+    if (canViewReports) {
       loadData();
     }
-  }, [isAdmin, loadData]);
+  }, [canViewReports, loadData]);
 
   useEffect(() => {
-    setActiveTab(initialTab);
-  }, [initialTab]);
+    setActiveTab(initialTab === "revenue" && !canViewRevenue ? "sales" : initialTab);
+  }, [canViewRevenue, initialTab]);
 
   // Clear cached data when branch changes so fresh data is loaded
   useEffect(() => {
@@ -311,8 +314,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
   const formatCurrency = (amount: number) => `GHS ${amount.toFixed(2)}`;
   const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString();
 
-  // Block access for non-Admin users
-  if (userRole !== "Admin") {
+  if (!canViewReports) {
     return (
       <div style={{ padding: 32 }}>
         <div
@@ -325,7 +327,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
           }}
         >
           <h2 style={{ color: "#c33", marginBottom: 8 }}>Access Denied</h2>
-          <p style={{ color: "#666" }}>Only business owners can access reports.</p>
+          <p style={{ color: "#666" }}>Your account does not have access to reports.</p>
         </div>
       </div>
     );
@@ -339,7 +341,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
       </div>
       {/* Tabs */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 20, padding: 6, border: "1px solid #dbe5f2", borderRadius: 14, background: "linear-gradient(180deg, #f8fbff, #f1f5fb)" }}>
-        {(["sales", "inventory", "creditors", "revenue"] as const).map((tab) => (
+        {availableTabs.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}

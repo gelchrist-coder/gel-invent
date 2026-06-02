@@ -302,6 +302,7 @@ export type AuthUser = {
   phone?: string | null;
   name: string;
   role: string;
+  permissions?: string[] | null;
   business_name?: string | null;
   business_logo_url?: string | null;
   categories?: string[] | null;

@@ -3,12 +3,13 @@ import { ReactNode, useState, useEffect } from "react";
 import TopBar from "./TopBar";
 import { Branch } from "../types";
 import appLogo from "../asset/logo.png";
+import { FrontendPermission, hasUserPermission } from "../user-storage";
 
 type NavItem = {
   id: string;
   label: string;
   icon: ReactNode;
-  adminOnly?: boolean; // Only visible to Admin/Owner
+  requiredPermission?: FrontendPermission;
 };
 
 // SVG Icons
@@ -91,10 +92,10 @@ const NAV_ITEMS: NavItem[] = [
   { id: "sales", label: "Sales", icon: <SalesIcon /> },
   { id: "invoice", label: "Invoice", icon: <InvoiceIcon /> },
   { id: "inventory", label: "Inventory", icon: <InventoryIcon /> },
-  { id: "reports", label: "Reports", icon: <ReportsIcon />, adminOnly: true },
+  { id: "reports", label: "Reports", icon: <ReportsIcon />, requiredPermission: "view_reports" },
   { id: "creditors", label: "Customers", icon: <CreditorsIcon /> },
   { id: "profile", label: "Settings", icon: <ProfileIcon /> },
-  { id: "users", label: "Users", icon: <UsersIcon />, adminOnly: true },
+  { id: "users", label: "Users", icon: <UsersIcon />, requiredPermission: "manage_employees" },
 ];
 
 const SIDEBAR_EXPANDED_WIDTH = 220;
@@ -109,6 +110,7 @@ type Props = {
   businessName?: string;
   businessLogoUrl?: string | null;
   userRole?: string;
+  userPermissions?: FrontendPermission[];
   isOnline?: boolean;
   outboxCount?: number;
   isSyncingOutbox?: boolean;
@@ -128,6 +130,7 @@ export default function Layout({
   businessName = "Business",
   businessLogoUrl,
   userRole = "Admin",
+  userPermissions,
   isOnline = true,
   outboxCount = 0,
   isSyncingOutbox = false,
@@ -175,7 +178,11 @@ export default function Layout({
   };
 
   // Filter navigation items based on user role
-  const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || userRole === "Admin");
+  const accessUser = { role: userRole, permissions: userPermissions };
+  const canManageBranches = hasUserPermission("manage_branches", accessUser);
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => !item.requiredPermission || hasUserPermission(item.requiredPermission, accessUser),
+  );
 
   const visibleBranches = branches;
 
@@ -291,7 +298,7 @@ export default function Layout({
           <div style={{ padding: "0 16px", marginBottom: 16 }}>
             <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 6, letterSpacing: 0.2 }}>Branch</div>
 
-            {userRole === "Admin" && onChangeBranch && visibleBranches.length > 1 ? (
+            {canManageBranches && onChangeBranch && visibleBranches.length > 1 ? (
               <select
                 value={activeBranchId ?? visibleBranches[0]?.id}
                 onChange={(e) => onChangeBranch?.(Number(e.target.value))}

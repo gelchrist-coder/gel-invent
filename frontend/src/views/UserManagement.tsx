@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { API_BASE, buildAuthHeaders, createBranch, fetchBranches, resilientFetch } from "../api";
 import { Branch } from "../types";
-import { readStoredUser } from "../user-storage";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type Employee = {
   id: number;
@@ -23,8 +23,8 @@ export default function UserManagement() {
   const [branchError, setBranchError] = useState("");
   const visibleBranches = branches;
   
-  // Check if current user is Admin
-  const userRole = readStoredUser()?.role ?? null;
+  const currentUser = readStoredUser();
+  const canManageEmployees = hasUserPermission("manage_employees", currentUser);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -37,8 +37,13 @@ export default function UserManagement() {
   const [success, setSuccess] = useState("");
 
   useEffect(() => {
+    if (!canManageEmployees) {
+      setLoading(false);
+      return;
+    }
+
     void Promise.all([loadEmployees(), loadBranches()]);
-  }, []);
+  }, [canManageEmployees]);
 
   const loadBranches = async () => {
     try {
@@ -111,7 +116,7 @@ export default function UserManagement() {
         const data = await response.json();
         setError(data.detail || "Failed to add employee");
       }
-    } catch (err) {
+    } catch {
       setError("Network error. Please try again.");
     }
   };
@@ -127,8 +132,8 @@ export default function UserManagement() {
       if (response.ok) {
         loadEmployees();
       }
-    } catch (err) {
-      console.error("Error updating employee:", err);
+    } catch {
+      console.error("Error updating employee");
     }
   };
 
@@ -166,8 +171,7 @@ export default function UserManagement() {
     }
   };
 
-  // Block access for non-Admin users
-  if (userRole !== "Admin") {
+  if (!canManageEmployees) {
     return (
       <div style={{ padding: 32 }}>
         <div
@@ -180,7 +184,7 @@ export default function UserManagement() {
           }}
         >
           <h2 style={{ color: "#c33", marginBottom: 8 }}>Access Denied</h2>
-          <p style={{ color: "#666" }}>Only business owners can manage employees.</p>
+          <p style={{ color: "#666" }}>Your account does not have access to user management.</p>
         </div>
       </div>
     );

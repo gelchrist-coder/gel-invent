@@ -13,7 +13,7 @@ import {
   loadCachedProducts,
 } from "../offline/storage";
 import { syncSalesOutboxOnce } from "../offline/sync";
-import { readStoredUser } from "../user-storage";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type SalesPaymentFilterOption = {
   key: string;
@@ -93,7 +93,8 @@ export default function Sales() {
   const businessName = userData?.business_name || "Your Business";
   const businessLogoUrl = userData?.business_logo_url || "";
   const salesPerson = userData?.name || "Sales Person";
-  const canDeleteSales = userData?.role === "Admin";
+  const canDeleteSales = hasUserPermission("delete_sales", userData);
+  const canSendSaleReceipts = hasUserPermission("send_sale_receipts", userData);
 
   const loadData = useCallback(async () => {
     if (!hasLoadedOnce.current) {
@@ -258,6 +259,11 @@ export default function Sales() {
   };
 
   const sendReceiptToEmail = async () => {
+    if (!canSendSaleReceipts) {
+      setEmailStatus("You do not have permission to send receipt emails.");
+      return;
+    }
+
     const email = receiptEmail.trim();
     if (!email) {
       setEmailStatus("Enter a customer email address.");
@@ -1456,44 +1462,46 @@ export default function Sales() {
                     </button>
                   </div>
 
-                  <div style={{ display: "grid", gap: 8, padding: 10, border: "1px solid #dbe5f2", borderRadius: 10, background: "#ffffff" }}>
-                    <label style={{ display: "grid", gap: 4, margin: 0, fontSize: 12, color: "#475569", fontWeight: 600 }}>
-                      Email receipt to customer
-                      <input
-                        type="email"
-                        value={receiptEmail}
-                        onChange={(e) => setReceiptEmail(e.target.value)}
-                        placeholder="customer@email.com"
-                        style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 14 }}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      onClick={sendReceiptToEmail}
-                      disabled={emailSending || !receiptEmail.trim()}
-                      style={{
-                        padding: "10px 12px",
-                        border: "none",
-                        borderRadius: 8,
-                        background: emailSending ? "#94a3b8" : "#2563eb",
-                        color: "white",
-                        fontWeight: 700,
-                        cursor: emailSending ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      {emailSending ? "Sending..." : "Send Receipt Email"}
-                    </button>
-                    {emailStatus && (
-                      <p style={{ margin: 0, fontSize: 12, color: emailStatus.toLowerCase().includes("success") ? "#166534" : "#b91c1c" }}>
-                        {emailStatus}
-                      </p>
-                    )}
-                    {confirmedSales.length === 0 && (
-                      <p style={{ margin: 0, fontSize: 11, color: "#92400e" }}>
-                        Receipt email is available after online sale sync.
-                      </p>
-                    )}
-                  </div>
+                  {canSendSaleReceipts ? (
+                    <div style={{ display: "grid", gap: 8, padding: 10, border: "1px solid #dbe5f2", borderRadius: 10, background: "#ffffff" }}>
+                      <label style={{ display: "grid", gap: 4, margin: 0, fontSize: 12, color: "#475569", fontWeight: 600 }}>
+                        Email receipt to customer
+                        <input
+                          type="email"
+                          value={receiptEmail}
+                          onChange={(e) => setReceiptEmail(e.target.value)}
+                          placeholder="customer@email.com"
+                          style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 14 }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={sendReceiptToEmail}
+                        disabled={emailSending || !receiptEmail.trim()}
+                        style={{
+                          padding: "10px 12px",
+                          border: "none",
+                          borderRadius: 8,
+                          background: emailSending ? "#94a3b8" : "#2563eb",
+                          color: "white",
+                          fontWeight: 700,
+                          cursor: emailSending ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        {emailSending ? "Sending..." : "Send Receipt Email"}
+                      </button>
+                      {emailStatus && (
+                        <p style={{ margin: 0, fontSize: 12, color: emailStatus.toLowerCase().includes("success") ? "#166534" : "#b91c1c" }}>
+                          {emailStatus}
+                        </p>
+                      )}
+                      {confirmedSales.length === 0 && (
+                        <p style={{ margin: 0, fontSize: 11, color: "#92400e" }}>
+                          Receipt email is available after online sale sync.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>

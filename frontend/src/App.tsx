@@ -20,25 +20,7 @@ import RevenueAnalysis from "./views/RevenueAnalysis";
 import Sales from "./views/Sales";
 import UserManagement from "./views/UserManagement";
 import { useExpiryTracking } from "./settings";
-
-type StoredUser = {
-  id?: number;
-  name?: string;
-  business_name?: string;
-  business_logo_url?: string | null;
-  role?: string;
-  branch_id?: number | null;
-};
-
-function readStoredUser(): StoredUser | null {
-  const raw = localStorage.getItem("user");
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as StoredUser;
-  } catch {
-    return null;
-  }
-}
+import { getEffectiveUserRole, hasUserPermission, readStoredUser } from "./user-storage";
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("token"));
@@ -77,6 +59,16 @@ export default function App() {
   const prefetchedBranchRef = useRef<number | null>(null);
   const syncInFlightRef = useRef(false);
   const supplierSyncInFlightRef = useRef(false);
+  const storedUser = readStoredUser();
+  const accessUser = storedUser ?? { role: userRole };
+  const userPermissions = storedUser?.permissions ?? [];
+  const canManageBranches = hasUserPermission("manage_branches", accessUser);
+  const canManageCatalog = hasUserPermission("manage_catalog", accessUser);
+  const canManageEmployees = hasUserPermission("manage_employees", accessUser);
+  const canManageProcurement = hasUserPermission("manage_procurement", accessUser);
+  const canViewProcurement = hasUserPermission("view_procurement", accessUser);
+  const canViewReports = hasUserPermission("view_reports", accessUser);
+  const canViewRevenue = hasUserPermission("view_revenue", accessUser);
 
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
 
@@ -148,6 +140,10 @@ export default function App() {
       return;
     }
 
+    if (!canManageProcurement) {
+      return;
+    }
+
     if (supplierSyncInFlightRef.current) {
       return;
     }
@@ -190,7 +186,7 @@ export default function App() {
         supplierSyncInFlightRef.current = false;
       }
     })();
-  }, [isAuthenticated, supplierDirectory, supplierOptions]);
+  }, [canManageProcurement, isAuthenticated, supplierDirectory, supplierOptions]);
 
   const logoutAndReset = () => {
     setIsAuthenticated(false);
@@ -223,7 +219,7 @@ export default function App() {
       if (result.syncedCount > 0) {
         fetchProductsCached((fresh) => setProducts(fresh)).catch(() => {});
         fetchSalesCached().catch(() => {});
-        if (userRole === "Admin") {
+        if (canViewReports) {
           fetchSalesDashboard().catch(() => {});
         }
       }
@@ -231,28 +227,23 @@ export default function App() {
       syncInFlightRef.current = false;
       setIsSyncingOutbox(false);
     }
-  }, [isAuthenticated, userRole]);
+  }, [canViewReports, isAuthenticated]);
 
   // Check if user is authenticated on mount
   useEffect(() => {
-    const userStr = localStorage.getItem("user");
+    const initialUser = readStoredUser();
     const token = localStorage.getItem("token");
-    if (userStr) {
+    if (initialUser) {
       setIsAuthenticated(true);
-      try {
-        const user = JSON.parse(userStr);
-        setUserName(user.name || "User");
-        setBusinessName(user.business_name || "Business");
-        setBusinessLogoUrl(user.business_logo_url ?? null);
-        setUserRole(user.role || "Admin");
-        setCurrentUserId(user.id || null);
-        if (user.role && user.role !== "Admin") {
-          const bid = typeof user.branch_id === "number" ? user.branch_id : null;
-          setActiveBranchId(bid);
-          if (bid != null) localStorage.setItem("activeBranchId", String(bid));
-        }
-      } catch (error) {
-        console.error("Error parsing user data:", error);
+      setUserName(initialUser.name || "User");
+      setBusinessName(initialUser.business_name || "Business");
+      setBusinessLogoUrl(initialUser.business_logo_url ?? null);
+      setUserRole(initialUser.role || "Admin");
+      setCurrentUserId(initialUser.id || null);
+      if (!hasUserPermission("manage_branches", initialUser)) {
+        const bid = typeof initialUser.branch_id === "number" ? initialUser.branch_id : null;
+        setActiveBranchId(bid);
+        if (bid != null) localStorage.setItem("activeBranchId", String(bid));
       }
     }
 
@@ -266,11 +257,11 @@ export default function App() {
           setUserName(me.name || "User");
           setBusinessName(me.business_name || "Business");
           setBusinessLogoUrl(me.business_logo_url ?? null);
-          setUserRole(me.role || "Admin");
+          setUserRole(getEffectiveUserRole(me));
           setCurrentUserId(me.id || null);
 
           // Employees are locked to their assigned branch.
-          if (me.role !== "Admin") {
+          if (!hasUserPermission("manage_branches", me)) {
             const bid = typeof me.branch_id === "number" ? me.branch_id : null;
             setActiveBranchId(bid);
             if (bid != null) localStorage.setItem("activeBranchId", String(bid));
@@ -369,10 +360,10 @@ export default function App() {
     fetchSalesCached().catch(() => {});
     fetchInventoryAnalytics().catch(() => {});
 
-    if (userRole === "Admin") {
+    if (canViewReports) {
       fetchSalesDashboard().catch(() => {});
     }
-  }, [isAuthenticated, activeBranchId, userRole]);
+  }, [canViewReports, isAuthenticated, activeBranchId]);
 
   useEffect(() => {
     const handleOutboxChanged = () => {
@@ -443,22 +434,28 @@ export default function App() {
 
     // Also listen for custom event in the same tab
     const handleCustomUserChange = (e: CustomEvent) => {
-      const newUser = e.detail;
-      if (!newUser) {
+      const changedUser = e.detail as { id?: number } | null;
+      if (!changedUser) {
         logoutAndReset();
         return;
       }
       // Only reload when switching between two different logged-in users (not for initial login).
-      if (currentUserId !== null && newUser?.id && newUser.id !== currentUserId) {
+      if (currentUserId !== null && changedUser?.id && changedUser.id !== currentUserId) {
         console.log("Different user detected in same tab, refreshing...");
         window.location.reload();
         return;
       }
 
-      setUserName(newUser.name || "User");
-      setBusinessName(newUser.business_name || "Business");
-      setBusinessLogoUrl(newUser.business_logo_url ?? null);
-      setUserRole(newUser.role || "Admin");
+      const nextUser = readStoredUser();
+      if (!nextUser) {
+        logoutAndReset();
+        return;
+      }
+
+      setUserName(nextUser.name || "User");
+      setBusinessName(nextUser.business_name || "Business");
+      setBusinessLogoUrl(nextUser.business_logo_url ?? null);
+      setUserRole(nextUser.role || "Admin");
     };
 
     window.addEventListener("userChanged", handleCustomUserChange as EventListener);
@@ -509,6 +506,11 @@ export default function App() {
       return;
     }
 
+    if (!canViewProcurement) {
+      setSupplierDirectory([]);
+      return;
+    }
+
     let isMounted = true;
 
     fetchSuppliersCached((fresh) => {
@@ -530,17 +532,23 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [isAuthenticated, activeBranchId]);
+  }, [canViewProcurement, isAuthenticated, activeBranchId]);
 
   useEffect(() => {
-    if (!showAddProduct || !isAuthenticated) {
+    if (!showAddProduct || !isAuthenticated || !canViewProcurement) {
       return;
     }
 
     fetchSuppliersCached((fresh) => setSupplierDirectory(fresh))
       .then((data) => setSupplierDirectory(data))
       .catch(() => {});
-  }, [showAddProduct, isAuthenticated, activeBranchId]);
+  }, [showAddProduct, canViewProcurement, isAuthenticated, activeBranchId]);
+
+  useEffect(() => {
+    if (showAddProduct && !canManageCatalog) {
+      setShowAddProduct(false);
+    }
+  }, [canManageCatalog, showAddProduct]);
 
   const handleLogin = (_email: string, _password: string) => {
     const user = readStoredUser();
@@ -551,7 +559,7 @@ export default function App() {
       setUserRole(user.role || "Admin");
       setCurrentUserId(user.id ?? null);
 
-      if (user.role && user.role !== "Admin") {
+      if (!hasUserPermission("manage_branches", user)) {
         const bid = typeof user.branch_id === "number" ? user.branch_id : null;
         setActiveBranchId(bid);
         if (bid != null) localStorage.setItem("activeBranchId", String(bid));
@@ -589,6 +597,26 @@ export default function App() {
     window.dispatchEvent(new CustomEvent("activeBranchChanged", { detail: branchId }));
   };
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    if (activeView === "reports" && !canViewReports) {
+      setActiveView("dashboard");
+      return;
+    }
+
+    if (activeView === "revenue" && !canViewRevenue) {
+      setActiveView("dashboard");
+      return;
+    }
+
+    if (activeView === "users" && !canManageEmployees) {
+      setActiveView("dashboard");
+    }
+  }, [activeView, canManageEmployees, canViewReports, canViewRevenue, isAuthenticated]);
+
   // Show login page if not authenticated
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />;
@@ -598,7 +626,7 @@ export default function App() {
     const created = await createProduct(payload, branchIdOverride);
 
     // If admin created into a different branch, switch to it so the list matches.
-    if (userRole === "Admin" && branchIdOverride != null && branchIdOverride !== activeBranchId) {
+    if (canManageBranches && branchIdOverride != null && branchIdOverride !== activeBranchId) {
       setActiveBranchId(branchIdOverride);
       localStorage.setItem("activeBranchId", String(branchIdOverride));
       return;
@@ -678,27 +706,29 @@ export default function App() {
                 <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0, letterSpacing: -0.3 }}>Products</h1>
                 <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>Manage catalog pricing, stock health, and product quality in one place.</p>
               </div>
-              <button
-                className="button"
-                onClick={() => setShowAddProduct(true)}
-                style={{
-                  background: "linear-gradient(135deg, #1f7aff, #2563eb)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "11px 18px",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  borderRadius: 12,
-                  boxShadow: "0 10px 20px rgba(37, 99, 235, 0.24)",
-                }}
-              >
-                <span>Add New Product</span>
-              </button>
+              {canManageCatalog ? (
+                <button
+                  className="button"
+                  onClick={() => setShowAddProduct(true)}
+                  style={{
+                    background: "linear-gradient(135deg, #1f7aff, #2563eb)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "11px 18px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    borderRadius: 12,
+                    boxShadow: "0 10px 20px rgba(37, 99, 235, 0.24)",
+                  }}
+                >
+                  <span>Add New Product</span>
+                </button>
+              ) : null}
             </div>
             
             {/* Add Product Modal */}
-            {showAddProduct && (
+            {showAddProduct && canManageCatalog && (
               <div
                 style={{
                   position: "fixed",
@@ -1075,6 +1105,7 @@ export default function App() {
       businessName={businessName}
       businessLogoUrl={businessLogoUrl}
       userRole={userRole}
+      userPermissions={userPermissions}
       isOnline={isOnline}
       outboxCount={outboxCount}
       isSyncingOutbox={isSyncingOutbox}
@@ -1082,7 +1113,7 @@ export default function App() {
       onInstallApp={handleInstallApp}
       branches={branches}
       activeBranchId={activeBranchId}
-      onChangeBranch={userRole === "Admin" ? handleChangeBranch : undefined}
+      onChangeBranch={canManageBranches ? handleChangeBranch : undefined}
     >
       {renderView(activeView)}
     </Layout>

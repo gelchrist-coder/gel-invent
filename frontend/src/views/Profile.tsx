@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { changePassword, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings, uploadBusinessLogo } from "../api";
 import { Branch } from "../types";
-import { readStoredUser } from "../user-storage";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type PasswordInputProps = {
   label: string;
@@ -49,12 +49,16 @@ function getPasswordRuleError(password: string): string | null {
 }
 
 export default function Profile() {
-  // Get user role from localStorage
   const currentUserData = readStoredUser();
-  const userRole = currentUserData?.role || "Admin";
-  const isAdmin = userRole === "Admin";
+  const canManageBranches = hasUserPermission("manage_branches", currentUserData);
+  const canManageBusinessProfile = hasUserPermission("manage_business_profile", currentUserData);
+  const canManageSettings = hasUserPermission("manage_settings", currentUserData);
+  const canManageData = hasUserPermission("manage_data", currentUserData);
+  const canAccessSystemTab = canManageSettings || canManageData;
 
-  const [activeTab, setActiveTab] = useState<"business" | "user" | "system">(isAdmin ? "business" : "user");
+  const [activeTab, setActiveTab] = useState<"business" | "user" | "system">(
+    canManageBusinessProfile ? "business" : canAccessSystemTab ? "system" : "user",
+  );
   const [businessInfo, setBusinessInfo] = useState({
     name: currentUserData?.business_name || "Gel Invent Business",
     owner: currentUserData?.name || "Gel Christ Boateng",
@@ -165,8 +169,7 @@ export default function Profile() {
         // If unauthenticated or API unavailable, keep defaults.
       }
 
-      // Load branches for Admin users
-      if (isAdmin) {
+      if (canManageBranches) {
         try {
           const branchData = await fetchBranches();
           setBranches(branchData);
@@ -175,14 +178,24 @@ export default function Profile() {
         }
       }
     })();
-  }, [isAdmin]);
+  }, [canManageBranches]);
+
+  useEffect(() => {
+    if (activeTab === "business" && !canManageBusinessProfile) {
+      setActiveTab(canAccessSystemTab ? "system" : "user");
+      return;
+    }
+
+    if (activeTab === "system" && !canAccessSystemTab) {
+      setActiveTab(canManageBusinessProfile ? "business" : "user");
+    }
+  }, [activeTab, canAccessSystemTab, canManageBusinessProfile]);
 
   const handleSave = async () => {
     localStorage.setItem("businessInfo", JSON.stringify(businessInfo));
     localStorage.setItem("userInfo", JSON.stringify(userInfo));
 
-    // Persist system settings (Admin only)
-    if (isAdmin) {
+    if (canManageSettings) {
       const selectedCurrency = (businessInfo.currency || "GHS").toUpperCase();
       const previousCurrency = (systemSettings.currencyCode || "GHS").toUpperCase();
 
@@ -573,11 +586,11 @@ export default function Profile() {
         }}
       >
         {[
-          { id: "business", label: "Business Info", icon: "", adminOnly: true },
+          { id: "business", label: "Business Info", icon: "", hidden: !canManageBusinessProfile },
           { id: "user", label: "User Account", icon: "" },
-          { id: "system", label: "System Settings", icon: "", adminOnly: true },
+          { id: "system", label: "System Settings", icon: "", hidden: !canAccessSystemTab },
         ]
-          .filter((tab) => !tab.adminOnly || isAdmin)
+          .filter((tab) => !tab.hidden)
           .map((tab) => (
           <button
             key={tab.id}
@@ -1128,7 +1141,7 @@ export default function Profile() {
             </div>
 
             {/* Branch Management */}
-            {isAdmin && (
+            {canManageBranches && (
               <div
                 style={{
                   borderTop: "1px solid #e5e7eb",

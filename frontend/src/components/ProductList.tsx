@@ -3,6 +3,7 @@ import { Product } from "../types";
 import { updateMyCategories } from "../api";
 import { useAppCategories } from "../categories";
 import { useExpiryTracking } from "../settings";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type Props = {
   products: Product[];
@@ -33,7 +34,8 @@ export default function ProductList({
   userRole = "Admin",
   onOpenInventory,
 }: Props) {
-  const isAdmin = userRole === "Admin";
+  const accessUser = readStoredUser() ?? { role: userRole };
+  const canManageCatalog = hasUserPermission("manage_catalog", accessUser);
   const categoryOptions = useAppCategories();
   const usesExpiryTracking = useExpiryTracking();
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
@@ -586,7 +588,7 @@ export default function ProductList({
                   >
                     Open Inventory
                   </button>
-                  {isAdmin ? (
+                  {canManageCatalog ? (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                       <button
                         onClick={() => startEdit(p)}
@@ -757,7 +759,7 @@ export default function ProductList({
                         >
                           Open Inventory
                         </button>
-                        {isAdmin ? (
+                        {canManageCatalog ? (
                           <div
                             style={{
                               display: "grid",

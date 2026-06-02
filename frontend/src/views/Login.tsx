@@ -41,6 +41,7 @@ type AuthResponse = {
     email?: string;
     name?: string;
     role?: string;
+    permissions?: string[] | null;
     business_name?: string | null;
     business_logo_url?: string | null;
     branch_id?: number | null;

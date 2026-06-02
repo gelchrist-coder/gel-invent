@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import { createBranchTransfer, createMovement, deleteProduct, fetchAllMovements, fetchBranchesCached, fetchInventoryAnalytics, fetchProductsCached, exportMovementsPdf, isTemporaryServerDelayError, warmBackend } from "../api";
 import InventoryOverview from "../components/InventoryOverview";
@@ -8,16 +8,19 @@ import PurchasingPanel from "../components/PurchasingPanel";
 import ProductSearchSelect from "../components/ProductSearchSelect";
 import { useExpiryTracking } from "../settings";
 import type { Branch, Product } from "../types";
-import { readStoredUser } from "../user-storage";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
 type InventoryTab = "overview" | "alerts" | "actions" | "purchasing" | "returns" | "history";
 
 export default function Inventory() {
-  // Check if current user is Admin
-  const userRole = readStoredUser()?.role ?? null;
-  const isAdmin = userRole === "Admin";
+  const currentUser = readStoredUser();
+  const canManageCatalog = hasUserPermission("manage_catalog", currentUser);
+  const canManageInventory = hasUserPermission("manage_inventory", currentUser);
+  const canTransferBetweenBranches = hasUserPermission("transfer_stock_between_branches", currentUser);
+  const canViewProcurement = hasUserPermission("view_procurement", currentUser);
+  const canUseActionTab = canManageInventory || canManageCatalog || canTransferBetweenBranches;
   const usesExpiryTracking = useExpiryTracking();
 
   const [analytics, setAnalytics] = useState<InventoryAnalytics | null>(null);
@@ -151,8 +154,8 @@ export default function Inventory() {
     }
 
     if (actionType === "delete") {
-      if (!isAdmin) {
-        alert("Only Admin can delete products");
+      if (!canManageCatalog) {
+        alert("You do not have permission to delete products");
         return;
       }
 
@@ -173,6 +176,11 @@ export default function Inventory() {
       return;
     }
 
+    if (!canManageInventory && !isTransferAction) {
+      alert("You do not have permission to adjust inventory");
+      return;
+    }
+
     const qty = Number(quantity);
     if (!Number.isFinite(qty) || qty <= 0) {
       alert("Enter a valid quantity");
@@ -185,8 +193,8 @@ export default function Inventory() {
     }
 
     if (isTransferAction) {
-      if (!isAdmin) {
-        alert("Only Admin can transfer stock between branches");
+      if (!canTransferBetweenBranches) {
+        alert("You do not have permission to transfer stock between branches");
         return;
       }
       if (!destinationBranchId) {
@@ -264,6 +272,62 @@ export default function Inventory() {
     }
   };
 
+  const alertCount = analytics
+    ? analytics.low_stock_alerts.length + (usesExpiryTracking ? analytics.expiring_products.length : 0)
+    : 0;
+  const inventoryTabs = useMemo<Array<{ id: InventoryTab; label: string; description: string; count?: number }>>(
+    () => [
+      {
+        id: "overview",
+        label: "Overview",
+        description: "Track stock value, totals, and movement summaries at a glance.",
+      },
+      {
+        id: "alerts",
+        label: "Alerts",
+        description: "Review low-stock and expiring-product attention items.",
+        count: alertCount,
+      },
+      ...(canUseActionTab
+        ? [
+            {
+              id: "actions" as const,
+              label: "Quick Adjustments",
+              description: "Make manual stock corrections, record losses, transfer stock, or delete a product.",
+            },
+          ]
+        : []),
+      ...(canViewProcurement
+        ? [
+            {
+              id: "purchasing" as const,
+              label: "Purchasing",
+              description: "Use this for supplier-backed restocks, invoices, payments, and recent buying activity.",
+            },
+            {
+              id: "returns" as const,
+              label: "Supplier Returns",
+              description: "Handle stock sent back to suppliers without crowding the purchasing workflow.",
+            },
+          ]
+        : []),
+      {
+        id: "history",
+        label: "Movement History",
+        description: "Filter, export, and review inventory movement activity.",
+        count: movements.length,
+      },
+    ],
+    [alertCount, canUseActionTab, canViewProcurement, movements.length],
+  );
+  const activeTabMeta = inventoryTabs.find((tab) => tab.id === activeTab) ?? inventoryTabs[0];
+
+  useEffect(() => {
+    if (!inventoryTabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab("overview");
+    }
+  }, [activeTab, inventoryTabs]);
+
   if (loading) {
     return (
       <div className="app-shell">
@@ -305,43 +369,6 @@ export default function Inventory() {
   if (!analytics) {
     return null;
   }
-
-  const alertCount = analytics.low_stock_alerts.length + (usesExpiryTracking ? analytics.expiring_products.length : 0);
-  const inventoryTabs: Array<{ id: InventoryTab; label: string; description: string; count?: number }> = [
-    {
-      id: "overview",
-      label: "Overview",
-      description: "Track stock value, totals, and movement summaries at a glance.",
-    },
-    {
-      id: "alerts",
-      label: "Alerts",
-      description: "Review low-stock and expiring-product attention items.",
-      count: alertCount,
-    },
-    {
-      id: "actions",
-      label: "Quick Adjustments",
-      description: "Make manual stock corrections, record losses, transfer stock, or delete a product.",
-    },
-    {
-      id: "purchasing",
-      label: "Purchasing",
-      description: "Use this for supplier-backed restocks, invoices, payments, and recent buying activity.",
-    },
-    {
-      id: "returns",
-      label: "Supplier Returns",
-      description: "Handle stock sent back to suppliers without crowding the purchasing workflow.",
-    },
-    {
-      id: "history",
-      label: "Movement History",
-      description: "Filter, export, and review inventory movement activity.",
-      count: movements.length,
-    },
-  ];
-  const activeTabMeta = inventoryTabs.find((tab) => tab.id === activeTab) ?? inventoryTabs[0];
 
   return (
     <div className="app-shell">
@@ -443,42 +470,44 @@ export default function Inventory() {
           </p>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            flexWrap: "wrap",
-            marginBottom: 16,
-            padding: 14,
-            borderRadius: 12,
-            border: "1px solid #bfdbfe",
-            background: "linear-gradient(180deg, #eff6ff, #dbeafe)",
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8", marginBottom: 4 }}>Restocking from a supplier?</div>
-            <p style={{ margin: 0, fontSize: 13, color: "#1e3a8a" }}>
-              Record supplier deliveries in Purchasing so the stock increase also keeps invoice, supplier, and cost details.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setActiveTab("purchasing")}
+        {canViewProcurement ? (
+          <div
             style={{
-              padding: "9px 14px",
-              borderRadius: 8,
-              border: "1px solid #2563eb",
-              background: "#2563eb",
-              color: "#ffffff",
-              fontWeight: 700,
-              cursor: "pointer",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+              marginBottom: 16,
+              padding: 14,
+              borderRadius: 12,
+              border: "1px solid #bfdbfe",
+              background: "linear-gradient(180deg, #eff6ff, #dbeafe)",
             }}
           >
-            Open Purchasing
-          </button>
-        </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8", marginBottom: 4 }}>Restocking from a supplier?</div>
+              <p style={{ margin: 0, fontSize: 13, color: "#1e3a8a" }}>
+                Record supplier deliveries in Purchasing so the stock increase also keeps invoice, supplier, and cost details.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab("purchasing")}
+              style={{
+                padding: "9px 14px",
+                borderRadius: 8,
+                border: "1px solid #2563eb",
+                background: "#2563eb",
+                color: "#ffffff",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Open Purchasing
+            </button>
+          </div>
+        ) : null}
 
         <div
           style={{
@@ -528,41 +557,45 @@ export default function Inventory() {
           <div>
             <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Action</span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => setActionType("new_stock")}
-                disabled={submittingAction}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #d1d5db",
-                  background: actionType === "new_stock" ? "#dcfce7" : "white",
-                  color: actionType === "new_stock" ? "#166534" : "#334155",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: submittingAction ? "not-allowed" : "pointer",
-                }}
-              >
-                Quick Add
-              </button>
-              <button
-                type="button"
-                onClick={() => setActionType("damage")}
-                disabled={submittingAction}
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #d1d5db",
-                  background: actionType === "damage" ? "#fef3c7" : "white",
-                  color: actionType === "damage" ? "#92400e" : "#334155",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: submittingAction ? "not-allowed" : "pointer",
-                }}
-              >
-                Record Damage
-              </button>
-              {isAdmin ? (
+              {canManageInventory ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setActionType("new_stock")}
+                    disabled={submittingAction}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: actionType === "new_stock" ? "#dcfce7" : "white",
+                      color: actionType === "new_stock" ? "#166534" : "#334155",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: submittingAction ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Quick Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActionType("damage")}
+                    disabled={submittingAction}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: actionType === "damage" ? "#fef3c7" : "white",
+                      color: actionType === "damage" ? "#92400e" : "#334155",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: submittingAction ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Record Damage
+                  </button>
+                </>
+              ) : null}
+              {canTransferBetweenBranches ? (
                 <button
                   type="button"
                   onClick={() => setActionType("transfer")}
@@ -581,7 +614,7 @@ export default function Inventory() {
                   Transfer Stock
                 </button>
               ) : null}
-              {isAdmin ? (
+              {canManageCatalog ? (
                 <button
                   type="button"
                   onClick={() => setActionType("delete")}

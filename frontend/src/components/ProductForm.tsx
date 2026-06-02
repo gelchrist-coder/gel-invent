@@ -3,6 +3,7 @@ import React, { useMemo, useState } from "react";
 import { Branch, NewProduct, Supplier } from "../types";
 import { useAppCategories } from "../categories";
 import { createSupplier, updateMyCategories } from "../api";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type Props = {
   onCreate: (payload: NewProduct, branchIdOverride?: number | null) => Promise<void>;
@@ -73,6 +74,8 @@ export default function ProductForm({
   const [submittingMode, setSubmittingMode] = useState<"save" | "saveAndNew" | null>(null);
 
   const role = userRole;
+  const accessUser = readStoredUser() ?? { role };
+  const canManageBranches = hasUserPermission("manage_branches", accessUser);
   const isModalLayout = layoutMode === "modal";
   const modalSectionStyle = isModalLayout
     ? {
@@ -141,13 +144,13 @@ export default function ProductForm({
   }, [allSupplierNames, form.supplier]);
 
   const effectiveBranchId = useMemo(() => {
-    if (role === "Admin") {
+    if (canManageBranches) {
       if (selectedBranchId != null) return selectedBranchId;
       if (activeBranchId != null) return activeBranchId;
       return visibleBranches[0]?.id ?? null;
     }
     return activeBranchId ?? null;
-  }, [role, selectedBranchId, activeBranchId, visibleBranches]);
+  }, [canManageBranches, selectedBranchId, activeBranchId, visibleBranches]);
 
   const generateSKU = () => {
     const prefix = form.category?.substring(0, 3).toUpperCase() || "PRD";
@@ -243,7 +246,7 @@ export default function ProductForm({
         selling_price: form.sellingPrice ? parseFloat(form.sellingPrice) : undefined,
         pack_selling_price: form.packSellingPrice ? parseFloat(form.packSellingPrice) : undefined,
         initial_stock: actualStock,
-      }, role === "Admin" ? effectiveBranchId : null);
+      }, canManageBranches ? effectiveBranchId : null);
       
       if (mode === "saveAndNew") {
         // Clear form but keep category and unit
@@ -602,7 +605,7 @@ export default function ProductForm({
               </label>
               <label>
                 Branch
-                {role === "Admin" && visibleBranches.length > 0 ? (
+                {canManageBranches && visibleBranches.length > 0 ? (
                   <select
                     className="input"
                     value={String(effectiveBranchId ?? visibleBranches[0].id)}

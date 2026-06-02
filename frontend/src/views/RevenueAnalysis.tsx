@@ -4,7 +4,7 @@ import RevenueMetrics from "../components/RevenueMetrics";
 import RevenueTrend from "../components/RevenueTrend";
 import TopProducts from "../components/TopProducts";
 import PaymentMethodBreakdown from "../components/PaymentMethodBreakdown";
-import { readStoredUser } from "../user-storage";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type RevenueAnalysisProps = {
   embedded?: boolean;
@@ -54,9 +54,8 @@ type RevenueAnalyticsResponse = {
 };
 
 export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisProps) {
-  // Check if current user is Admin
-  const userRole = readStoredUser()?.role ?? null;
-  const isAdmin = userRole === "Admin";
+  const currentUser = readStoredUser();
+  const canViewRevenue = hasUserPermission("view_revenue", currentUser);
 
   const [data, setData] = useState<RevenueAnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,8 +64,7 @@ export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisPro
   const title = "Revenue";
 
   const loadData = useCallback(async () => {
-    // Only load data if user is Admin
-    if (!isAdmin) return;
+    if (!canViewRevenue) return;
     
     setLoading(true);
     setError(null);
@@ -78,30 +76,29 @@ export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisPro
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, period]);
+  }, [canViewRevenue, period]);
 
   useEffect(() => {
-    if (isAdmin) {
+    if (canViewRevenue) {
       loadData();
     } else {
       setLoading(false);
     }
-  }, [isAdmin, loadData, period]);
+  }, [canViewRevenue, loadData, period]);
 
   // Reload data when branch changes
   useEffect(() => {
     const handleBranchChange = () => {
-      if (isAdmin) {
+      if (canViewRevenue) {
         loadData();
       }
     };
 
     window.addEventListener("activeBranchChanged", handleBranchChange);
     return () => window.removeEventListener("activeBranchChanged", handleBranchChange);
-  }, [isAdmin, loadData]);
+  }, [canViewRevenue, loadData]);
 
-  // Block access for non-Admin users
-  if (!isAdmin) {
+  if (!canViewRevenue) {
     return (
       <div style={{ padding: embedded ? 0 : 32 }}>
         <div
@@ -114,7 +111,7 @@ export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisPro
           }}
         >
           <h2 style={{ color: "#c33", marginBottom: 8 }}>Access Denied</h2>
-          <p style={{ color: "#666" }}>Only business owners can access revenue.</p>
+          <p style={{ color: "#666" }}>Your account does not have access to revenue.</p>
         </div>
       </div>
     );

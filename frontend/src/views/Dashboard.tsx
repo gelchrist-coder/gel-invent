@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSystemSettingsCached, getCachedProducts } from "../api";
 import { Product } from "../types";
 import { useExpiryTracking } from "../settings";
-import { readStoredUser } from "../user-storage";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type Props = {
   onNavigate: (view: string) => void;
@@ -13,17 +13,6 @@ type DashboardTopProduct = {
   name: string;
   quantity_sold: number | string;
   revenue: number | string;
-};
-
-type DashboardRecentSale = {
-  id: number | string;
-  product?: { name?: string | null } | null;
-  product_id?: number | string;
-  customer_name?: string | null;
-  quantity?: number | string;
-  total_price?: number | string;
-  payment_method?: string | null;
-  created_at: string;
 };
 
 type SalesDashboardResponse = {
@@ -63,6 +52,22 @@ type KpiItem = {
   value: string;
   accent: string;
   helper: string;
+};
+
+type DashboardRecentSaleItem = {
+  name?: string | null;
+  quantity?: number | string;
+};
+
+type DashboardRecentSale = {
+  id: number | string;
+  receipt_number?: string | null;
+  customer_name?: string | null;
+  items?: DashboardRecentSaleItem[];
+  item_count?: number | string;
+  total_price?: number | string;
+  payment_method?: string | null;
+  created_at: string;
 };
 
 type PaymentFilterOption = {
@@ -154,6 +159,13 @@ function getPaymentMeta(paymentMethod: string): { label: string; background: str
   return { label: "Other", background: "#fef3c7", color: "#92400e" };
 }
 
+function formatRecentSaleQuantity(value: number | string | undefined): string {
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return "0";
+  if (Number.isInteger(numeric)) return String(numeric);
+  return numeric.toFixed(2);
+}
+
 export default function Dashboard({ onNavigate }: Props) {
   // Initialize from cache for instant display
   const cachedProducts = getCachedProducts();
@@ -184,9 +196,8 @@ export default function Dashboard({ onNavigate }: Props) {
     return "All Time";
   }, [customRangeStartDate, selectedRange]);
 
-  // Check if current user is Admin
-  const userRole = readStoredUser()?.role ?? null;
-  const isAdmin = userRole === "Admin";
+  const currentUser = readStoredUser();
+  const canViewReports = hasUserPermission("view_reports", currentUser);
   const token = localStorage.getItem("token");
 
   const loadDashboardData = useCallback(async () => {
@@ -205,8 +216,8 @@ export default function Dashboard({ onNavigate }: Props) {
           setLowStockThreshold(fresh.low_stock_threshold);
           setExpiryWarningDays(fresh.expiry_warning_days);
         }).catch(() => null),
-        isAdmin ? fetchSalesDashboard(rangeStartDate) : Promise.resolve(null),
-        isAdmin ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])).catch(() => []) : Promise.resolve([]),
+        canViewReports ? fetchSalesDashboard(rangeStartDate) : Promise.resolve(null),
+        canViewReports ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])).catch(() => []) : Promise.resolve([]),
       ]);
 
       setProducts(productsData);
@@ -216,7 +227,7 @@ export default function Dashboard({ onNavigate }: Props) {
         setExpiryWarningDays(settingsData.expiry_warning_days);
       }
 
-      if (isAdmin) {
+      if (canViewReports) {
         if (dashboardResponse) {
           setDashboardData(dashboardResponse);
         }
@@ -233,7 +244,7 @@ export default function Dashboard({ onNavigate }: Props) {
       setLoading(false);
       setDashboardLoading(false);
     }
-  }, [isAdmin, rangeStartDate, token]);
+  }, [canViewReports, rangeStartDate, token]);
 
   useEffect(() => {
     void loadDashboardData();
@@ -489,7 +500,7 @@ export default function Dashboard({ onNavigate }: Props) {
     : 0;
 
   const kpiItems = useMemo<KpiItem[]>(() => {
-    if (isAdmin) {
+    if (canViewReports) {
       return [
         {
           label: `Revenue (${rangeLabel})`,
@@ -546,10 +557,10 @@ export default function Dashboard({ onNavigate }: Props) {
     ];
   }, [
     averageOrderValue,
+    canViewReports,
     expiringSoonProducts.length,
     expiryWarningDays,
     expiredProducts.length,
-    isAdmin,
     lowStockItems.length,
     lowStockThreshold,
     products.length,
@@ -564,8 +575,8 @@ export default function Dashboard({ onNavigate }: Props) {
     { label: "Add Product", icon: "+", color: "#1f7aff", action: "products" },
     { label: "Record Sale", icon: "$", color: "#10b981", action: "sales" },
     { label: "Stock Movement", icon: "#", color: "#8246ff", action: "inventory" },
-    { label: "View Reports", icon: "~", color: "#f59e0b", action: "reports", adminOnly: true },
-  ].filter(action => !action.adminOnly || isAdmin);
+    ...(canViewReports ? [{ label: "View Reports", icon: "~", color: "#f59e0b", action: "reports" }] : []),
+  ];
 
   const paymentCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -606,10 +617,14 @@ export default function Dashboard({ onNavigate }: Props) {
 
       if (!query) return true;
 
-      const productName = (sale.product?.name ?? `Product #${sale.product_id ?? ""}`).toLowerCase();
+      const itemsText = (sale.items ?? [])
+        .map((item) => `${item.name ?? "Unknown"} ${formatRecentSaleQuantity(item.quantity)}`)
+        .join(" ")
+        .toLowerCase();
       const customerName = (sale.customer_name ?? "Walk-in").toLowerCase();
       const paymentName = getPaymentMeta(paymentKey).label.toLowerCase();
-      return productName.includes(query) || customerName.includes(query) || paymentName.includes(query);
+      const receiptNumber = String(sale.receipt_number ?? "").toLowerCase();
+      return itemsText.includes(query) || customerName.includes(query) || paymentName.includes(query) || receiptNumber.includes(query);
     });
   }, [recentSales, recentSalesPaymentFilter, recentSalesSearch]);
 
@@ -727,7 +742,7 @@ export default function Dashboard({ onNavigate }: Props) {
         </div>
       </div>
 
-      {isAdmin && (
+      {canViewReports && (
         <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 24 }}>
           <div className="card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
@@ -1025,7 +1040,7 @@ export default function Dashboard({ onNavigate }: Props) {
       )}
 
       {/* Recent Sales */}
-      {isAdmin && (
+      {canViewReports && (
         <div className="card">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
             <h2 className="section-title" style={{ margin: 0 }}>Recent Sales</h2>
@@ -1069,7 +1084,7 @@ export default function Dashboard({ onNavigate }: Props) {
                   type="text"
                   value={recentSalesSearch}
                   onChange={(event) => setRecentSalesSearch(event.target.value)}
-                  placeholder="Search product or customer"
+                  placeholder="Search customer or item"
                   className="input"
                   style={{ minWidth: 210, flex: "1 1 220px" }}
                 />
@@ -1119,9 +1134,9 @@ export default function Dashboard({ onNavigate }: Props) {
                     <table className="table" style={{ minWidth: 760 }}>
                       <thead>
                         <tr>
-                          <th>Product</th>
+                          <th>Receipt</th>
                           <th>Customer</th>
-                          <th style={{ textAlign: "right" }}>Qty</th>
+                          <th>Items</th>
                           <th style={{ textAlign: "right" }}>Total</th>
                           <th>Payment</th>
                           <th>Date & Time</th>
@@ -1133,9 +1148,23 @@ export default function Dashboard({ onNavigate }: Props) {
                           const paymentMeta = getPaymentMeta(paymentKey);
                           return (
                             <tr key={sale.id}>
-                              <td style={{ fontWeight: 700, color: "#0f172a" }}>{sale.product?.name || `Product #${sale.product_id}`}</td>
-                              <td>{sale.customer_name || "Walk-in"}</td>
-                              <td style={{ textAlign: "right", fontWeight: 600 }}>{sale.quantity}</td>
+                              <td style={{ fontWeight: 700, color: "#0f172a" }}>#{sale.receipt_number || sale.id}</td>
+                              <td>
+                                <div style={{ fontWeight: 600, color: "#0f172a" }}>{sale.customer_name || "Walk-in"}</div>
+                                <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
+                                  {sale.item_count || (sale.items ?? []).length} item{Number(sale.item_count || (sale.items ?? []).length) === 1 ? "" : "s"}
+                                </div>
+                              </td>
+                              <td>
+                                <div style={{ display: "grid", gap: 4 }}>
+                                  {(sale.items ?? []).map((item, index) => (
+                                    <div key={`${sale.id}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                                      <span style={{ color: "#0f172a", fontWeight: 500 }}>{item.name || "Unknown"}</span>
+                                      <span style={{ color: "#64748b", fontSize: 12 }}>Qty {formatRecentSaleQuantity(item.quantity)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
                               <td style={{ textAlign: "right", fontWeight: 800, color: "#047857" }}>GHS {Number(sale.total_price).toFixed(2)}</td>
                               <td>
                                 <span className="badge" style={{ background: paymentMeta.background, color: paymentMeta.color }}>
@@ -1150,7 +1179,7 @@ export default function Dashboard({ onNavigate }: Props) {
                     </table>
                   </div>
                   <p style={{ margin: "10px 0 0", fontSize: 12, color: "#64748b" }}>
-                    Showing {visibleRecentSales.length} of {filteredRecentSales.length} filtered sales.
+                    Showing {visibleRecentSales.length} of {filteredRecentSales.length} filtered transactions.
                   </p>
                 </>
               )}
