@@ -17,6 +17,7 @@ from app.database import get_db
 from app.models import User, PasswordResetToken, Branch, SystemSettings
 from app.auth import (
     create_access_token,
+    get_password_rule_error,
     get_password_hash,
     verify_password,
     get_current_active_user,
@@ -33,20 +34,6 @@ from app.utils.phone import is_valid_phone, normalize_phone
 from app.utils.supabase_storage import is_supabase_storage_enabled, upload_public_logo
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-def _password_rule_error(password: str) -> Optional[str]:
-    if len(password) < 8:
-        return "Password must be at least 8 characters."
-    if not any(c.islower() for c in password):
-        return "Password must include a lowercase letter."
-    if not any(c.isupper() for c in password):
-        return "Password must include an uppercase letter."
-    if not any(c.isdigit() for c in password):
-        return "Password must include a number."
-    if not any(not c.isalnum() for c in password):
-        return "Password must include a special character."
-    return None
 
 
 # Schemas
@@ -290,7 +277,7 @@ async def signup(request: Request, db: Session = Depends(get_db)):
         if existing_phone_user:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already registered")
     
-    rule_error = _password_rule_error(user_data.password)
+    rule_error = get_password_rule_error(user_data.password)
     if rule_error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rule_error)
 
@@ -560,7 +547,7 @@ def request_password_reset(payload: PasswordResetRequest, db: Session = Depends(
 @router.post("/password-reset/confirm")
 def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
     """Confirm reset code and set a new password."""
-    rule_error = _password_rule_error(payload.new_password)
+    rule_error = get_password_rule_error(payload.new_password)
     if rule_error:
         raise HTTPException(status_code=400, detail=rule_error)
 
@@ -600,7 +587,7 @@ def change_password(
     if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 
-    rule_error = _password_rule_error(payload.new_password)
+    rule_error = get_password_rule_error(payload.new_password)
     if rule_error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=rule_error)
 

@@ -31,6 +31,21 @@ def get_password_hash(password: str) -> str:
     return hashed.decode('utf-8')
 
 
+def get_password_rule_error(password: str) -> Optional[str]:
+    """Return a validation message when a password does not meet policy."""
+    if len(password) < 8:
+        return "Password must be at least 8 characters."
+    if not any(char.islower() for char in password):
+        return "Password must include a lowercase letter."
+    if not any(char.isupper() for char in password):
+        return "Password must include an uppercase letter."
+    if not any(char.isdigit() for char in password):
+        return "Password must include a number."
+    if not any(not char.isalnum() for char in password):
+        return "Password must include a special character."
+    return None
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token"""
     to_encode = data.copy()

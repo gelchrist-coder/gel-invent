@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User, Branch
-from app.auth import get_current_active_user, get_password_hash
+from app.auth import get_current_active_user, get_password_hash, get_password_rule_error
 from app.utils.branch import get_owner_user_id
 from app.utils.supabase_auth import (
     SupabaseAuthError,
@@ -83,8 +83,11 @@ def create_employee(
     email = str(employee_data.email).strip().lower()
     phone = normalize_phone(employee_data.phone)
     role = _normalize_employee_role(employee_data.role)
+    password_rule_error = get_password_rule_error(employee_data.password)
     if employee_data.phone and not is_valid_phone(employee_data.phone):
         raise HTTPException(status_code=400, detail="Phone number is invalid")
+    if password_rule_error:
+        raise HTTPException(status_code=400, detail=password_rule_error)
 
     # Check if email already exists
     existing_user = db.query(User).filter(User.email == email).first()
