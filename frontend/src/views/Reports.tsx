@@ -4,6 +4,7 @@ import {
   fetchInventoryStatusReport,
   fetchSalesDashboard,
 } from "../api";
+import RevenueAnalysis from "./RevenueAnalysis";
 import { useExpiryTracking } from "../settings";
 import { readStoredUser } from "../user-storage";
 
@@ -238,33 +239,42 @@ function HorizontalBarChart({
   );
 }
 
+type ReportTab = "sales" | "inventory" | "creditors" | "revenue";
+
 type Props = {
+  initialTab?: ReportTab;
   onNavigate?: (view: string) => void;
 };
 
-export default function Reports({ onNavigate }: Props) {
+export default function Reports({ initialTab = "sales" }: Props) {
   const userRole = readStoredUser()?.role ?? null;
   const isAdmin = userRole === "Admin";
   const usesExpiryTracking = useExpiryTracking();
 
-  const [activeTab, setActiveTab] = useState<"sales" | "inventory" | "creditors">("sales");
+  const [activeTab, setActiveTab] = useState<ReportTab>(initialTab);
   const [salesData, setSalesData] = useState<SalesDashboard | null>(null);
   const [inventoryData, setInventoryData] = useState<InventoryStatus | null>(null);
   const [creditorsData, setCreditorsData] = useState<CreditorsSummary | null>(null);
   const [loading, setLoading] = useState(false);
 
   const loadData = useCallback(async () => {
+    const shouldLoadSales = activeTab === "sales" && !salesData;
+    const shouldLoadInventory = activeTab === "inventory" && !inventoryData;
+    const shouldLoadCreditors = activeTab === "creditors" && !creditorsData;
+
+    if (!shouldLoadSales && !shouldLoadInventory && !shouldLoadCreditors) {
+      return;
+    }
+
     setLoading(true);
     try {
-      if (activeTab === "sales") {
-        if (!salesData) {
-          const data = await fetchSalesDashboard();
-          setSalesData(data as SalesDashboard);
-        }
-      } else if (activeTab === "inventory" && !inventoryData) {
+      if (shouldLoadSales) {
+        const data = await fetchSalesDashboard();
+        setSalesData(data as SalesDashboard);
+      } else if (shouldLoadInventory) {
         const data = await fetchInventoryStatusReport();
         setInventoryData(data as InventoryStatus);
-      } else if (activeTab === "creditors" && !creditorsData) {
+      } else if (shouldLoadCreditors) {
         const data = await fetchCreditorsSummaryReport();
         setCreditorsData(data as CreditorsSummary);
       }
@@ -281,6 +291,10 @@ export default function Reports({ onNavigate }: Props) {
       loadData();
     }
   }, [isAdmin, loadData]);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   // Clear cached data when branch changes so fresh data is loaded
   useEffect(() => {
@@ -325,7 +339,7 @@ export default function Reports({ onNavigate }: Props) {
       </div>
       {/* Tabs */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 20, padding: 6, border: "1px solid #dbe5f2", borderRadius: 14, background: "linear-gradient(180deg, #f8fbff, #f1f5fb)" }}>
-        {(["sales", "inventory", "creditors"] as const).map((tab) => (
+        {(["sales", "inventory", "creditors", "revenue"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -350,30 +364,6 @@ export default function Reports({ onNavigate }: Props) {
       {loading && (
         <div style={{ textAlign: "center", padding: 36, color: "#6b7280", background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 14 }}>Loading...</div>
       )}
-
-      {activeTab === "sales" && onNavigate ? (
-        <div style={{ marginBottom: 18, display: "flex", justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            onClick={() => onNavigate("revenue")}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "10px 14px",
-              border: "1px solid #0f172a",
-              borderRadius: 10,
-              background: "#ffffff",
-              color: "#0f172a",
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 700,
-            }}
-          >
-            Open Revenue Analysis
-          </button>
-        </div>
-      ) : null}
 
       {/* Sales Dashboard */}
       {activeTab === "sales" && salesData && salesData.today && (
@@ -511,37 +501,10 @@ export default function Reports({ onNavigate }: Props) {
               )}
             </div>
           </div>
-
-          <div style={{ marginTop: 24, padding: 18, borderRadius: 14, border: "1px solid #dbe5f2", background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#0f172a" }}>Need profitability and trend analysis?</h2>
-                <p style={{ margin: 0, fontSize: 13, color: "#64748b", maxWidth: 620 }}>
-                  Revenue, margin, growth, and daily trend charts now live on the dedicated Revenue Analysis page so this report stays focused on operational sales reporting.
-                </p>
-              </div>
-              {onNavigate ? (
-                <button
-                  type="button"
-                  onClick={() => onNavigate("revenue")}
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 10,
-                    border: "1px solid #0f172a",
-                    background: "#0f172a",
-                    color: "#ffffff",
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 700,
-                  }}
-                >
-                  Go to Revenue Analysis
-                </button>
-              ) : null}
-            </div>
-          </div>
         </div>
       )}
+
+      {activeTab === "revenue" && <RevenueAnalysis embedded />}
 
       {/* Inventory Status */}
       {activeTab === "inventory" && inventoryData && (

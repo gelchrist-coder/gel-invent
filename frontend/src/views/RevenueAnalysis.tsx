@@ -6,6 +6,10 @@ import TopProducts from "../components/TopProducts";
 import PaymentMethodBreakdown from "../components/PaymentMethodBreakdown";
 import { readStoredUser } from "../user-storage";
 
+type RevenueAnalysisProps = {
+  embedded?: boolean;
+};
+
 type RevenueMetricsData = {
   total_revenue: number;
   cash_revenue: number;
@@ -49,7 +53,7 @@ type RevenueAnalyticsResponse = {
   top_products: TopProductRow[];
 };
 
-export default function RevenueAnalysis() {
+export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisProps) {
   // Check if current user is Admin
   const userRole = readStoredUser()?.role ?? null;
   const isAdmin = userRole === "Admin";
@@ -58,6 +62,7 @@ export default function RevenueAnalysis() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState("30d");
+  const title = "Revenue";
 
   const loadData = useCallback(async () => {
     // Only load data if user is Admin
@@ -98,7 +103,7 @@ export default function RevenueAnalysis() {
   // Block access for non-Admin users
   if (!isAdmin) {
     return (
-      <div style={{ padding: 32 }}>
+      <div style={{ padding: embedded ? 0 : 32 }}>
         <div
           style={{
             padding: 32,
@@ -109,7 +114,7 @@ export default function RevenueAnalysis() {
           }}
         >
           <h2 style={{ color: "#c33", marginBottom: 8 }}>Access Denied</h2>
-          <p style={{ color: "#666" }}>Only business owners can access revenue analysis.</p>
+          <p style={{ color: "#666" }}>Only business owners can access revenue.</p>
         </div>
       </div>
     );
@@ -117,8 +122,8 @@ export default function RevenueAnalysis() {
 
   if (loading) {
     return (
-      <div className="app-shell">
-        <h1 className="page-title" style={{ marginBottom: 24 }}>Revenue Analysis</h1>
+      <div className={embedded ? undefined : "app-shell"}>
+        {!embedded ? <h1 className="page-title" style={{ marginBottom: 24 }}>{title}</h1> : null}
         <div className="card">
           <p style={{ margin: 0, color: "#6b7280" }}>Loading revenue data...</p>
         </div>
@@ -128,8 +133,8 @@ export default function RevenueAnalysis() {
 
   if (error) {
     return (
-      <div className="app-shell">
-        <h1 className="page-title" style={{ marginBottom: 24 }}>Revenue Analysis</h1>
+      <div className={embedded ? undefined : "app-shell"}>
+        {!embedded ? <h1 className="page-title" style={{ marginBottom: 24 }}>{title}</h1> : null}
         <div className="card">
           <p style={{ margin: 0, color: "#ef4444" }}>Error: {error}</p>
           <button
@@ -156,9 +161,9 @@ export default function RevenueAnalysis() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={embedded ? undefined : "app-shell"}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <h1 className="page-title" style={{ margin: 0 }}>Revenue Analysis</h1>
+        <h1 className="page-title" style={{ margin: 0, fontSize: embedded ? 24 : undefined }}>{title}</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <label style={{ fontSize: 14, color: "#6b7280", fontWeight: 500 }}>Period:</label>
           <select
