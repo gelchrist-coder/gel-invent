@@ -149,10 +149,11 @@ export default function Login({ onLogin }: LoginProps) {
     }
   };
 
-  // Warm the DB-backed auth path as soon as the login page loads so the
-  // cold-start delay doesn't hit the first credential check.
+  // Warm the backend process without triggering a noisy DB health probe on
+  // first page load. The actual login path still waits for /health/db if
+  // the server is starting up.
   useEffect(() => {
-    void warmBackend("/health/db");
+    void warmBackend("/health");
   }, []);
 
   useEffect(() => {
