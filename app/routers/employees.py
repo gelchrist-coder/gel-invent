@@ -18,6 +18,21 @@ from app.utils.phone import is_valid_phone, normalize_phone
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
+EMPLOYEE_ROLE_LOOKUP = {
+    "sales": "Sales",
+    "manager": "Manager",
+}
+
+
+def _normalize_employee_role(role: str) -> str:
+    value = " ".join(str(role or "").strip().split())
+    normalized = EMPLOYEE_ROLE_LOOKUP.get(value.lower())
+    if normalized:
+        return normalized
+
+    allowed_roles = ", ".join(EMPLOYEE_ROLE_LOOKUP.values())
+    raise HTTPException(status_code=400, detail=f"Invalid employee role. Allowed roles: {allowed_roles}")
+
 
 # Schemas
 class EmployeeCreate(BaseModel):
@@ -67,6 +82,7 @@ def create_employee(
     
     email = str(employee_data.email).strip().lower()
     phone = normalize_phone(employee_data.phone)
+    role = _normalize_employee_role(employee_data.role)
     if employee_data.phone and not is_valid_phone(employee_data.phone):
         raise HTTPException(status_code=400, detail="Phone number is invalid")
 
@@ -133,7 +149,7 @@ def create_employee(
         phone=phone,
         name=employee_data.name.strip(),
         hashed_password=hashed_password,
-        role=employee_data.role,
+        role=role,
         created_by=current_user.id,
         branch_id=branch_id,
         business_name=current_user.business_name,  # Inherit owner's business
@@ -231,7 +247,7 @@ def update_employee(
     if employee_data.name is not None:
         employee.name = employee_data.name
     if employee_data.role is not None:
-        employee.role = employee_data.role
+        employee.role = _normalize_employee_role(employee_data.role)
     if employee_data.is_active is not None:
         employee.is_active = employee_data.is_active
     if employee_data.branch_id is not None:
