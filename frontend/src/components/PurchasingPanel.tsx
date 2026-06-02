@@ -46,9 +46,9 @@ const paymentMethodOptions = [
   { value: "other", label: "Other" },
 ];
 
+type PurchasePaymentChoice = "unpaid" | "partial" | "paid";
+
 const MAX_VISIBLE_SUPPLIER_RESULTS = 8;
-const DEFAULT_VISIBLE_SUPPLIERS = 6;
-const DEFAULT_VISIBLE_RESTOCK_PRODUCTS = 6;
 
 function normalizeText(value: string | null | undefined): string {
   return (value || "").trim().toLowerCase();
@@ -603,8 +603,8 @@ export default function PurchasingPanel({
   const [orderItems, setOrderItems] = useState<PurchaseOrderLine[]>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [manualSupplierName, setManualSupplierName] = useState("");
-  const [showAllSuppliers, setShowAllSuppliers] = useState(false);
   const [showAllSupplierProducts, setShowAllSupplierProducts] = useState(false);
+  const [showSelectedProductDetails, setShowSelectedProductDetails] = useState(false);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [quantity, setQuantity] = useState("1");
@@ -612,6 +612,7 @@ export default function PurchasingPanel({
   const [unitSellingPrice, setUnitSellingPrice] = useState("");
   const [isChangingLinePrice, setIsChangingLinePrice] = useState(false);
   const [showOptionalOrderDetails, setShowOptionalOrderDetails] = useState(false);
+  const [purchasePaymentChoice, setPurchasePaymentChoice] = useState<PurchasePaymentChoice>("unpaid");
   const [amountPaid, setAmountPaid] = useState("");
   const [purchasePaymentMethod, setPurchasePaymentMethod] = useState("cash");
   const [purchaseDate, setPurchaseDate] = useState(() => toISODate(new Date()));
@@ -751,68 +752,6 @@ export default function PurchasingPanel({
     () => products.find((product) => product.id === selectedProductId) ?? null,
     [products, selectedProductId],
   );
-  const normalizedSupplierSearch = useMemo(
-    () => normalizeText(manualSupplierName),
-    [manualSupplierName],
-  );
-  const rankedSuppliers = useMemo(() => {
-    const supplierPurchaseStats = new Map<string, { purchaseCount: number; lastPurchaseTimestamp: number }>();
-
-    for (const purchase of purchases) {
-      const supplierKey = normalizeText(purchase.supplier_name);
-      if (!supplierKey) continue;
-
-      const existingStats = supplierPurchaseStats.get(supplierKey) ?? { purchaseCount: 0, lastPurchaseTimestamp: 0 };
-      supplierPurchaseStats.set(supplierKey, {
-        purchaseCount: existingStats.purchaseCount + 1,
-        lastPurchaseTimestamp: Math.max(existingStats.lastPurchaseTimestamp, getPurchaseDateValue(purchase)),
-      });
-    }
-
-    return [...suppliers].sort((left, right) => {
-      const leftStats = supplierPurchaseStats.get(normalizeText(left.name)) ?? { purchaseCount: 0, lastPurchaseTimestamp: 0 };
-      const rightStats = supplierPurchaseStats.get(normalizeText(right.name)) ?? { purchaseCount: 0, lastPurchaseTimestamp: 0 };
-
-      if (rightStats.purchaseCount !== leftStats.purchaseCount) {
-        return rightStats.purchaseCount - leftStats.purchaseCount;
-      }
-
-      if (rightStats.lastPurchaseTimestamp !== leftStats.lastPurchaseTimestamp) {
-        return rightStats.lastPurchaseTimestamp - leftStats.lastPurchaseTimestamp;
-      }
-
-      return left.name.localeCompare(right.name);
-    });
-  }, [purchases, suppliers]);
-  const supplierDirectoryMatches = useMemo(() => {
-    if (!normalizedSupplierSearch) {
-      return rankedSuppliers;
-    }
-
-    return rankedSuppliers.filter((supplier) => {
-      return [supplier.name, supplier.phone, supplier.email]
-        .map((value) => normalizeText(value || ""))
-        .some((value) => value.includes(normalizedSupplierSearch));
-    });
-  }, [normalizedSupplierSearch, rankedSuppliers]);
-  const visibleDirectorySuppliers = useMemo(() => {
-    if (normalizedSupplierSearch) {
-      return supplierDirectoryMatches;
-    }
-
-    if (showAllSuppliers) {
-      return rankedSuppliers;
-    }
-
-    return rankedSuppliers.slice(0, DEFAULT_VISIBLE_SUPPLIERS);
-  }, [normalizedSupplierSearch, rankedSuppliers, showAllSuppliers, supplierDirectoryMatches]);
-  const hiddenSupplierCount = useMemo(() => {
-    if (normalizedSupplierSearch || showAllSuppliers) {
-      return 0;
-    }
-
-    return Math.max(rankedSuppliers.length - DEFAULT_VISIBLE_SUPPLIERS, 0);
-  }, [normalizedSupplierSearch, rankedSuppliers.length, showAllSuppliers]);
   const isPerishableProduct = usesExpiryTracking && !!selectedProduct?.expiry_date;
   const totalPurchaseValue = useMemo(() => purchases.reduce((sum, purchase) => sum + Number(purchase.total_cost || 0), 0), [purchases]);
   const totalOutstandingBalance = useMemo(
@@ -914,10 +853,6 @@ export default function PurchasingPanel({
       return right.lastPurchaseTimestamp - left.lastPurchaseTimestamp;
     });
   }, [matchedPurchaseSupplier, products, purchases]);
-  const quickRestockProducts = useMemo(
-    () => supplierProductInsights.slice(0, DEFAULT_VISIBLE_RESTOCK_PRODUCTS),
-    [supplierProductInsights],
-  );
   const savedUnitCostPrice = useMemo(
     () => selectedProduct?.cost_price != null ? Number(selectedProduct.cost_price) : null,
     [selectedProduct],
@@ -960,10 +895,12 @@ export default function PurchasingPanel({
     [orderItems],
   );
   const amountPaidNow = useMemo(() => {
+    if (purchasePaymentChoice === "paid") return estimatedTotal;
+    if (purchasePaymentChoice === "unpaid") return 0;
     if (amountPaid.trim() === "") return 0;
     const numericValue = Number(amountPaid);
     return Number.isFinite(numericValue) ? numericValue : NaN;
-  }, [amountPaid]);
+  }, [amountPaid, estimatedTotal, purchasePaymentChoice]);
   const estimatedBalanceDue = useMemo(() => {
     if (!Number.isFinite(amountPaidNow)) return NaN;
     return Math.max(estimatedTotal - amountPaidNow, 0);
@@ -973,6 +910,15 @@ export default function PurchasingPanel({
     if (amountPaidNow > 0) return "partial";
     return "unpaid";
   }, [amountPaidNow, estimatedBalanceDue, estimatedTotal]);
+  const purchasePaidAmountDisplayValue = useMemo(() => {
+    if (purchasePaymentChoice === "paid") {
+      return estimatedTotal > 0 ? estimatedTotal.toFixed(2) : "";
+    }
+    if (purchasePaymentChoice === "unpaid") {
+      return "";
+    }
+    return amountPaid;
+  }, [amountPaid, estimatedTotal, purchasePaymentChoice]);
 
   useEffect(() => {
     if (!selectedProduct) {
@@ -984,6 +930,10 @@ export default function PurchasingPanel({
     setIsChangingLinePrice(selectedProduct.cost_price == null);
     setExpiryDate("");
   }, [selectedProduct]);
+
+  useEffect(() => {
+    setShowSelectedProductDetails(false);
+  }, [selectedProductId, selectedSupplierId]);
 
   useEffect(() => {
     const previousSupplierId = previousPurchaseSupplierRef.current;
@@ -1246,13 +1196,6 @@ export default function PurchasingPanel({
     });
   };
 
-  const focusPurchaseSupplier = (supplier: Supplier) => {
-    setSelectedSupplierId(supplier.id);
-    setManualSupplierName(supplier.name);
-    setShowAllSuppliers(false);
-    setNotice(`Supplier ${supplier.name} selected for the purchase order form`);
-  };
-
   const handleAddOrderItem = () => {
     if (!matchedPurchaseSupplier) {
       setError("Select a supplier before adding order items");
@@ -1350,15 +1293,6 @@ export default function PurchasingPanel({
     setPaymentDate(toISODate(new Date()));
     setPaymentNotes("");
     scrollSectionIntoView(paymentSectionRef);
-  };
-
-  const openPaymentForSupplier = (supplier: Supplier) => {
-    const targetOrder = purchaseOrders.find((order) => Number(order.amount_due || 0) > 0 && resolveSupplierIdForOrder(order) === supplier.id);
-    if (!targetOrder || !targetOrder.nextPaymentPurchase) {
-      setNotice(`No unpaid purchases found for ${supplier.name}`);
-      return;
-    }
-    openPaymentForPurchase(targetOrder.nextPaymentPurchase);
   };
 
   const openReturnForPurchase = (purchase: Purchase) => {
@@ -1469,7 +1403,6 @@ export default function PurchasingPanel({
       setManualSupplierName(created.name);
       setSelectedSupplierId(created.id);
       setIsSupplierModalOpen(false);
-      setShowAllSuppliers(false);
       setNotice(`Supplier ${created.name} added`);
       await loadPanelData();
     } catch (err) {
@@ -1485,7 +1418,16 @@ export default function PurchasingPanel({
       return;
     }
 
-    const amountPaidValue = amountPaid.trim() === "" ? 0 : Number(amountPaid);
+    const amountPaidValue = purchasePaymentChoice === "paid"
+      ? estimatedTotal
+      : purchasePaymentChoice === "partial"
+        ? (amountPaid.trim() === "" ? 0 : Number(amountPaid))
+        : 0;
+
+    if (purchasePaymentChoice === "partial" && (!Number.isFinite(amountPaidValue) || amountPaidValue <= 0)) {
+      setError("Enter how much was paid now or choose Not Paid Yet");
+      return;
+    }
 
     if (!Number.isFinite(amountPaidValue) || amountPaidValue < 0) {
       setError("Enter a valid amount paid");
@@ -1517,7 +1459,7 @@ export default function PurchasingPanel({
         amount_paid: amountPaidValue || undefined,
         payment_method: amountPaidValue > 0 ? purchasePaymentMethod : undefined,
         purchase_date: purchaseDate || undefined,
-        due_date: dueDate || undefined,
+        due_date: estimatedPaymentStatus === "paid" ? undefined : dueDate || undefined,
         notes: trimOrUndefined(notes),
         items: orderItems.map((item) => ({
           product_id: item.product_id,
@@ -1534,9 +1476,12 @@ export default function PurchasingPanel({
       setSelectedSupplierId(null);
       setManualSupplierName("");
       setIsChangingLinePrice(selectedProduct?.cost_price == null);
+      setShowSelectedProductDetails(false);
       setShowOptionalOrderDetails(false);
+      setPurchasePaymentChoice("unpaid");
       setAmountPaid("");
       setPurchasePaymentMethod("cash");
+      setPurchaseDate(toISODate(new Date()));
       setDueDate("");
       setNotes("");
       setExpiryDate("");
@@ -1664,13 +1609,6 @@ export default function PurchasingPanel({
     boxShadow: "0 12px 28px rgba(15, 23, 42, 0.04)",
   };
 
-  const topSectionGridStyle: CSSProperties = {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
-    gap: 24,
-    alignItems: "start",
-  };
-
   const primaryPanelStyle: CSSProperties = {
     marginBottom: 0,
     padding: 24,
@@ -1678,15 +1616,6 @@ export default function PurchasingPanel({
     borderRadius: 20,
     background: "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
     boxShadow: "0 18px 36px rgba(15, 23, 42, 0.05)",
-  };
-
-  const emphasisSectionStyle: CSSProperties = {
-    display: "grid",
-    gap: 14,
-    padding: 18,
-    borderRadius: 16,
-    border: "1px solid #dbe5f2",
-    background: "linear-gradient(180deg, #fbfdff 0%, #f6faff 100%)",
   };
 
   const plainSectionStyle: CSSProperties = {
@@ -1735,25 +1664,6 @@ export default function PurchasingPanel({
     borderRadius: 12,
   };
 
-  const listStackStyle: CSSProperties = {
-    display: "grid",
-    gap: 12,
-    maxHeight: 360,
-    overflowY: "auto",
-    paddingRight: 4,
-  };
-
-  const countPillStyle: CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "6px 10px",
-    borderRadius: 999,
-    background: "#eff6ff",
-    color: "#1d4ed8",
-    fontSize: 12,
-    fontWeight: 800,
-  };
-
   const supplierModalOverlayStyle: CSSProperties = {
     position: "fixed",
     inset: 0,
@@ -1797,6 +1707,7 @@ export default function PurchasingPanel({
         </div>
       ) : null}
 
+      {!isPurchasingMode ? (
       <div style={statsGridStyle}>
         <div style={statCardStyle}>
           <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Active Suppliers</div>
@@ -1833,22 +1744,17 @@ export default function PurchasingPanel({
           </div>
         ) : null}
       </div>
+      ) : null}
 
       {isPurchasingMode ? (
-      <div style={topSectionGridStyle}>
         <div className="card" style={primaryPanelStyle}>
-          <div style={{ marginBottom: 20 }}>
-            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Supplier Directory</h3>
-            <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-              Start by selecting a supplier. The purchase builder appears only after a supplier is chosen.
-            </p>
-          </div>
-
-          <div style={emphasisSectionStyle}>
+          <div style={{ display: "grid", gap: 20 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <div style={subSectionLabelStyle}>Find Supplier</div>
-                <p style={helperTextStyle}>Search suppliers with suggestions while typing, then select one to begin the order.</p>
+              <div>
+                <h3 style={{ margin: "0 0 6px", fontSize: 20, fontWeight: 800, color: "#0f172a" }}>Create Purchase Order</h3>
+                <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>
+                  Select supplier, add products, and save the order in one short flow.
+                </p>
               </div>
               <button
                 type="button"
@@ -1871,700 +1777,529 @@ export default function PurchasingPanel({
               </button>
             </div>
 
-            <SupplierNameCombobox
-              suppliers={suppliers}
-              value={manualSupplierName}
-              selectedSupplier={matchedPurchaseSupplier}
-              onChange={handleSupplierNameChange}
-              disabled={submittingPurchase}
-            />
+            <div style={plainSectionStyle}>
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={subSectionLabelStyle}>Step 1</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>Select Supplier</div>
+                <p style={helperTextStyle}>Choose the supplier first. The rest of the order unlocks immediately after that.</p>
+              </div>
 
-            {matchedPurchaseSupplier ? (
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", padding: "12px 14px", borderRadius: 12, border: "1px solid #bfdbfe", background: "#eff6ff" }}>
-                <div style={{ fontSize: 13, color: "#1e3a8a" }}>
-                  Building purchase order for <strong>{matchedPurchaseSupplier.name}</strong>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSupplierId(null);
-                      setManualSupplierName("");
-                      setShowAllSupplierProducts(false);
-                    }}
-                    style={{
-                      padding: "7px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: "white",
-                      color: "#334155",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Change Supplier
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
+              <SupplierNameCombobox
+                suppliers={suppliers}
+                value={manualSupplierName}
+                selectedSupplier={matchedPurchaseSupplier}
+                onChange={handleSupplierNameChange}
+                disabled={submittingPurchase}
+              />
 
-          <div style={{ ...plainSectionStyle, marginTop: 22 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <div style={subSectionLabelStyle}>Recent and Frequent Suppliers</div>
-                <p style={helperTextStyle}>
-                  {normalizedSupplierSearch
-                    ? `Showing ${supplierDirectoryMatches.length} matching supplier${supplierDirectoryMatches.length === 1 ? "" : "s"}.`
-                    : "Showing the suppliers used most recently and most often. Use View All Suppliers to see the rest."}
-                </p>
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <span style={countPillStyle}>
-                  {panelDataErrors.suppliers && suppliers.length === 0 ? "Unavailable" : `${suppliers.length} saved`}
-                </span>
-                {!normalizedSupplierSearch && hiddenSupplierCount > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllSuppliers(true)}
-                    style={{
-                      padding: "7px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: "white",
-                      color: "#334155",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    View All Suppliers ({rankedSuppliers.length})
-                  </button>
-                ) : null}
-                {!normalizedSupplierSearch && showAllSuppliers && rankedSuppliers.length > DEFAULT_VISIBLE_SUPPLIERS ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllSuppliers(false)}
-                    style={{
-                      padding: "7px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: "white",
-                      color: "#334155",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Show Fewer
-                  </button>
-                ) : null}
-              </div>
+              {loading && suppliers.length === 0 && !panelDataErrors.suppliers ? (
+                <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>Loading suppliers...</p>
+              ) : null}
+
+              {panelDataErrors.suppliers && suppliers.length === 0 ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <p style={{ margin: 0, color: "#92400e", fontSize: 14 }}>{panelDataErrors.suppliers}</p>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => void loadPanelData()}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #d1d5db",
+                        background: "white",
+                        color: "#334155",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {!loading && !panelDataErrors.suppliers && suppliers.length === 0 ? (
+                <div style={{ padding: 14, borderRadius: 12, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 14 }}>
+                  No suppliers yet. Add one supplier to start creating purchase orders.
+                </div>
+              ) : null}
             </div>
 
-            {loading && suppliers.length === 0 && !panelDataErrors.suppliers ? (
-              <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>Loading suppliers...</p>
-            ) : panelDataErrors.suppliers && suppliers.length === 0 ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                <p style={{ margin: 0, color: "#92400e", fontSize: 14 }}>{panelDataErrors.suppliers}</p>
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => void loadPanelData()}
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: "white",
-                      color: "#334155",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Retry
-                  </button>
-                </div>
+            <div style={plainSectionStyle}>
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={subSectionLabelStyle}>Step 2</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>Add Products</div>
+                <p style={helperTextStyle}>Add each product line for this supplier, then review the order list before saving.</p>
               </div>
-            ) : suppliers.length === 0 ? (
-              <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>No suppliers yet.</p>
-            ) : visibleDirectorySuppliers.length === 0 ? (
-              <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>No supplier matched your search. Try a different name or add a new supplier.</p>
-            ) : (
-              <div style={listStackStyle}>
-                {visibleDirectorySuppliers.map((supplier) => (
-                  <div
-                    key={supplier.id}
-                    style={{
-                      padding: "14px 16px",
-                      borderRadius: 14,
-                      border: supplier.id === selectedSupplierId ? "1px solid #2563eb" : "1px solid #e2e8f0",
-                      background: supplier.id === selectedSupplierId ? "#eff6ff" : "#ffffff",
-                      display: "grid",
-                      gap: 12,
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{supplier.name}</div>
-                        <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                          {supplier.phone || supplier.email || "No phone number added"}
+
+              {!matchedPurchaseSupplier ? (
+                <div style={{ padding: 14, borderRadius: 12, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 14 }}>
+                  Select a supplier in Step 1 to start adding products.
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 13, color: "#475569" }}>
+                      {showAllSupplierProducts
+                        ? `Showing all ${products.length} product${products.length === 1 ? "" : "s"}`
+                        : supplierScopedProducts.length > 0
+                          ? `Showing ${supplierScopedProducts.length} product${supplierScopedProducts.length === 1 ? "" : "s"} linked to ${matchedPurchaseSupplier.name}`
+                          : `No linked products found for ${matchedPurchaseSupplier.name}`}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAllSupplierProducts((previousValue) => !previousValue)}
+                      style={{
+                        padding: "7px 10px",
+                        borderRadius: 8,
+                        border: "1px solid #d1d5db",
+                        background: "white",
+                        color: "#334155",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {showAllSupplierProducts ? "Supplier Products Only" : "Show All Products"}
+                    </button>
+                  </div>
+
+                  {purchaseProductOptions.length > 0 ? (
+                    <div style={{ maxWidth: 720 }}>
+                      <ProductSearchSelect
+                        label="Product"
+                        products={purchaseProductOptions}
+                        selectedProductId={selectedProductId}
+                        onChange={setSelectedProductId}
+                        disabled={submittingPurchase}
+                        searchPlaceholder={showAllSupplierProducts ? "Search all products" : `Search ${matchedPurchaseSupplier.name} products`}
+                        emptyLabel={showAllSupplierProducts ? "No matching products found" : "No linked products found for this supplier"}
+                      />
+                    </div>
+                  ) : (
+                    <div style={{ padding: 14, borderRadius: 12, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 14 }}>
+                      No products are available for this supplier yet. Turn on Show All Products to choose from the full catalog.
+                    </div>
+                  )}
+
+                  {selectedProduct ? (
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedProduct.name}</div>
+                          <div style={{ fontSize: 12, color: "#64748b" }}>{selectedProduct.sku}</div>
                         </div>
-                      </div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button
                           type="button"
-                          onClick={() => focusPurchaseSupplier(supplier)}
+                          onClick={() => setShowSelectedProductDetails((previousValue) => !previousValue)}
                           style={{
                             padding: "7px 10px",
                             borderRadius: 8,
                             border: "1px solid #d1d5db",
                             background: "white",
-                            color: "#1f2937",
+                            color: "#334155",
                             fontSize: 12,
                             fontWeight: 700,
                             cursor: "pointer",
                           }}
                         >
-                          {supplier.id === selectedSupplierId ? "Selected" : "Select Supplier"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openPaymentForSupplier(supplier)}
-                          disabled={Number(supplier.unpaid_purchases_count || 0) === 0}
-                          style={{
-                            padding: "7px 10px",
-                            borderRadius: 8,
-                            border: "1px solid #2563eb",
-                            background: Number(supplier.unpaid_purchases_count || 0) === 0 ? "#e5e7eb" : "#2563eb",
-                            color: Number(supplier.unpaid_purchases_count || 0) === 0 ? "#6b7280" : "#ffffff",
-                            fontSize: 12,
-                            fontWeight: 700,
-                            cursor: Number(supplier.unpaid_purchases_count || 0) === 0 ? "not-allowed" : "pointer",
-                          }}
-                        >
-                          Record Payment
+                          {showSelectedProductDetails ? "Hide Product Details" : "Show Product Details"}
                         </button>
                       </div>
-                    </div>
 
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span style={{ padding: "4px 8px", borderRadius: 999, background: "#f8fafc", color: "#334155", fontSize: 12, fontWeight: 700, border: "1px solid #e2e8f0" }}>
-                        Purchased: {formatCurrency(Number(supplier.total_purchased || 0))}
-                      </span>
-                      <span style={{ padding: "4px 8px", borderRadius: 999, background: "#eff6ff", color: "#1d4ed8", fontSize: 12, fontWeight: 700, border: "1px solid #bfdbfe" }}>
-                        Paid: {formatCurrency(Number(supplier.total_paid || 0))}
-                      </span>
-                      <span style={{ padding: "4px 8px", borderRadius: 999, background: Number(supplier.outstanding_balance || 0) > 0 ? "#fff7ed" : "#ecfdf5", color: Number(supplier.outstanding_balance || 0) > 0 ? "#c2410c" : "#047857", fontSize: 12, fontWeight: 700, border: Number(supplier.outstanding_balance || 0) > 0 ? "1px solid #fdba74" : "1px solid #a7f3d0" }}>
-                        Outstanding: {formatCurrency(Number(supplier.outstanding_balance || 0))}
-                      </span>
-                      <span style={{ padding: "4px 8px", borderRadius: 999, background: "#fef2f2", color: "#b91c1c", fontSize: 12, fontWeight: 700, border: "1px solid #fecaca" }}>
-                        Open invoices: {Number(supplier.unpaid_purchases_count || 0)}
-                      </span>
-                      {supplier.last_payment_date ? (
-                        <span style={{ padding: "4px 8px", borderRadius: 999, background: "#f8fafc", color: "#475569", fontSize: 12, fontWeight: 600, border: "1px solid #e2e8f0" }}>
-                          Last payment: {formatDate(supplier.last_payment_date)}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {!normalizedSupplierSearch && hiddenSupplierCount > 0 && !showAllSuppliers ? (
-              <div style={{ fontSize: 12, color: "#64748b" }}>
-                {hiddenSupplierCount} more supplier{hiddenSupplierCount === 1 ? " is" : "s are"} hidden to keep this view clean.
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        {matchedPurchaseSupplier ? (
-        <div className="card" style={primaryPanelStyle}>
-          <div style={{ marginBottom: 20 }}>
-            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Build Purchase Order</h3>
-            <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-              Create one supplier order with multiple product lines, then track payment status against the combined order value.
-            </p>
-          </div>
-
-          <div style={{ display: "grid", gap: 18 }}>
-            <div style={emphasisSectionStyle}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <div style={subSectionLabelStyle}>Supplier Scope</div>
-                <p style={helperTextStyle}>Purchase order is now scoped to {matchedPurchaseSupplier.name}. Start with linked products, then expand only if needed.</p>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ fontSize: 13, color: "#334155" }}>
-                  {showAllSupplierProducts
-                    ? `Showing all ${products.length} product${products.length === 1 ? "" : "s"}`
-                    : `Showing ${supplierScopedProducts.length} product${supplierScopedProducts.length === 1 ? "" : "s"} linked to ${matchedPurchaseSupplier.name}`}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowAllSupplierProducts((previousValue) => !previousValue)}
-                  style={{
-                    padding: "7px 10px",
-                    borderRadius: 8,
-                    border: "1px solid #d1d5db",
-                    background: "white",
-                    color: "#334155",
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  {showAllSupplierProducts ? "Show Supplier Products Only" : "Show All Products"}
-                </button>
-              </div>
-
-              {!showAllSupplierProducts && supplierScopedProducts.length === 0 ? (
-                <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid #fcd34d", background: "#fffbeb", color: "#92400e", fontSize: 13 }}>
-                  No products are currently linked to this supplier. Use Show All Products to add a new supplier-product relationship through purchasing.
-                </div>
-              ) : null}
-
-              {quickRestockProducts.length > 0 ? (
-                <div style={{ display: "grid", gap: 8 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Recently/Frequently Restocked</div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {quickRestockProducts.map((insight) => (
-                      <button
-                        key={insight.product.id}
-                        type="button"
-                        onClick={() => setSelectedProductId(insight.product.id)}
-                        style={{
-                          padding: "7px 10px",
-                          borderRadius: 999,
-                          border: selectedProductId === insight.product.id ? "1px solid #2563eb" : "1px solid #dbe5f2",
-                          background: selectedProductId === insight.product.id ? "#eff6ff" : "#ffffff",
-                          color: "#1f2937",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {insight.product.name} · {insight.purchaseCount} restock{insight.purchaseCount === 1 ? "" : "s"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div style={emphasisSectionStyle}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <div style={subSectionLabelStyle}>Add Line Item</div>
-                <p style={helperTextStyle}>Pick a product, decide whether the price changed, then enter the quantity and add it to the order.</p>
-              </div>
-
-              <div style={{ maxWidth: 720 }}>
-                <ProductSearchSelect
-                  label="Product"
-                  products={purchaseProductOptions}
-                  selectedProductId={selectedProductId}
-                  onChange={setSelectedProductId}
-                  disabled={submittingPurchase}
-                  searchPlaceholder={showAllSupplierProducts ? "Search all products for this purchase order" : `Search ${matchedPurchaseSupplier.name} products`}
-                  emptyLabel={showAllSupplierProducts ? "No matching products found" : "No linked products found for this supplier"}
-                />
-              </div>
-
-              {selectedProduct ? (
-                <div style={metricGridStyle}>
-                  <div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current Stock</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{Number(selectedProduct.current_stock || 0)}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Last Purchase Cost</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
-                      {lastPurchaseCostForSelectedProduct != null ? formatCurrency(lastPurchaseCostForSelectedProduct) : "Not set"}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Previous Selling Price</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
-                      {previousSellingPriceForSelectedProduct != null ? formatCurrency(previousSellingPriceForSelectedProduct) : "Not set"}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Draft Line Total</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(draftLineTotal)}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Supplier Restocks</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedProductSupplierInsight?.purchaseCount ?? 0}</div>
-                  </div>
-                </div>
-              ) : null}
-
-              {selectedProduct ? (
-                <div style={{ display: "grid", gap: 10, padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#fffaf0" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                    <div style={{ display: "grid", gap: 4 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>Will there be a price change?</div>
-                      <div style={{ fontSize: 12, color: "#64748b" }}>
-                        {requiresManualPriceEntry
-                          ? "Enter the updated buying and selling price for this line item."
-                          : "No price change needed. Just enter the quantity and add the line item."}
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        onClick={() => setIsChangingLinePrice(false)}
-                        disabled={savedUnitCostPrice == null}
-                        style={{
-                          padding: "7px 10px",
-                          borderRadius: 8,
-                          border: "1px solid #d1d5db",
-                          background: !requiresManualPriceEntry ? "#0f172a" : "white",
-                          color: !requiresManualPriceEntry ? "#ffffff" : "#1f2937",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: savedUnitCostPrice == null ? "not-allowed" : "pointer",
-                          opacity: savedUnitCostPrice == null ? 0.6 : 1,
-                        }}
-                      >
-                        No
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsChangingLinePrice(true)}
-                        style={{
-                          padding: "7px 10px",
-                          borderRadius: 8,
-                          border: "1px solid #b45309",
-                          background: requiresManualPriceEntry ? "#b45309" : "white",
-                          color: requiresManualPriceEntry ? "#ffffff" : "#9a3412",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: "pointer",
-                        }}
-                      >
-                        Yes
-                      </button>
-                    </div>
-                  </div>
-
-                  {savedUnitCostPrice == null ? (
-                    <div style={{ fontSize: 12, color: "#9a3412" }}>
-                      This product has no saved cost price yet, so enter the price for this purchase line.
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <div style={compactFieldGridStyle}>
-                <label>
-                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Quantity</span>
-                  <input
-                    className="input"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={quantity}
-                    onChange={(e) => setQuantity(e.target.value)}
-                    disabled={submittingPurchase}
-                  />
-                </label>
-
-                {requiresManualPriceEntry ? (
-                  <>
-                    <label>
-                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Cost Price</span>
-                      <input
-                        className="input"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={unitCostPrice}
-                        onChange={(e) => setUnitCostPrice(e.target.value)}
-                        disabled={submittingPurchase}
-                      />
-                    </label>
-                    <label>
-                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Selling Price</span>
-                      <input
-                        className="input"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={unitSellingPrice}
-                        onChange={(e) => setUnitSellingPrice(e.target.value)}
-                        disabled={submittingPurchase}
-                      />
-                    </label>
-                  </>
-                ) : null}
-              </div>
-
-              {!requiresManualPriceEntry && selectedProduct ? (
-                <div style={{ fontSize: 12, color: "#64748b" }}>
-                  Using saved prices for this product: cost {formatCurrency(savedUnitCostPrice ?? 0)}
-                  {savedUnitSellingPrice != null ? ` and selling ${formatCurrency(savedUnitSellingPrice)}` : ""}.
-                </div>
-              ) : null}
-
-              {isPerishableProduct ? (
-                <label>
-                  <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Batch Expiry Date</span>
-                  <input
-                    className="input"
-                    type="date"
-                    value={expiryDate}
-                    onChange={(e) => setExpiryDate(e.target.value)}
-                    disabled={submittingPurchase}
-                  />
-                </label>
-              ) : null}
-
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={handleAddOrderItem}
-                  disabled={submittingPurchase || purchaseProductOptions.length === 0}
-                >
-                  Add Item to Order
-                </button>
-              </div>
-            </div>
-
-            <div style={plainSectionStyle}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <div style={subSectionLabelStyle}>Current Order</div>
-                <p style={helperTextStyle}>Review the products already added before you create the purchase order.</p>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Order Items</div>
-                <div style={{ fontSize: 12, color: "#64748b" }}>{orderItems.length} line{orderItems.length === 1 ? "" : "s"} added</div>
-              </div>
-
-              {orderItems.length === 0 ? (
-                <div style={{ padding: 14, borderRadius: 12, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 14 }}>
-                  No items added yet. Add at least one product line before creating the order.
-                </div>
-              ) : (
-                <div style={{ display: "grid", gap: 10 }}>
-                  {orderItems.map((item) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        display: "grid",
-                        gap: 10,
-                        padding: 14,
-                        borderRadius: 12,
-                        border: "1px solid #e2e8f0",
-                        background: "white",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{item.product_name}</div>
-                          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                            {item.product_sku} · Stock {item.current_stock.toFixed(2)}
-                            {item.expiry_date ? ` · Exp ${formatDate(item.expiry_date)}` : ""}
+                      {showSelectedProductDetails ? (
+                        <div style={metricGridStyle}>
+                          <div>
+                            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current Stock</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{Number(selectedProduct.current_stock || 0)}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Last Purchase Cost</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
+                              {lastPurchaseCostForSelectedProduct != null ? formatCurrency(lastPurchaseCostForSelectedProduct) : "Not set"}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Previous Selling Price</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
+                              {previousSellingPriceForSelectedProduct != null ? formatCurrency(previousSellingPriceForSelectedProduct) : "Not set"}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Supplier Restocks</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedProductSupplierInsight?.purchaseCount ?? 0}</div>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveOrderItem(item.id)}
-                          style={{
-                            padding: "7px 10px",
-                            borderRadius: 8,
-                            border: "1px solid #fecaca",
-                            background: "#fff1f2",
-                            color: "#b91c1c",
-                            fontSize: 12,
-                            fontWeight: 700,
-                            cursor: "pointer",
-                          }}
-                        >
-                          Remove
-                        </button>
+                      ) : null}
+
+                      {savedUnitCostPrice != null ? (
+                        <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13, color: "#334155", fontWeight: 600 }}>
+                          <input
+                            type="checkbox"
+                            checked={requiresManualPriceEntry}
+                            onChange={(event) => setIsChangingLinePrice(event.target.checked)}
+                            disabled={submittingPurchase}
+                          />
+                          Change cost or selling price for this line
+                        </label>
+                      ) : (
+                        <div style={{ fontSize: 12, color: "#9a3412" }}>
+                          This product has no saved cost price yet, so enter the buying and selling prices for this line.
+                        </div>
+                      )}
+
+                      {!requiresManualPriceEntry ? (
+                        <div style={{ fontSize: 12, color: "#64748b" }}>
+                          Using saved prices: cost {formatCurrency(savedUnitCostPrice ?? 0)}
+                          {savedUnitSellingPrice != null ? ` and selling ${formatCurrency(savedUnitSellingPrice)}` : ""}.
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {selectedProduct ? (
+                    <>
+                      <div style={compactFieldGridStyle}>
+                        <label>
+                          <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Quantity</span>
+                          <input
+                            className="input"
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={quantity}
+                            onChange={(e) => setQuantity(e.target.value)}
+                            disabled={submittingPurchase}
+                          />
+                        </label>
+
+                        {requiresManualPriceEntry ? (
+                          <>
+                            <label>
+                              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Cost Price</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={unitCostPrice}
+                                onChange={(e) => setUnitCostPrice(e.target.value)}
+                                disabled={submittingPurchase}
+                              />
+                            </label>
+                            <label>
+                              <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Unit Selling Price</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={unitSellingPrice}
+                                onChange={(e) => setUnitSellingPrice(e.target.value)}
+                                disabled={submittingPurchase}
+                              />
+                            </label>
+                          </>
+                        ) : null}
+
+                        {isPerishableProduct ? (
+                          <label>
+                            <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Batch Expiry Date</span>
+                            <input
+                              className="input"
+                              type="date"
+                              value={expiryDate}
+                              onChange={(e) => setExpiryDate(e.target.value)}
+                              disabled={submittingPurchase}
+                            />
+                          </label>
+                        ) : null}
                       </div>
 
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", padding: 14, borderRadius: 12, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
                         <div>
-                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Quantity</div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{item.quantity.toFixed(2)}</div>
+                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Draft Line Total</div>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(draftLineTotal)}</div>
                         </div>
-                        <div>
-                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Unit Cost</div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(item.unit_cost_price)}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Unit Selling</div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(Number(item.unit_selling_price || 0))}</div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Line Total</div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(item.line_total)}</div>
-                        </div>
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={handleAddOrderItem}
+                          disabled={submittingPurchase || purchaseProductOptions.length === 0}
+                        >
+                          Add Product
+                        </button>
                       </div>
+                    </>
+                  ) : (
+                    <div style={{ padding: 14, borderRadius: 12, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 14 }}>
+                      Choose a product to enter quantity and pricing for the line item.
                     </div>
-                  ))}
-                </div>
+                  )}
+
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Current Order</div>
+                      <div style={{ fontSize: 12, color: "#64748b" }}>{orderItems.length} line{orderItems.length === 1 ? "" : "s"} added</div>
+                    </div>
+
+                    {orderItems.length === 0 ? (
+                      <div style={{ padding: 14, borderRadius: 12, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 14 }}>
+                        No items added yet. Add at least one product before creating the purchase order.
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 10 }}>
+                        {orderItems.map((item) => (
+                          <div
+                            key={item.id}
+                            style={{
+                              display: "grid",
+                              gap: 8,
+                              padding: 14,
+                              borderRadius: 12,
+                              border: "1px solid #e2e8f0",
+                              background: "white",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+                              <div>
+                                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{item.product_name}</div>
+                                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                                  {item.product_sku}
+                                  {item.expiry_date ? ` · Exp ${formatDate(item.expiry_date)}` : ""}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveOrderItem(item.id)}
+                                style={{
+                                  padding: "7px 10px",
+                                  borderRadius: 8,
+                                  border: "1px solid #fecaca",
+                                  background: "#fff1f2",
+                                  color: "#b91c1c",
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </div>
+
+                            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 13, color: "#475569" }}>
+                              <span>{item.quantity.toFixed(2)} x {formatCurrency(item.unit_cost_price)}</span>
+                              {item.unit_selling_price != null ? <span>Selling {formatCurrency(Number(item.unit_selling_price))}</span> : null}
+                              <span style={{ fontWeight: 700, color: "#0f172a" }}>Total {formatCurrency(item.line_total)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
 
             <div style={plainSectionStyle}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={subSectionLabelStyle}>Optional Order Details</div>
-                  <button
-                    type="button"
-                    onClick={() => setShowOptionalOrderDetails((previousValue) => !previousValue)}
-                    style={{
-                      padding: "7px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: "white",
-                      color: "#334155",
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    {showOptionalOrderDetails ? "Hide Optional Details" : "Show Optional Details"}
-                  </button>
-                </div>
-                <p style={helperTextStyle}>Add invoice number, purchase date, upfront payment, due date, and notes only when needed.</p>
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={subSectionLabelStyle}>Step 3</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>Create Purchase Order</div>
+                <p style={helperTextStyle}>Choose how much was paid now. The remaining balance and status update automatically.</p>
               </div>
 
-              {showOptionalOrderDetails ? (
-                <>
-                  <div style={wideFieldGridStyle}>
-                    <label>
-                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Invoice Number</span>
-                      <input
-                        className="input"
-                        value={invoiceNumber}
-                        onChange={(e) => setInvoiceNumber(e.target.value)}
-                        placeholder="Optional"
-                        disabled={submittingPurchase}
-                      />
-                    </label>
-
-                    <label>
-                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Purchase Date</span>
-                      <input
-                        className="input"
-                        type="date"
-                        value={purchaseDate}
-                        onChange={(e) => setPurchaseDate(e.target.value)}
-                        disabled={submittingPurchase}
-                      />
-                    </label>
+              <div style={metricGridStyle}>
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Supplier</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{matchedPurchaseSupplier?.name || "Select supplier"}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Lines</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{orderItems.length}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Order Total</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(estimatedTotal)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Paid Now</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(Number.isFinite(amountPaidNow) ? amountPaidNow : 0)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Balance Due</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: Number.isFinite(estimatedBalanceDue) && estimatedBalanceDue > 0 ? "#b45309" : "#166534" }}>
+                    {formatCurrency(Number.isFinite(estimatedBalanceDue) ? estimatedBalanceDue : 0)}
                   </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Status</div>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      padding: "4px 8px",
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      border: `1px solid ${getStatusMeta(estimatedPaymentStatus).border}`,
+                      background: getStatusMeta(estimatedPaymentStatus).background,
+                      color: getStatusMeta(estimatedPaymentStatus).color,
+                    }}
+                  >
+                    {getStatusMeta(estimatedPaymentStatus).label}
+                  </span>
+                </div>
+              </div>
 
+              <div style={{ display: "grid", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Payment at Purchase</div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {[
+                      { value: "unpaid", label: "Not Paid Yet" },
+                      { value: "paid", label: "Fully Paid" },
+                      { value: "partial", label: "Partially Paid" },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setPurchasePaymentChoice(option.value as PurchasePaymentChoice)}
+                        disabled={submittingPurchase || orderItems.length === 0}
+                        style={{
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          border: purchasePaymentChoice === option.value ? "1px solid #0f172a" : "1px solid #d1d5db",
+                          background: purchasePaymentChoice === option.value ? "#0f172a" : "white",
+                          color: purchasePaymentChoice === option.value ? "#ffffff" : "#334155",
+                          fontSize: 13,
+                          fontWeight: 700,
+                          cursor: submittingPurchase || orderItems.length === 0 ? "not-allowed" : "pointer",
+                          opacity: submittingPurchase || orderItems.length === 0 ? 0.6 : 1,
+                        }}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {purchasePaymentChoice !== "unpaid" ? (
                   <div style={compactFieldGridStyle}>
                     <label>
-                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Amount Paid Now</span>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Paid Amount</span>
                       <input
                         className="input"
                         type="number"
                         min="0"
                         step="0.01"
-                        value={amountPaid}
+                        value={purchasePaidAmountDisplayValue}
                         onChange={(e) => setAmountPaid(e.target.value)}
-                        placeholder="Optional upfront payment"
-                        disabled={submittingPurchase}
+                        placeholder={purchasePaymentChoice === "paid" ? "Matches order total" : "Enter amount paid"}
+                        readOnly={purchasePaymentChoice === "paid"}
+                        disabled={submittingPurchase || orderItems.length === 0}
                       />
                     </label>
+
                     <label>
                       <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Payment Method</span>
                       <select
                         className="input"
                         value={purchasePaymentMethod}
                         onChange={(e) => setPurchasePaymentMethod(e.target.value)}
-                        disabled={submittingPurchase}
+                        disabled={submittingPurchase || orderItems.length === 0}
                       >
                         {paymentMethodOptions.map((option) => (
                           <option key={option.value} value={option.value}>{option.label}</option>
                         ))}
                       </select>
                     </label>
-                    <label>
-                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Due Date</span>
-                      <input
-                        className="input"
-                        type="date"
-                        value={dueDate}
-                        onChange={(e) => setDueDate(e.target.value)}
-                        disabled={submittingPurchase}
-                      />
-                    </label>
                   </div>
+                ) : null}
 
-                  <label>
-                    <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Notes</span>
-                    <textarea
-                      className="textarea"
-                      rows={3}
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      placeholder="Optional order note"
-                      disabled={submittingPurchase}
-                    />
-                  </label>
-                </>
-              ) : null}
+                <div style={{ display: "grid", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowOptionalOrderDetails((previousValue) => !previousValue)}
+                    style={{
+                      justifySelf: "start",
+                      padding: "7px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #d1d5db",
+                      background: "white",
+                      color: "#334155",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {showOptionalOrderDetails ? "Hide More Options" : "More Options"}
+                  </button>
 
-              <div style={metricGridStyle}>
-              <div>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Order Total</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(estimatedTotal)}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Lines</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{orderItems.length}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Paid Now</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(Number.isFinite(amountPaidNow) ? amountPaidNow : 0)}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Balance Due</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: Number.isFinite(estimatedBalanceDue) && estimatedBalanceDue > 0 ? "#b45309" : "#166534" }}>
-                  {formatCurrency(Number.isFinite(estimatedBalanceDue) ? estimatedBalanceDue : 0)}
+                  {showOptionalOrderDetails ? (
+                    <>
+                      <div style={wideFieldGridStyle}>
+                        <label>
+                          <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Invoice Number</span>
+                          <input
+                            className="input"
+                            value={invoiceNumber}
+                            onChange={(e) => setInvoiceNumber(e.target.value)}
+                            placeholder="Optional"
+                            disabled={submittingPurchase}
+                          />
+                        </label>
+
+                        <label>
+                          <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Purchase Date</span>
+                          <input
+                            className="input"
+                            type="date"
+                            value={purchaseDate}
+                            onChange={(e) => setPurchaseDate(e.target.value)}
+                            disabled={submittingPurchase}
+                          />
+                        </label>
+
+                        {estimatedPaymentStatus !== "paid" ? (
+                          <label>
+                            <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Due Date</span>
+                            <input
+                              className="input"
+                              type="date"
+                              value={dueDate}
+                              onChange={(e) => setDueDate(e.target.value)}
+                              disabled={submittingPurchase}
+                            />
+                          </label>
+                        ) : null}
+                      </div>
+
+                      <label>
+                        <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Notes</span>
+                        <textarea
+                          className="textarea"
+                          rows={3}
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value)}
+                          placeholder="Optional order note"
+                          disabled={submittingPurchase}
+                        />
+                      </label>
+                    </>
+                  ) : null}
                 </div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Payment Status</div>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    padding: "4px 8px",
-                    borderRadius: 999,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    border: `1px solid ${getStatusMeta(estimatedPaymentStatus).border}`,
-                    background: getStatusMeta(estimatedPaymentStatus).background,
-                    color: getStatusMeta(estimatedPaymentStatus).color,
-                  }}
-                >
-                  {getStatusMeta(estimatedPaymentStatus).label}
-                </span>
-              </div>
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 13, color: "#475569", maxWidth: 480 }}>
-                  Payments are still tracked against supplier balances, while the order groups all its product lines under one order number.
+                  One order number will be created for every line item added above.
                 </div>
                 <button
                   type="button"
                   className="button"
                   onClick={() => void handleRecordPurchase()}
-                  disabled={submittingPurchase || orderItems.length === 0}
+                  disabled={submittingPurchase || orderItems.length === 0 || selectedSupplierId == null}
                 >
                   {submittingPurchase ? "Recording..." : "Create Purchase Order"}
                 </button>
@@ -2572,8 +2307,6 @@ export default function PurchasingPanel({
             </div>
           </div>
         </div>
-        ) : null}
-      </div>
       ) : null}
 
       {isSupplierModalOpen ? (
