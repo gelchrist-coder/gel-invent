@@ -65,6 +65,9 @@ type DashboardRecentSale = {
   customer_name?: string | null;
   items?: DashboardRecentSaleItem[];
   item_count?: number | string;
+  product_id?: number | string;
+  product_name?: string | null;
+  quantity?: number | string;
   total_price?: number | string;
   payment_method?: string | null;
   created_at: string;
@@ -164,6 +167,36 @@ function formatRecentSaleQuantity(value: number | string | undefined): string {
   if (!Number.isFinite(numeric)) return "0";
   if (Number.isInteger(numeric)) return String(numeric);
   return numeric.toFixed(2);
+}
+
+function getRecentSaleItems(sale: DashboardRecentSale): DashboardRecentSaleItem[] {
+  const items = Array.isArray(sale.items) ? sale.items : [];
+  if (items.length > 0) {
+    return items;
+  }
+
+  // Backward compatibility for older sales-dashboard payload shape.
+  const fallbackName =
+    (typeof sale.product_name === "string" && sale.product_name.trim())
+      ? sale.product_name.trim()
+      : sale.product_id != null
+        ? `Product #${sale.product_id}`
+        : "Item";
+  const qty = Number(sale.quantity ?? 0);
+
+  if (Number.isFinite(qty) && qty > 0) {
+    return [{ name: fallbackName, quantity: qty }];
+  }
+
+  return [];
+}
+
+function getRecentSaleItemCount(sale: DashboardRecentSale): number {
+  const explicitCount = Number(sale.item_count);
+  if (Number.isFinite(explicitCount) && explicitCount > 0) {
+    return explicitCount;
+  }
+  return getRecentSaleItems(sale).length;
 }
 
 export default function Dashboard({ onNavigate }: Props) {
@@ -617,7 +650,7 @@ export default function Dashboard({ onNavigate }: Props) {
 
       if (!query) return true;
 
-      const itemsText = (sale.items ?? [])
+      const itemsText = getRecentSaleItems(sale)
         .map((item) => `${item.name ?? "Unknown"} ${formatRecentSaleQuantity(item.quantity)}`)
         .join(" ")
         .toLowerCase();
@@ -1146,18 +1179,20 @@ export default function Dashboard({ onNavigate }: Props) {
                         {visibleRecentSales.map((sale) => {
                           const paymentKey = normalizePaymentMethod(sale.payment_method);
                           const paymentMeta = getPaymentMeta(paymentKey);
+                          const saleItems = getRecentSaleItems(sale);
+                          const itemCount = getRecentSaleItemCount(sale);
                           return (
                             <tr key={sale.id}>
                               <td style={{ fontWeight: 700, color: "#0f172a" }}>#{sale.receipt_number || sale.id}</td>
                               <td>
                                 <div style={{ fontWeight: 600, color: "#0f172a" }}>{sale.customer_name || "Walk-in"}</div>
                                 <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
-                                  {sale.item_count || (sale.items ?? []).length} item{Number(sale.item_count || (sale.items ?? []).length) === 1 ? "" : "s"}
+                                  {itemCount} item{itemCount === 1 ? "" : "s"}
                                 </div>
                               </td>
                               <td>
                                 <div style={{ display: "grid", gap: 4 }}>
-                                  {(sale.items ?? []).map((item, index) => (
+                                  {saleItems.map((item, index) => (
                                     <div key={`${sale.id}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
                                       <span style={{ color: "#0f172a", fontWeight: 500 }}>{item.name || "Unknown"}</span>
                                       <span style={{ color: "#64748b", fontSize: 12 }}>Qty {formatRecentSaleQuantity(item.quantity)}</span>
