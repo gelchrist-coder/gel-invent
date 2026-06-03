@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from io import BytesIO
 from typing import Any
@@ -194,6 +194,7 @@ def export_data(
                 "name": c.name,
                 "phone": c.phone,
                 "email": c.email,
+                "birthday": _serialize_dt(c.birthday),
                 "total_debt": _serialize_decimal(c.total_debt),
                 "notes": c.notes,
                 "created_at": _serialize_dt(c.created_at),
@@ -443,6 +444,25 @@ def _as_decimal(value: Any) -> Decimal:
     return Decimal(str(value))
 
 
+def _as_date(value: Any) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    text_value = str(value).strip()
+    if not text_value:
+        return None
+    try:
+        return date.fromisoformat(text_value)
+    except ValueError:
+        try:
+            return datetime.fromisoformat(text_value.replace("Z", "+00:00")).date()
+        except ValueError:
+            return None
+
+
 @router.post("/import")
 def import_data(
     payload: dict[str, Any],
@@ -669,6 +689,7 @@ def import_data(
             name=name,
             phone=c.get("phone"),
             email=c.get("email"),
+            birthday=_as_date(c.get("birthday")),
             total_debt=_as_decimal(c.get("total_debt")) if c.get("total_debt") is not None else _as_decimal(0),
             notes=c.get("notes"),
         )

@@ -21,6 +21,7 @@ interface Creditor {
   name: string;
   phone: string | null;
   email: string | null;
+  birthday?: string | null;
   total_debt: number;
   actual_debt?: number;
   total_purchases?: number;
@@ -40,9 +41,80 @@ interface CreditorDetailsProps {
   onRefresh: () => void;
 }
 
+interface RetentionSuggestion {
+  product_id: number;
+  product_name: string;
+  times_purchased: number;
+  total_quantity: number;
+  last_purchased_at: string;
+  average_reorder_days: number | null;
+  days_since_last_purchase: number;
+  is_due: boolean;
+}
+
+interface RetentionPayload {
+  customer: {
+    id: number;
+    name: string;
+    phone: string | null;
+    email: string | null;
+    birthday?: string | null;
+    notes: string | null;
+  };
+  summary: {
+    outstanding: number;
+    total_purchases: number;
+    purchase_count: number;
+    loyalty_points: number;
+    loyalty_level: "Bronze" | "Silver" | "Gold" | "VIP";
+    next_target?: {
+      level: "Silver" | "Gold" | "VIP";
+      remaining_spend: number;
+      remaining_purchases: number;
+      requires_clear_balance: boolean;
+    } | null;
+  };
+  birthday: {
+    birthday: string | null;
+    next_occurrence: string | null;
+    days_until: number | null;
+    is_today: boolean;
+    is_this_month: boolean;
+  };
+  latest_receipt: {
+    receipt_number: string;
+    purchased_at: string;
+    payment_method: string;
+    sale_ids: number[];
+    total_amount: number;
+    items: Array<{
+      sale_id: number;
+      product_id: number;
+      product_name: string;
+      quantity: number;
+      total_price: number;
+    }>;
+    message: string;
+    whatsapp_url: string | null;
+  } | null;
+  campaigns: {
+    debt_reminder_message: string | null;
+    debt_reminder_whatsapp_url: string | null;
+    birthday_message: string | null;
+    birthday_whatsapp_url: string | null;
+    promo_message: string;
+    promo_whatsapp_url: string | null;
+  };
+  buy_again_suggestions: RetentionSuggestion[];
+}
+
 export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }: CreditorDetailsProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [retention, setRetention] = useState<RetentionPayload | null>(null);
+  const [retentionLoading, setRetentionLoading] = useState(true);
+  const [retentionError, setRetentionError] = useState("");
+  const [retentionStatus, setRetentionStatus] = useState("");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showDebtModal, setShowDebtModal] = useState(false);
   const [typeFilter, setTypeFilter] = useState<"all" | "purchase" | "payment">("all");
@@ -73,6 +145,33 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
     fetchTransactions();
   }, [fetchTransactions]);
 
+  const fetchRetention = useCallback(async () => {
+    try {
+      setRetentionLoading(true);
+      setRetentionError("");
+      const response = await resilientFetch(`${API_BASE}/creditors/${creditor.id}/retention`, {
+        headers: buildAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to load customer retention data");
+      }
+
+      const data = await response.json() as RetentionPayload;
+      setRetention(data);
+    } catch (error) {
+      console.error("Error fetching retention data:", error);
+      setRetention(null);
+      setRetentionError(error instanceof Error ? error.message : "Failed to load retention tools");
+    } finally {
+      setRetentionLoading(false);
+    }
+  }, [creditor.id]);
+
+  useEffect(() => {
+    fetchRetention();
+  }, [fetchRetention]);
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-GH", {
       style: "currency",
@@ -88,6 +187,54 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const formatShortDate = (dateString: string | null | undefined) => {
+    if (!dateString) return "Not set";
+    return new Date(dateString).toLocaleDateString("en-GH", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const copyText = async (value: string, successMessage: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setRetentionStatus(successMessage);
+    } catch {
+      setRetentionStatus("Could not copy message. Please try again.");
+    }
+  };
+
+  const openMessageAction = async (
+    url: string | null | undefined,
+    message: string | null | undefined,
+    successMessage: string,
+    unavailableMessage: string,
+  ) => {
+    if (url) {
+      const popup = window.open(url, "_blank", "noopener,noreferrer");
+      setRetentionStatus(popup ? successMessage : "Popup blocked. Please allow popups and try again.");
+      return;
+    }
+    if (message) {
+      await copyText(message, `${successMessage} Message copied instead.`);
+      return;
+    }
+    setRetentionStatus(unavailableMessage);
   };
 
   // Calculate actual debt from transactions
@@ -119,6 +266,11 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
         : totalPurchaseValue >= 800 || purchaseCount >= 6
           ? "Silver"
           : "Bronze");
+  const retentionSummary = retention?.summary;
+  const retentionBirthday = retention?.birthday;
+  const nextTarget = retentionSummary?.next_target;
+  const latestReceipt = retention?.latest_receipt;
+  const buyAgainSuggestions = retention?.buy_again_suggestions ?? [];
 
   const filteredTransactions = transactions.filter((t) => {
     const typeMatch =
@@ -258,6 +410,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
             <div style={{ marginTop: 8 }}>
               {creditor.phone && <p style={{ margin: "4px 0", fontSize: 14, color: "#6b7280" }}>{creditor.phone}</p>}
               {creditor.email && <p style={{ margin: "4px 0", fontSize: 14, color: "#6b7280" }}>{creditor.email}</p>}
+              {creditor.birthday && <p style={{ margin: "4px 0", fontSize: 14, color: "#6b7280" }}>Birthday: {formatShortDate(creditor.birthday)}</p>}
             </div>
             {creditor.notes && (
               <p style={{ margin: "12px 0 0", fontSize: 14, color: "#6b7280", fontStyle: "italic" }}>
@@ -391,6 +544,258 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
           </button>
         </div>
 
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, marginBottom: 24 }}>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 18, background: "#ffffff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", marginBottom: 12 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#111827" }}>Retention Engine</h3>
+                <p style={{ margin: "6px 0 0", fontSize: 13, color: "#6b7280" }}>
+                  Send personalized follow-ups, share receipts on WhatsApp, and keep repeat buyers coming back.
+                </p>
+              </div>
+              <div style={{ padding: "8px 12px", borderRadius: 999, background: "#ecfeff", color: "#0f766e", fontSize: 12, fontWeight: 700 }}>
+                {(retentionSummary?.loyalty_points ?? loyaltyPoints)} pts
+              </div>
+            </div>
+
+            {retentionLoading ? (
+              <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Loading retention tools...</p>
+            ) : retentionError ? (
+              <p style={{ margin: 0, fontSize: 13, color: "#b91c1c" }}>{retentionError}</p>
+            ) : (
+              <>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+                  <button
+                    type="button"
+                    onClick={() => void openMessageAction(
+                      latestReceipt?.whatsapp_url,
+                      latestReceipt?.message,
+                      "Latest receipt opened in WhatsApp.",
+                      "No recent receipt is available for this customer yet.",
+                    )}
+                    disabled={!latestReceipt?.message}
+                    style={{
+                      padding: "10px 12px",
+                      border: "none",
+                      borderRadius: 8,
+                      background: latestReceipt?.message ? "#16a34a" : "#cbd5e1",
+                      color: "white",
+                      fontWeight: 700,
+                      cursor: latestReceipt?.message ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    {latestReceipt?.whatsapp_url ? "WhatsApp Receipt" : "Copy Latest Receipt"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void openMessageAction(
+                      retention?.campaigns.debt_reminder_whatsapp_url,
+                      retention?.campaigns.debt_reminder_message,
+                      "Debt reminder opened in WhatsApp.",
+                      "This customer has no outstanding balance to remind them about.",
+                    )}
+                    disabled={!retention?.campaigns.debt_reminder_message}
+                    style={{
+                      padding: "10px 12px",
+                      border: "none",
+                      borderRadius: 8,
+                      background: retention?.campaigns.debt_reminder_message ? "#dc2626" : "#cbd5e1",
+                      color: "white",
+                      fontWeight: 700,
+                      cursor: retention?.campaigns.debt_reminder_message ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    {retention?.campaigns.debt_reminder_whatsapp_url ? "Debt Reminder" : "Copy Debt Reminder"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void openMessageAction(
+                      retention?.campaigns.birthday_whatsapp_url,
+                      retention?.campaigns.birthday_message,
+                      "Birthday campaign opened in WhatsApp.",
+                      "Add a birthday for this customer to unlock birthday campaigns.",
+                    )}
+                    disabled={!retention?.campaigns.birthday_message}
+                    style={{
+                      padding: "10px 12px",
+                      border: "none",
+                      borderRadius: 8,
+                      background: retention?.campaigns.birthday_message ? "#7c3aed" : "#cbd5e1",
+                      color: "white",
+                      fontWeight: 700,
+                      cursor: retention?.campaigns.birthday_message ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    {retention?.campaigns.birthday_whatsapp_url ? "Birthday Campaign" : "Copy Birthday Offer"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void openMessageAction(
+                      retention?.campaigns.promo_whatsapp_url,
+                      retention?.campaigns.promo_message,
+                      "Promo campaign opened in WhatsApp.",
+                      "Promo campaign is not available right now.",
+                    )}
+                    style={{
+                      padding: "10px 12px",
+                      border: "none",
+                      borderRadius: 8,
+                      background: "#2563eb",
+                      color: "white",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {retention?.campaigns.promo_whatsapp_url ? "Promo Campaign" : "Copy Promo Offer"}
+                  </button>
+                </div>
+
+                {retentionStatus ? (
+                  <p style={{ margin: "0 0 12px", fontSize: 12, color: "#475569" }}>{retentionStatus}</p>
+                ) : null}
+
+                {latestReceipt ? (
+                  <div style={{ borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0", padding: 14 }}>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+                      Latest Receipt #{latestReceipt.receipt_number}
+                    </p>
+                    <p style={{ margin: "4px 0 10px", fontSize: 12, color: "#64748b" }}>
+                      {formatDate(latestReceipt.purchased_at)} • {formatCurrency(latestReceipt.total_amount)} • {String(latestReceipt.payment_method || "cash").toUpperCase()}
+                    </p>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {latestReceipt.items.slice(0, 4).map((item) => (
+                        <div key={`${item.sale_id}-${item.product_id}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13, color: "#334155" }}>
+                          <span>{item.product_name} x {item.quantity}</span>
+                          <strong>{formatCurrency(item.total_price)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
+                    No named receipt history yet. Once this customer buys with their name attached, the app can send WhatsApp receipts automatically.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 18, background: "#ffffff" }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 700, color: "#111827" }}>Lifecycle Signals</h3>
+            <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ padding: 12, borderRadius: 8, background: "#f8fafc" }}>
+                <p style={{ margin: 0, fontSize: 12, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>Birthday</p>
+                <p style={{ margin: "6px 0 0", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                  {retentionBirthday?.birthday ? formatShortDate(retentionBirthday.birthday) : "Not recorded"}
+                </p>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: "#475569" }}>
+                  {retentionBirthday?.is_today
+                    ? "Today is their birthday."
+                    : retentionBirthday?.days_until != null
+                      ? `${retentionBirthday.days_until} day(s) until next birthday.`
+                      : "Save a birthday to run celebration campaigns."}
+                </p>
+              </div>
+              <div style={{ padding: 12, borderRadius: 8, background: "#f8fafc" }}>
+                <p style={{ margin: 0, fontSize: 12, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>Next Loyalty Target</p>
+                <p style={{ margin: "6px 0 0", fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                  {nextTarget ? nextTarget.level : "VIP unlocked"}
+                </p>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: "#475569" }}>
+                  {nextTarget
+                    ? `${formatCurrency(nextTarget.remaining_spend)} more spend or ${nextTarget.remaining_purchases} purchase(s) to go${nextTarget.requires_clear_balance ? ", plus clear the outstanding balance for VIP." : "."}`
+                    : "This customer is already at the highest loyalty tier."}
+                </p>
+              </div>
+              <div style={{ padding: 12, borderRadius: 8, background: "#f8fafc" }}>
+                <p style={{ margin: 0, fontSize: 12, color: "#64748b", textTransform: "uppercase", fontWeight: 700 }}>WhatsApp Readiness</p>
+                <p style={{ margin: "6px 0 0", fontSize: 16, fontWeight: 700, color: creditor.phone ? "#0f766e" : "#92400e" }}>
+                  {creditor.phone ? "Ready for direct follow-up" : "Phone number missing"}
+                </p>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: "#475569" }}>
+                  {creditor.phone
+                    ? "Receipt shares, promos, and reminders can open directly in WhatsApp."
+                    : "Add a phone number to send WhatsApp receipts and reminder campaigns faster."}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 18, background: "#ffffff", marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", marginBottom: 12 }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#111827" }}>Buy Again Suggestions</h3>
+              <p style={{ margin: "6px 0 0", fontSize: 13, color: "#6b7280" }}>
+                Based on repeat purchase history for this customer.
+              </p>
+            </div>
+          </div>
+
+          {retentionLoading ? (
+            <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>Loading repeat-purchase suggestions...</p>
+          ) : buyAgainSuggestions.length === 0 ? (
+            <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
+              Not enough named purchase history yet. Once this customer has a few repeat purchases, the app will suggest what to pitch next.
+            </p>
+          ) : (
+            <div style={{ display: "grid", gap: 10 }}>
+              {buyAgainSuggestions.map((suggestion) => (
+                <div
+                  key={suggestion.product_id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) auto",
+                    gap: 12,
+                    alignItems: "center",
+                    padding: 12,
+                    borderRadius: 8,
+                    background: suggestion.is_due ? "#eff6ff" : "#f8fafc",
+                    border: suggestion.is_due ? "1px solid #bfdbfe" : "1px solid #e2e8f0",
+                  }}
+                >
+                  <div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#0f172a" }}>{suggestion.product_name}</p>
+                      {suggestion.is_due ? (
+                        <span style={{ padding: "2px 8px", borderRadius: 999, background: "#dbeafe", color: "#1d4ed8", fontSize: 11, fontWeight: 700 }}>
+                          Due to repurchase
+                        </span>
+                      ) : null}
+                    </div>
+                    <p style={{ margin: "6px 0 0", fontSize: 12, color: "#475569" }}>
+                      Bought {suggestion.times_purchased} time(s), {suggestion.total_quantity} total unit(s). Last bought {formatShortDate(suggestion.last_purchased_at)}.
+                    </p>
+                    <p style={{ margin: "4px 0 0", fontSize: 12, color: "#64748b" }}>
+                      {suggestion.average_reorder_days != null
+                        ? `Usually reorders every ${suggestion.average_reorder_days} day(s); it has been ${suggestion.days_since_last_purchase} day(s).`
+                        : `Recent repeat product with ${suggestion.days_since_last_purchase} day(s) since last purchase.`}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void copyText(
+                      `Hi ${creditor.name}, ${suggestion.product_name} is back in stock at our store. Since you usually buy it, we thought to let you know first.`,
+                      `Follow-up message for ${suggestion.product_name} copied.`,
+                    )}
+                    style={{
+                      padding: "10px 12px",
+                      border: "none",
+                      borderRadius: 8,
+                      background: "#111827",
+                      color: "white",
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Copy Follow-up
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Transactions History */}
         <div>
           <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 700 }}>Customer Ledger</h3>
@@ -503,6 +908,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
             onClose={() => setShowPaymentModal(false)}
             onSuccess={() => {
               fetchTransactions();
+              fetchRetention();
               onRefresh();
               setShowPaymentModal(false);
             }}
@@ -517,6 +923,7 @@ export default function CreditorDetails({ creditor, onClose, onEdit, onRefresh }
             onClose={() => setShowDebtModal(false)}
             onSuccess={() => {
               fetchTransactions();
+              fetchRetention();
               onRefresh();
               setShowDebtModal(false);
             }}

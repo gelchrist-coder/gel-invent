@@ -257,6 +257,7 @@ class Creditor(Base):
     name: Mapped[str] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(50), default=None)
     email: Mapped[str | None] = mapped_column(String(255), default=None)
+    birthday: Mapped[date | None] = mapped_column(Date, default=None)
     total_debt: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     notes: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(

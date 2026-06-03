@@ -1,17 +1,19 @@
+import urllib.parse
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import Creditor, CreditTransaction, Sale
+from ..models import Creditor, CreditTransaction, Sale, Product
 from ..auth import get_current_active_user
 from ..models import User
 from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
+from app.utils.phone import to_e164_phone
 
 router = APIRouter(prefix="/creditors", tags=["creditors"])
 
@@ -90,17 +92,81 @@ def _loyalty_level(total_purchases: Decimal, transaction_count: int, outstanding
         return "Silver"
     return "Bronze"
 
+
+def _format_money(amount: Decimal) -> str:
+    value = Decimal(amount or 0).quantize(Decimal("0.01"))
+    return f"GHS {value:,.2f}"
+
+
+def _format_quantity(value: object) -> str:
+    try:
+        number = float(value or 0)
+    except Exception:
+        return "0"
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.2f}".rstrip("0").rstrip(".")
+
+
+def _receipt_number(client_sale_id: str | None, sale_id: int) -> str:
+    source = client_sale_id or str(sale_id)
+    return str(source).split(":")[0][-8:].upper()
+
+
+def _build_whatsapp_url(phone: str | None, message: str | None) -> str | None:
+    if not message:
+        return None
+    e164 = to_e164_phone(phone)
+    if not e164:
+        return None
+    return f"https://wa.me/{e164.lstrip('+')}?text={urllib.parse.quote(message)}"
+
+
+def _next_birthday_date(birthday: date, today: date) -> date:
+    try:
+        upcoming = date(today.year, birthday.month, birthday.day)
+    except ValueError:
+        upcoming = date(today.year, 2, 28)
+
+    if upcoming < today:
+        try:
+            return date(today.year + 1, birthday.month, birthday.day)
+        except ValueError:
+            return date(today.year + 1, 2, 28)
+    return upcoming
+
+
+def _loyalty_next_target(total_purchases: Decimal, purchase_count: int, outstanding: Decimal) -> dict[str, object] | None:
+    current = _loyalty_level(total_purchases, purchase_count, outstanding)
+    if current == "VIP":
+        return None
+
+    targets = {
+        "Bronze": ("Silver", Decimal("800"), 6, False),
+        "Silver": ("Gold", Decimal("2000"), 12, False),
+        "Gold": ("VIP", Decimal("5000"), 20, True),
+    }
+    next_level, spend_target, purchase_target, requires_clear_balance = targets[current]
+    return {
+        "level": next_level,
+        "remaining_spend": float(max(Decimal("0"), spend_target - total_purchases)),
+        "remaining_purchases": max(0, purchase_target - purchase_count),
+        "requires_clear_balance": requires_clear_balance and outstanding > 0,
+    }
+
 # Pydantic models
 class CreditorCreate(BaseModel):
     name: str
     phone: Optional[str] = None
     email: Optional[str] = None
+    birthday: Optional[date] = None
     notes: Optional[str] = None
 
 class CreditorUpdate(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    birthday: Optional[date] = None
     notes: Optional[str] = None
 
 class TransactionCreate(BaseModel):
@@ -191,6 +257,7 @@ async def get_creditors(
             "name": creditor.name,
             "phone": creditor.phone,
             "email": creditor.email,
+            "birthday": creditor.birthday.isoformat() if creditor.birthday else None,
             "total_debt": float(creditor.total_debt),
             "actual_debt": float(actual_debt),
             "total_purchases": float(total_spent),
@@ -259,6 +326,7 @@ async def get_creditor(
         "name": creditor.name,
         "phone": creditor.phone,
         "email": creditor.email,
+        "birthday": creditor.birthday.isoformat() if creditor.birthday else None,
         "total_debt": float(creditor.total_debt),
         "actual_debt": float(actual_debt),
         "total_purchases": float(total_spent),
@@ -282,6 +350,243 @@ async def get_creditor(
         ],
     }
 
+
+@router.get("/{creditor_id}/retention")
+async def get_creditor_retention(
+    creditor_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    ensure_permission(current_user, "view_creditors")
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    creditor = db.scalar(
+        select(Creditor).where(
+            Creditor.id == creditor_id,
+            Creditor.user_id.in_(tenant_user_ids),
+            Creditor.branch_id == active_branch_id,
+        )
+    )
+    if not creditor:
+        raise HTTPException(status_code=404, detail="Creditor not found")
+
+    transactions = db.scalars(
+        select(CreditTransaction)
+        .where(
+            CreditTransaction.creditor_id == creditor_id,
+            CreditTransaction.user_id.in_(tenant_user_ids),
+            CreditTransaction.branch_id == active_branch_id,
+        )
+    ).all()
+
+    total_credit_purchases = sum((Decimal(t.amount) for t in transactions if t.transaction_type == "debt"), Decimal(0))
+    total_payments = sum((Decimal(t.amount) for t in transactions if t.transaction_type == "payment"), Decimal(0))
+    outstanding = total_credit_purchases - total_payments
+
+    sales_key = _normalize_customer_name(creditor.name)
+    sales_aggregate = _sales_aggregate_by_customer_name(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        active_branch_id=active_branch_id,
+    )
+    sales_item = sales_aggregate.get(sales_key, None)
+    purchase_count = int(sales_item["sale_count"]) if sales_item else 0
+    total_spent = Decimal(sales_item["total_spent"]) if sales_item else Decimal(0)
+    loyalty_level = _loyalty_level(total_spent, purchase_count, outstanding)
+    loyalty_points = int(total_spent // Decimal("10"))
+
+    sales_rows = db.execute(
+        select(
+            Sale.id,
+            Sale.client_sale_id,
+            Sale.product_id,
+            Product.name.label("product_name"),
+            Sale.quantity,
+            Sale.total_price,
+            Sale.payment_method,
+            Sale.created_at,
+        )
+        .join(Product, Product.id == Sale.product_id)
+        .where(
+            Sale.user_id.in_(tenant_user_ids),
+            Sale.branch_id == active_branch_id,
+            Sale.customer_name.is_not(None),
+            func.lower(func.trim(Sale.customer_name)) == creditor.name.strip().lower(),
+        )
+        .order_by(Sale.created_at.desc(), Sale.id.desc())
+    ).all()
+
+    latest_receipt = None
+    if sales_rows:
+        first = sales_rows[0]
+        latest_group_key = str(first.client_sale_id).split(":")[0] if first.client_sale_id else None
+        latest_group_rows = [first]
+        if latest_group_key:
+            latest_group_rows = [row for row in sales_rows if row.client_sale_id and str(row.client_sale_id).split(":")[0] == latest_group_key]
+
+        latest_total = sum((Decimal(row.total_price or 0) for row in latest_group_rows), Decimal(0))
+        receipt_message_lines = [
+            f"Hi {creditor.name}, thanks for shopping with {current_user.business_name or 'our store'}.",
+            f"Receipt #{_receipt_number(first.client_sale_id, int(first.id))} on {first.created_at.strftime('%d/%m/%Y %H:%M')}",
+        ]
+        receipt_items = []
+        for row in latest_group_rows[:8]:
+            receipt_items.append(
+                {
+                    "sale_id": int(row.id),
+                    "product_id": int(row.product_id),
+                    "product_name": str(row.product_name),
+                    "quantity": float(row.quantity),
+                    "total_price": float(row.total_price),
+                }
+            )
+            receipt_message_lines.append(
+                f"- {row.product_name}: {_format_quantity(row.quantity)} unit(s) for {_format_money(Decimal(row.total_price or 0))}"
+            )
+
+        receipt_message_lines.append(f"Total: {_format_money(latest_total)}")
+        receipt_message_lines.append(f"Payment: {str(first.payment_method or 'cash').upper()}")
+        receipt_message = "\n".join(receipt_message_lines)
+
+        latest_receipt = {
+            "receipt_number": _receipt_number(first.client_sale_id, int(first.id)),
+            "purchased_at": first.created_at.isoformat(),
+            "payment_method": first.payment_method,
+            "sale_ids": [int(row.id) for row in latest_group_rows],
+            "total_amount": float(latest_total),
+            "items": receipt_items,
+            "message": receipt_message,
+            "whatsapp_url": _build_whatsapp_url(creditor.phone, receipt_message),
+        }
+
+    today = datetime.utcnow().date()
+    birthday_info = {
+        "birthday": creditor.birthday.isoformat() if creditor.birthday else None,
+        "next_occurrence": None,
+        "days_until": None,
+        "is_today": False,
+        "is_this_month": False,
+    }
+    if creditor.birthday:
+        next_birthday = _next_birthday_date(creditor.birthday, today)
+        birthday_info = {
+            "birthday": creditor.birthday.isoformat(),
+            "next_occurrence": next_birthday.isoformat(),
+            "days_until": (next_birthday - today).days,
+            "is_today": next_birthday == today,
+            "is_this_month": next_birthday.month == today.month,
+        }
+
+    product_stats: dict[int, dict[str, object]] = {}
+    for row in sales_rows:
+        item = product_stats.get(int(row.product_id))
+        purchase_date = row.created_at.date()
+        if item is None:
+            product_stats[int(row.product_id)] = {
+                "product_id": int(row.product_id),
+                "product_name": str(row.product_name),
+                "times_purchased": 1,
+                "total_quantity": Decimal(row.quantity or 0),
+                "last_purchased_at": row.created_at,
+                "purchase_dates": [purchase_date],
+            }
+            continue
+
+        item["times_purchased"] = int(item["times_purchased"]) + 1
+        item["total_quantity"] = Decimal(item["total_quantity"]) + Decimal(row.quantity or 0)
+        if row.created_at > item["last_purchased_at"]:
+            item["last_purchased_at"] = row.created_at
+        purchase_dates = item["purchase_dates"]
+        if purchase_date not in purchase_dates:
+            purchase_dates.append(purchase_date)
+
+    buy_again_suggestions: list[dict[str, object]] = []
+    for item in product_stats.values():
+        purchase_dates = sorted(item["purchase_dates"])
+        average_reorder_days = None
+        if len(purchase_dates) >= 2:
+            intervals = [max(1, (purchase_dates[index] - purchase_dates[index - 1]).days) for index in range(1, len(purchase_dates))]
+            average_reorder_days = round(sum(intervals) / len(intervals), 1)
+
+        last_purchased_at = item["last_purchased_at"]
+        days_since_last_purchase = max(0, (today - last_purchased_at.date()).days)
+        is_due = average_reorder_days is not None and days_since_last_purchase >= max(1, int(average_reorder_days * 0.8))
+        buy_again_suggestions.append(
+            {
+                "product_id": int(item["product_id"]),
+                "product_name": str(item["product_name"]),
+                "times_purchased": int(item["times_purchased"]),
+                "total_quantity": float(item["total_quantity"]),
+                "last_purchased_at": last_purchased_at.isoformat(),
+                "average_reorder_days": average_reorder_days,
+                "days_since_last_purchase": days_since_last_purchase,
+                "is_due": is_due,
+            }
+        )
+
+    buy_again_suggestions.sort(
+        key=lambda item: (
+            int(bool(item["is_due"])),
+            int(item["times_purchased"]),
+            item["last_purchased_at"],
+        ),
+        reverse=True,
+    )
+    buy_again_suggestions = buy_again_suggestions[:5]
+
+    favorite_names = ", ".join(item["product_name"] for item in buy_again_suggestions[:3])
+    debt_message = None
+    if outstanding > 0:
+        debt_message = (
+            f"Hi {creditor.name}, this is a friendly reminder from {current_user.business_name or 'our store'} "
+            f"that your outstanding balance is {_format_money(outstanding)}. "
+            "Please pass by the shop or reply to arrange payment. Thank you."
+        )
+
+    birthday_message = None
+    if creditor.birthday:
+        birthday_message = (
+            f"Happy Birthday, {creditor.name}! Thank you for being one of our {loyalty_level} customers at "
+            f"{current_user.business_name or 'our store'}. We would love to celebrate you with a special in-store offer this week."
+        )
+
+    promo_message = (
+        f"Hi {creditor.name}, thank you for shopping with {current_user.business_name or 'our store'}. "
+        f"You currently have {loyalty_points} loyalty points and {purchase_count} purchases with us. "
+        f"{('Your usual favorites include ' + favorite_names + '. ') if favorite_names else ''}"
+        "Visit us again this week for a thank-you offer on your next order."
+    )
+
+    return {
+        "customer": {
+            "id": creditor.id,
+            "name": creditor.name,
+            "phone": creditor.phone,
+            "email": creditor.email,
+            "birthday": creditor.birthday.isoformat() if creditor.birthday else None,
+            "notes": creditor.notes,
+        },
+        "summary": {
+            "outstanding": float(outstanding),
+            "total_purchases": float(total_spent),
+            "purchase_count": purchase_count,
+            "loyalty_points": loyalty_points,
+            "loyalty_level": loyalty_level,
+            "next_target": _loyalty_next_target(total_spent, purchase_count, outstanding),
+        },
+        "birthday": birthday_info,
+        "latest_receipt": latest_receipt,
+        "campaigns": {
+            "debt_reminder_message": debt_message,
+            "debt_reminder_whatsapp_url": _build_whatsapp_url(creditor.phone, debt_message),
+            "birthday_message": birthday_message,
+            "birthday_whatsapp_url": _build_whatsapp_url(creditor.phone, birthday_message),
+            "promo_message": promo_message,
+            "promo_whatsapp_url": _build_whatsapp_url(creditor.phone, promo_message),
+        },
+        "buy_again_suggestions": buy_again_suggestions,
+    }
+
 # Create creditor
 @router.post("")
 async def create_creditor(
@@ -292,9 +597,10 @@ async def create_creditor(
 ):
     ensure_permission(current_user, "manage_creditors")
     new_creditor = Creditor(
-        name=creditor.name,
+        name=creditor.name.strip(),
         phone=creditor.phone,
         email=creditor.email,
+        birthday=creditor.birthday,
         notes=creditor.notes,
         user_id=current_user.id,
         branch_id=active_branch_id,
@@ -325,15 +631,11 @@ async def update_creditor(
     if not existing:
         raise HTTPException(status_code=404, detail="Creditor not found")
     
-    # Update fields if provided
-    if creditor.name is not None:
-        existing.name = creditor.name
-    if creditor.phone is not None:
-        existing.phone = creditor.phone
-    if creditor.email is not None:
-        existing.email = creditor.email
-    if creditor.notes is not None:
-        existing.notes = creditor.notes
+    updates = creditor.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        if field == "name" and value is not None:
+            value = str(value).strip()
+        setattr(existing, field, value)
     
     db.commit()
     return {"message": "Creditor updated successfully"}

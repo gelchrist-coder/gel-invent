@@ -1,0 +1,2 @@
+ALTER TABLE creditors
+ADD COLUMN IF NOT EXISTS birthday DATE;

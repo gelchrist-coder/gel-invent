@@ -35,6 +35,7 @@ def _ensure_critical_auth_schema_sync() -> None:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_logo_url VARCHAR(512)"))
+        conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS birthday DATE"))
         conn.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id_unique "
@@ -230,6 +231,7 @@ def _run_startup_migrations_sync() -> None:
         conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
         conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS client_sale_id VARCHAR(80)"))
         conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
+        conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS birthday DATE"))
         conn.execute(text("ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
 
         # Offline/poor-network idempotency for sales

@@ -6,6 +6,7 @@ interface Creditor {
   name: string;
   phone: string | null;
   email: string | null;
+  birthday?: string | null;
   total_debt: number;
   actual_debt: number;
   total_purchases: number;

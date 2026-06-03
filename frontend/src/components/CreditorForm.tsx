@@ -9,6 +9,7 @@ interface CreditorFormProps {
     name: string;
     phone: string | null;
     email: string | null;
+    birthday?: string | null;
     notes: string | null;
   };
 }
@@ -18,6 +19,7 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
     name: creditor?.name || "",
     phone: creditor?.phone || "",
     email: creditor?.email || "",
+    birthday: creditor?.birthday || "",
     notes: creditor?.notes || "",
   });
   const [loading, setLoading] = useState(false);
@@ -46,6 +48,7 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
           name: formData.name.trim(),
           phone: formData.phone.trim() || null,
           email: formData.email.trim() || null,
+          birthday: formData.birthday || null,
           notes: formData.notes.trim() || null,
         }),
       });
@@ -151,6 +154,24 @@ export default function CreditorForm({ onClose, onSuccess, creditor }: CreditorF
                 fontSize: 14,
               }}
               placeholder="Enter email address"
+            />
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", marginBottom: 6, fontSize: 14, fontWeight: 500 }}>
+              Birthday
+            </label>
+            <input
+              type="date"
+              value={formData.birthday}
+              onChange={(e) => setFormData({ ...formData, birthday: e.target.value })}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                border: "1px solid #d1d5db",
+                borderRadius: 6,
+                fontSize: 14,
+              }}
             />
           </div>
 
