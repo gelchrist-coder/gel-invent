@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { API_BASE, warmBackend } from "../api";
 import appLogo from "../asset/logo.png";
-import wareImage from "../asset/Ware.jpg";
+import wareImage from "../asset/Ware.png";
 
 function loadRecaptchaScript(): Promise<void> {
   if (typeof window === "undefined") {
