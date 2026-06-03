@@ -399,6 +399,16 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
+    // Warm the backend DB path in the background so first authenticated data
+    // fan-out is less likely to hit cold-start timeout edges.
+    void warmBackend("/health/db", true, {
+      timeoutMs: 90000,
+      probeTimeoutMs: 35000,
+      retryIntervalMs: 2000,
+    }).catch(() => {
+      // Keep startup non-blocking; regular fetch retries still handle failures.
+    });
+
     if (prefetchedBranchRef.current === activeBranchId) return;
     prefetchedBranchRef.current = activeBranchId;
 
