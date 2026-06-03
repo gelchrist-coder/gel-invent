@@ -1,11 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NewSale, Product } from "../types";
 import { useAppCategories } from "../categories";
+
+type RepeatDraft = {
+  token: string;
+  sales: NewSale[];
+  sourceLabel?: string;
+};
 
 type POSSaleFormProps = {
   products: Product[];
   onSubmit: (sales: NewSale[]) => void;
   onCancel?: () => void;
+  customerSuggestions?: string[];
+  repeatDraft?: RepeatDraft | null;
 };
 
 interface CartItem {
@@ -15,18 +23,59 @@ interface CartItem {
 }
 
 const PAYMENT_METHODS = ["cash", "card", "mobile money", "bank transfer", "credit"];
+const SUSPENDED_CARTS_STORAGE_KEY = "pos_suspended_carts_v1";
+const MAX_SUSPENDED_CARTS = 20;
 
-export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }: POSSaleFormProps) {
+type SuspendedCartLine = {
+  product_id: number;
+  quantity: number;
+  sellingUnit: "piece" | "pack";
+};
+
+type SuspendedCart = {
+  id: string;
+  label: string;
+  createdAt: number;
+  lines: SuspendedCartLine[];
+  customerName: string;
+  paymentMethod: string;
+  notes: string;
+  amountReceived: string;
+};
+
+export default function POSSaleForm({
+  products,
+  onSubmit,
+  onCancel: _onCancel,
+  customerSuggestions = [],
+  repeatDraft = null,
+}: POSSaleFormProps) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [scanInput, setScanInput] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [notes, setNotes] = useState("");
   const [uiMessage, setUiMessage] = useState<{ type: "error" | "info"; text: string } | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [suspendedCarts, setSuspendedCarts] = useState<SuspendedCart[]>([]);
+  const [selectedSuspendedCartId, setSelectedSuspendedCartId] = useState("");
 
   const messageTimeoutRef = useRef<number | null>(null);
   const customerInputRef = useRef<HTMLInputElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const scanInputRef = useRef<HTMLInputElement | null>(null);
+  const amountReceivedInputRef = useRef<HTMLInputElement | null>(null);
+  const checkoutFormRef = useRef<HTMLFormElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraFrameRef = useRef<number | null>(null);
+  const lastAppliedRepeatTokenRef = useRef<string | null>(null);
+  const handleScannedCodeRef = useRef<(value: string, source: "scanner" | "camera") => void>(() => {});
+  const suspendCurrentCartRef = useRef<() => void>(() => {});
+  const restoreSuspendedCartRef = useRef<(cartId: string) => void>(() => {});
 
   const userCategories = useAppCategories();
   const [amountReceived, setAmountReceived] = useState("");
@@ -37,6 +86,15 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const [creditorPhone, setCreditorPhone] = useState("");
   const [initialPayment, setInitialPayment] = useState<number>(0);
 
+  const customerLookupSuggestions = useMemo(() => {
+    const query = customerName.trim().toLowerCase();
+    const unique = Array.from(new Set(customerSuggestions.map((name) => String(name || "").trim()).filter(Boolean)));
+    if (!query) {
+      return unique.slice(0, 8);
+    }
+    return unique.filter((name) => name.toLowerCase().includes(query)).slice(0, 8);
+  }, [customerName, customerSuggestions]);
+
   useEffect(() => {
     return () => {
       if (messageTimeoutRef.current != null) {
@@ -45,7 +103,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     };
   }, []);
 
-  const showMessage = (text: string, type: "error" | "info" = "error") => {
+  const showMessage = useCallback((text: string, type: "error" | "info" = "error") => {
     setUiMessage({ type, text });
     if (messageTimeoutRef.current != null) {
       window.clearTimeout(messageTimeoutRef.current);
@@ -54,7 +112,134 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
       setUiMessage(null);
       messageTimeoutRef.current = null;
     }, 3500);
+  }, []);
+
+  const persistSuspendedCarts = (next: SuspendedCart[]) => {
+    setSuspendedCarts(next);
+    try {
+      localStorage.setItem(SUSPENDED_CARTS_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Ignore persistence failures so checkout flow stays responsive.
+    }
   };
+
+  const stopCameraScanner = useCallback(() => {
+    if (cameraFrameRef.current != null) {
+      window.cancelAnimationFrame(cameraFrameRef.current);
+      cameraFrameRef.current = null;
+    }
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+  }, []);
+
+  const findProductFromScan = (rawScanValue: string): Product | null => {
+    const normalized = rawScanValue.trim().toLowerCase();
+    if (!normalized) return null;
+
+    const exactSku = products.find((product) => String(product.sku || "").trim().toLowerCase() === normalized);
+    if (exactSku) return exactSku;
+
+    const exactName = products.find((product) => String(product.name || "").trim().toLowerCase() === normalized);
+    if (exactName) return exactName;
+
+    const startsWithSku = products.find((product) => String(product.sku || "").trim().toLowerCase().startsWith(normalized));
+    if (startsWithSku) return startsWithSku;
+
+    return null;
+  };
+
+  const handleScannedCode = (rawScanValue: string, source: "scanner" | "camera") => {
+    const value = rawScanValue.trim();
+    if (!value) return;
+
+    const matchedProduct = findProductFromScan(value);
+    if (matchedProduct) {
+      addToCart(matchedProduct, "piece");
+      setSearchTerm(matchedProduct.name);
+      setScanInput("");
+      showMessage(`Added ${matchedProduct.name} from ${source}`, "info");
+      return;
+    }
+
+    setSearchTerm(value);
+    showMessage(`No exact barcode match. Filtered catalog by \"${value}\".`, "info");
+  };
+
+  const suspendCurrentCart = () => {
+    if (cart.length === 0) {
+      showMessage("Add at least one item before suspending.");
+      return;
+    }
+
+    const now = Date.now();
+    const id = (globalThis.crypto as Crypto | undefined)?.randomUUID?.() ?? `suspend-${now}`;
+    const firstProduct = cart[0]?.product?.name || "Quick cart";
+    const snapshot: SuspendedCart = {
+      id,
+      label: customerName.trim() || `${firstProduct} (${cart.length} item${cart.length === 1 ? "" : "s"})`,
+      createdAt: now,
+      lines: cart.map((item) => ({
+        product_id: item.product.id,
+        quantity: item.quantity,
+        sellingUnit: item.sellingUnit,
+      })),
+      customerName,
+      paymentMethod,
+      notes,
+      amountReceived,
+    };
+
+    const next = [snapshot, ...suspendedCarts].slice(0, MAX_SUSPENDED_CARTS);
+    persistSuspendedCarts(next);
+    setSelectedSuspendedCartId(snapshot.id);
+    clearCart();
+    showMessage(`Cart suspended as \"${snapshot.label}\".`, "info");
+  };
+
+  const restoreSuspendedCart = (cartId: string) => {
+    if (!cartId) return;
+    const snapshot = suspendedCarts.find((entry) => entry.id === cartId);
+    if (!snapshot) {
+      showMessage("Suspended cart not found.");
+      return;
+    }
+
+    const restoredLines: CartItem[] = snapshot.lines
+      .map((line) => {
+        const product = products.find((entry) => entry.id === line.product_id);
+        if (!product) {
+          return null;
+        }
+        return {
+          product,
+          quantity: Math.max(0.01, Number(line.quantity) || 0),
+          sellingUnit: line.sellingUnit,
+        } as CartItem;
+      })
+      .filter((line): line is CartItem => line !== null);
+
+    if (restoredLines.length === 0) {
+      showMessage("Could not restore this cart because its products are missing.");
+      return;
+    }
+
+    setCart(restoredLines);
+    setCustomerName(snapshot.customerName || "");
+    setPaymentMethod(snapshot.paymentMethod || "cash");
+    setNotes(snapshot.notes || "");
+    setAmountReceived(snapshot.amountReceived || "");
+
+    const next = suspendedCarts.filter((entry) => entry.id !== cartId);
+    persistSuspendedCarts(next);
+    setSelectedSuspendedCartId("");
+    showMessage(`Resumed \"${snapshot.label}\".`, "info");
+  };
+
+  handleScannedCodeRef.current = handleScannedCode;
+  suspendCurrentCartRef.current = suspendCurrentCart;
+  restoreSuspendedCartRef.current = restoreSuspendedCart;
 
   // Get categories from user registration + existing products
   const categories = [
@@ -169,6 +354,8 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
     setCustomerName("");
     setPaymentMethod("cash");
     setNotes("");
+    setScanInput("");
+    setSearchTerm("");
     setAmountReceived("");
     setCreditorName("");
     setCreditorPhone("");
@@ -196,6 +383,215 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
   const applyQuickTender = (extra: number) => {
     setAmountReceived((cartTotal + extra).toFixed(2));
   };
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SUSPENDED_CARTS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as SuspendedCart[];
+      if (!Array.isArray(parsed)) return;
+      setSuspendedCarts(parsed);
+    } catch {
+      // Ignore malformed local state so POS can still load.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!cameraOpen) {
+      stopCameraScanner();
+      return;
+    }
+
+    let cancelled = false;
+
+    const startCamera = async () => {
+      setCameraError(null);
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setCameraError("Camera scanning is not supported on this browser.");
+          return;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+        });
+
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        cameraStreamRef.current = stream;
+        const video = cameraVideoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          await video.play().catch(() => {
+            // Ignore autoplay errors and continue.
+          });
+        }
+
+        const BarcodeDetectorApi = (window as typeof window & { BarcodeDetector?: new (config?: { formats?: string[] }) => { detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
+        if (!BarcodeDetectorApi) {
+          setCameraError("BarcodeDetector is not available. Use scanner input instead.");
+          return;
+        }
+
+        const detector = new BarcodeDetectorApi({
+          formats: ["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e", "qr_code"],
+        });
+
+        const detectFrame = async () => {
+          if (cancelled || !cameraOpen) return;
+          const activeVideo = cameraVideoRef.current;
+          if (!activeVideo || activeVideo.readyState < 2) {
+            cameraFrameRef.current = window.requestAnimationFrame(() => {
+              void detectFrame();
+            });
+            return;
+          }
+
+          try {
+            const results = await detector.detect(activeVideo);
+            const rawValue = String(results[0]?.rawValue || "").trim();
+            if (rawValue) {
+              handleScannedCodeRef.current(rawValue, "camera");
+              setCameraOpen(false);
+              return;
+            }
+          } catch {
+            // Keep scanning even if a frame fails.
+          }
+
+          cameraFrameRef.current = window.requestAnimationFrame(() => {
+            void detectFrame();
+          });
+        };
+
+        void detectFrame();
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unable to access camera.";
+        setCameraError(text);
+      }
+    };
+
+    void startCamera();
+
+    return () => {
+      cancelled = true;
+      stopCameraScanner();
+    };
+  }, [cameraOpen, stopCameraScanner]);
+
+  useEffect(() => {
+    if (!repeatDraft || !repeatDraft.token || lastAppliedRepeatTokenRef.current === repeatDraft.token) {
+      return;
+    }
+
+    const restored: CartItem[] = repeatDraft.sales
+      .map((line) => {
+        const product = products.find((entry) => entry.id === line.product_id);
+        if (!product) return null;
+
+        const sellingUnit = line.sale_unit_type === "pack" ? "pack" : "piece";
+        const fallbackPackQty = sellingUnit === "pack"
+          ? Math.max(1, Math.round((Number(line.quantity) || 0) / Math.max(1, Number(product.pack_size || 1))))
+          : 0;
+        const quantity = sellingUnit === "pack"
+          ? Number(line.pack_quantity ?? fallbackPackQty)
+          : Number(line.quantity || 0);
+
+        if (!Number.isFinite(quantity) || quantity <= 0) return null;
+        return { product, quantity, sellingUnit } as CartItem;
+      })
+      .filter((entry): entry is CartItem => entry !== null);
+
+    if (!restored.length) {
+      showMessage("Could not repeat sale because items are unavailable.");
+      return;
+    }
+
+    setCart(restored);
+    setPaymentMethod(repeatDraft.sales[0]?.payment_method || "cash");
+    setCustomerName(String(repeatDraft.sales[0]?.customer_name || ""));
+    setNotes(String(repeatDraft.sales[0]?.notes || ""));
+    setAmountReceived("");
+    setSearchTerm("");
+    lastAppliedRepeatTokenRef.current = repeatDraft.token;
+    showMessage(`Loaded repeat sale${repeatDraft.sourceLabel ? ` from ${repeatDraft.sourceLabel}` : ""}.`, "info");
+  }, [repeatDraft, products, showMessage]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = !!target && (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable
+      );
+
+      if (event.ctrlKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      if (event.ctrlKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        scanInputRef.current?.focus();
+        scanInputRef.current?.select();
+        return;
+      }
+
+      if (event.ctrlKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        customerInputRef.current?.focus();
+        customerInputRef.current?.select();
+        return;
+      }
+
+      if (event.altKey && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        suspendCurrentCartRef.current();
+        return;
+      }
+
+      if (event.altKey && event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        if (suspendedCarts[0]) {
+          restoreSuspendedCartRef.current(suspendedCarts[0].id);
+        } else {
+          showMessage("No suspended carts available.", "info");
+        }
+        return;
+      }
+
+      if (event.key === "F2" && paymentMethod === "cash") {
+        event.preventDefault();
+        amountReceivedInputRef.current?.focus();
+        amountReceivedInputRef.current?.select();
+        return;
+      }
+
+      if (event.key === "F4") {
+        event.preventDefault();
+        checkoutFormRef.current?.requestSubmit();
+        return;
+      }
+
+      if (event.key === "Escape" && cameraOpen) {
+        event.preventDefault();
+        setCameraOpen(false);
+        return;
+      }
+
+      if (isTyping) return;
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [cameraOpen, paymentMethod, showMessage, suspendedCarts]);
 
   // Submit order
   const handleSubmit = (e: React.FormEvent) => {
@@ -323,11 +719,56 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
       {/* Left Side - Product Selection */}
       <div className="pos-left">
         {/* Search Bar */}
-        <div style={{ marginBottom: 8 }}>
+        <div style={{ marginBottom: 8, display: "grid", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input
+              type="text"
+              placeholder="Scan barcode or SKU then press Enter"
+              value={scanInput}
+              ref={scanInputRef}
+              onChange={(e) => setScanInput(e.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                handleScannedCode(scanInput, "scanner");
+              }}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                border: "1px solid #dbeafe",
+                borderRadius: 6,
+                fontSize: 13,
+                background: "#f8fbff",
+                outline: "none",
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setCameraError(null);
+                setCameraOpen(true);
+              }}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 6,
+                border: "1px solid #bfdbfe",
+                background: "#eff6ff",
+                color: "#1d4ed8",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Camera
+            </button>
+          </div>
+
           <input
             type="text"
             placeholder="Search products..."
             value={searchTerm}
+            ref={searchInputRef}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={{
               width: "100%",
@@ -443,6 +884,93 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 14, fontWeight: 600 }}>Order</span>
             <span style={{ fontSize: 13, opacity: 0.8 }}>{formattedTotalItems} items</span>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={suspendCurrentCart}
+              style={{
+                border: "1px solid rgba(255,255,255,0.25)",
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.15)",
+                color: "white",
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "4px 10px",
+                cursor: "pointer",
+              }}
+            >
+              Suspend (Alt+S)
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (suspendedCarts[0]) {
+                  restoreSuspendedCart(suspendedCarts[0].id);
+                  return;
+                }
+                showMessage("No suspended carts available.", "info");
+              }}
+              style={{
+                border: "1px solid rgba(255,255,255,0.25)",
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.08)",
+                color: "white",
+                fontSize: 11,
+                fontWeight: 700,
+                padding: "4px 10px",
+                cursor: "pointer",
+              }}
+            >
+              Resume Last (Alt+R)
+            </button>
+          </div>
+
+          {suspendedCarts.length > 0 && (
+            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+              <select
+                value={selectedSuspendedCartId}
+                onChange={(event) => setSelectedSuspendedCartId(event.target.value)}
+                style={{
+                  flex: 1,
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  borderRadius: 6,
+                  background: "rgba(255,255,255,0.08)",
+                  color: "white",
+                  fontSize: 12,
+                  padding: "6px 8px",
+                }}
+              >
+                <option value="" style={{ color: "#111827" }}>Select suspended cart</option>
+                {suspendedCarts.map((entry) => (
+                  <option key={entry.id} value={entry.id} style={{ color: "#111827" }}>
+                    {entry.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => restoreSuspendedCart(selectedSuspendedCartId)}
+                disabled={!selectedSuspendedCartId}
+                style={{
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  borderRadius: 6,
+                  background: selectedSuspendedCartId ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.08)",
+                  color: "white",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  padding: "6px 10px",
+                  cursor: selectedSuspendedCartId ? "pointer" : "not-allowed",
+                }}
+              >
+                Load
+              </button>
+            </div>
+          )}
+
+          <div style={{ marginTop: 8, fontSize: 11, opacity: 0.85 }}>
+            Shortcuts: Ctrl+F search, Ctrl+B scan, Ctrl+K customer, F2 cash, F4 charge.
           </div>
         </div>
 
@@ -623,6 +1151,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
           >
               <form
                 className="pos-checkout"
+                ref={checkoutFormRef}
                 onSubmit={handleSubmit}
               >
                 {/* Total */}
@@ -675,6 +1204,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                     onChange={(e) => setCustomerName(e.target.value)}
                     placeholder={paymentMethod === "credit" ? "Customer name (required)" : "Customer name (optional)"}
                     ref={customerInputRef}
+                    list="quick-customer-lookup"
                     style={{
                       width: "100%",
                       padding: "10px 12px",
@@ -684,6 +1214,34 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                       background: paymentMethod === "credit" ? "#fffbeb" : "white",
                     }}
                   />
+                  <datalist id="quick-customer-lookup">
+                    {customerLookupSuggestions.map((suggestion) => (
+                      <option key={suggestion} value={suggestion} />
+                    ))}
+                  </datalist>
+                  {customerLookupSuggestions.length > 0 && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                      {customerLookupSuggestions.slice(0, 5).map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => setCustomerName(suggestion)}
+                          style={{
+                            border: "1px solid #d1d5db",
+                            borderRadius: 999,
+                            background: "white",
+                            color: "#374151",
+                            fontSize: 11,
+                            padding: "4px 9px",
+                            cursor: "pointer",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {paymentMethod === "cash" && (
@@ -705,6 +1263,7 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
                       step="0.01"
                       min="0"
                       value={amountReceived}
+                      ref={amountReceivedInputRef}
                       onChange={(e) => setAmountReceived(e.target.value)}
                       placeholder={`Exact: ${cartTotal.toFixed(2)}`}
                       style={{
@@ -778,6 +1337,71 @@ export default function POSSaleForm({ products, onSubmit, onCancel: _onCancel }:
           </div>
         )}
       </div>
+
+      {/* Camera Scanner Modal */}
+      {cameraOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(15, 23, 42, 0.78)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1050,
+            padding: 16,
+          }}
+          onClick={() => setCameraOpen(false)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              background: "#020617",
+              borderRadius: 12,
+              border: "1px solid #1e293b",
+              padding: 14,
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <h3 style={{ margin: 0, fontSize: 16, color: "#e2e8f0" }}>Scan Barcode</h3>
+              <button
+                type="button"
+                onClick={() => setCameraOpen(false)}
+                style={{
+                  border: "1px solid #334155",
+                  borderRadius: 6,
+                  background: "#0f172a",
+                  color: "#e2e8f0",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  padding: "6px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <video
+              ref={cameraVideoRef}
+              autoPlay
+              muted
+              playsInline
+              style={{ width: "100%", borderRadius: 10, background: "#0b1220", minHeight: 280, objectFit: "cover" }}
+            />
+            <p style={{ margin: "10px 0 0", fontSize: 12, color: "#94a3b8" }}>
+              Align barcode inside the frame. Scan auto-adds one item to cart.
+            </p>
+            {cameraError ? (
+              <p style={{ margin: "8px 0 0", fontSize: 12, color: "#fca5a5" }}>{cameraError}</p>
+            ) : null}
+          </div>
+        </div>
+      )}
 
       {/* Credit Modal */}
       {showCreditModal && (

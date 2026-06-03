@@ -11,6 +11,7 @@ type SalesListProps = {
   allowDelete?: boolean;
   onPrintReceipt?: (transaction: SaleTransaction) => void;
   onConvertWalkIn?: (transaction: SaleTransaction) => void;
+  onRepeatSale?: (transaction: SaleTransaction) => void;
 };
 
 const WALK_IN_NAMES = new Set(["walk in", "walk in customer", "walkin", "guest", "anonymous"]);
@@ -22,7 +23,7 @@ function isWalkInSaleName(customerName: string | null | undefined): boolean {
   return WALK_IN_NAMES.has(normalized);
 }
 
-export default function SalesList({ sales, products, onDelete, onRefresh, allowDelete = false, onPrintReceipt, onConvertWalkIn }: SalesListProps) {
+export default function SalesList({ sales, products, onDelete, onRefresh, allowDelete = false, onPrintReceipt, onConvertWalkIn, onRepeatSale }: SalesListProps) {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [returnSale, setReturnSale] = useState<Sale | null>(null);
   const [expandedTransactionKey, setExpandedTransactionKey] = useState<string | null>(null);
@@ -212,6 +213,24 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                             }}
                           >
                             Receipt
+                          </button>
+                        )}
+                        {onRepeatSale && (
+                          <button
+                            type="button"
+                            onClick={() => onRepeatSale(transaction)}
+                            style={{
+                              padding: "5px 10px",
+                              borderRadius: 4,
+                              border: "1px solid #bbf7d0",
+                              backgroundColor: "#f0fdf4",
+                              color: "#166534",
+                              cursor: "pointer",
+                              fontSize: "0.8125rem",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Repeat Sale
                           </button>
                         )}
                         {onConvertWalkIn && isWalkInSaleName(transaction.customer_name) && (

@@ -86,6 +86,7 @@ export default function Sales() {
   const [assignCustomerNotes, setAssignCustomerNotes] = useState("");
   const [assignCustomerError, setAssignCustomerError] = useState<string | null>(null);
   const [assigningCustomer, setAssigningCustomer] = useState(false);
+  const [repeatDraft, setRepeatDraft] = useState<{ token: string; sales: NewSale[]; sourceLabel?: string } | null>(null);
   const hasLoadedOnce = useRef(false);
 
   // Get user and business info for receipt
@@ -672,6 +673,47 @@ export default function Sales() {
     [filteredSales],
   );
 
+  const quickCustomerSuggestions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const sale of sales) {
+      const customer = String(sale.customer_name || "").trim();
+      if (!customer || isWalkInCustomerName(customer)) continue;
+      counts.set(customer, (counts.get(customer) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((left, right) => right[1] - left[1])
+      .map(([name]) => name)
+      .slice(0, 30);
+  }, [sales]);
+
+  const handleRepeatSale = (transaction: SaleTransaction) => {
+    const mappedSales: NewSale[] = transaction.sales.map((sale) => ({
+      product_id: sale.product_id,
+      quantity: Number(sale.quantity || 0),
+      sale_unit_type: sale.sale_unit_type,
+      pack_quantity: sale.pack_quantity ?? undefined,
+      unit_price: Number(sale.unit_price || 0),
+      total_price: Number(sale.total_price || 0),
+      customer_name: sale.customer_name ?? null,
+      payment_method: sale.payment_method || "cash",
+      notes: sale.notes ?? null,
+      amount_paid: sale.amount_paid ?? undefined,
+      partial_payment_method: sale.partial_payment_method ?? undefined,
+    }));
+
+    if (mappedSales.length === 0) {
+      return;
+    }
+
+    const token = `repeat:${transaction.key}:${Date.now()}`;
+    setRepeatDraft({
+      token,
+      sales: mappedSales,
+      sourceLabel: `receipt #${transaction.receiptNumber}`,
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const salesKpiItems = useMemo(
     () => [
       {
@@ -833,7 +875,12 @@ export default function Sales() {
         {products.length === 0 && loading ? (
           <p style={{ margin: 0, color: "#6b7280" }}>Loading products...</p>
         ) : (
-          <POSSaleForm products={products} onSubmit={handleCreateSale} />
+          <POSSaleForm
+            products={products}
+            onSubmit={handleCreateSale}
+            customerSuggestions={quickCustomerSuggestions}
+            repeatDraft={repeatDraft}
+          />
         )}
       </div>
 
@@ -1007,6 +1054,7 @@ export default function Sales() {
               allowDelete={canDeleteSales}
               onPrintReceipt={reprintSaleReceipt}
               onConvertWalkIn={openAssignCustomerModal}
+              onRepeatSale={handleRepeatSale}
             />
           </>
         )}
@@ -1584,6 +1632,7 @@ export default function Sales() {
                 allowDelete={canDeleteSales}
                 onPrintReceipt={reprintSaleReceipt}
                 onConvertWalkIn={openAssignCustomerModal}
+                onRepeatSale={handleRepeatSale}
               />
             </div>
           </div>
