@@ -1,26 +1,35 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, updateProduct, getCachedProducts, clearDataCache } from "./api";
+import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, updateProduct, getCachedProducts, clearDataCache, isTemporaryServerDelayError, warmBackend } from "./api";
 import Layout from "./components/Layout";
 import { getSalesOutboxCount } from "./offline/storage";
 import { syncSalesOutboxOnce } from "./offline/sync";
-import ProductForm from "./components/ProductForm";
-import ProductList from "./components/ProductList";
 import { useAppCategories } from "./categories";
 import { updateMyCategories } from "./api";
 import { Branch, NewProduct, Product, Supplier } from "./types";
-import Creditors from "./views/Creditors";
-import Dashboard from "./views/Dashboard";
-import Inventory from "./views/Inventory";
-import Invoice from "./views/Invoice";
-import Login from "./views/Login";
-import Profile from "./views/Profile";
-import Reports from "./views/Reports";
-import RevenueAnalysis from "./views/RevenueAnalysis";
-import Sales from "./views/Sales";
-import UserManagement from "./views/UserManagement";
 import { useExpiryTracking } from "./settings";
 import { getEffectiveUserRole, hasUserPermission, readStoredUser } from "./user-storage";
+
+const ProductForm = lazy(() => import("./components/ProductForm"));
+const ProductList = lazy(() => import("./components/ProductList"));
+const Creditors = lazy(() => import("./views/Creditors"));
+const Dashboard = lazy(() => import("./views/Dashboard"));
+const Inventory = lazy(() => import("./views/Inventory"));
+const Invoice = lazy(() => import("./views/Invoice"));
+const Login = lazy(() => import("./views/Login"));
+const Profile = lazy(() => import("./views/Profile"));
+const Reports = lazy(() => import("./views/Reports"));
+const RevenueAnalysis = lazy(() => import("./views/RevenueAnalysis"));
+const Sales = lazy(() => import("./views/Sales"));
+const UserManagement = lazy(() => import("./views/UserManagement"));
+
+function LazyViewFallback() {
+  return (
+    <div className="card" style={{ margin: 16, padding: 18, color: "#64748b" }}>
+      Loading...
+    </div>
+  );
+}
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("token"));
@@ -313,9 +322,43 @@ export default function App() {
         } else {
           localStorage.removeItem("activeBranchId");
         }
-      } catch {
-        // Branches are optional UI; backend may deny for some roles.
+      } catch (error) {
+        if (isTemporaryServerDelayError(error)) {
+          const isReady = await warmBackend("/health/db", true, {
+            timeoutMs: 90000,
+            probeTimeoutMs: 35000,
+            retryIntervalMs: 2000,
+          });
+
+          if (isReady) {
+            try {
+              const data = await fetchBranchesCached((fresh) => setBranches(fresh));
+              setBranches(data);
+
+              const existing = activeBranchId;
+              const existingBranch = existing != null ? data.find((b) => b.id === existing) : undefined;
+              if (existingBranch) {
+                return;
+              }
+
+              const nextId = data[0]?.id ?? null;
+              setActiveBranchId(nextId);
+              if (nextId != null) {
+                localStorage.setItem("activeBranchId", String(nextId));
+              } else {
+                localStorage.removeItem("activeBranchId");
+              }
+              return;
+            } catch {
+              // Fall through to stale-branch cleanup below.
+            }
+          }
+        }
+
+        // Branches are optional UI, but stale branch headers can break all data reads.
         setBranches([]);
+        setActiveBranchId(null);
+        localStorage.removeItem("activeBranchId");
       }
     };
 
@@ -343,6 +386,8 @@ export default function App() {
         })
         .catch(() => {
           setBranches([]);
+          setActiveBranchId(null);
+          localStorage.removeItem("activeBranchId");
         });
     };
 
@@ -619,7 +664,11 @@ export default function App() {
 
   // Show login page if not authenticated
   if (!isAuthenticated) {
-    return <Login onLogin={handleLogin} />;
+    return (
+      <Suspense fallback={<LazyViewFallback />}>
+        <Login onLogin={handleLogin} />
+      </Suspense>
+    );
   }
 
   const handleCreateProduct = async (payload: NewProduct, branchIdOverride?: number | null) => {
@@ -1115,7 +1164,9 @@ export default function App() {
       activeBranchId={activeBranchId}
       onChangeBranch={canManageBranches ? handleChangeBranch : undefined}
     >
-      {renderView(activeView)}
+      <Suspense fallback={<LazyViewFallback />}>
+        {renderView(activeView)}
+      </Suspense>
     </Layout>
   );
 }
