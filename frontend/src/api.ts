@@ -61,6 +61,7 @@ const REQUEST_TIMEOUT_MS = 25000;
 const GET_REQUEST_TIMEOUT_MS = 35000;
 const GET_RETRY_ATTEMPTS = 1;
 const STARTUP_REQUEST_TIMEOUT_MS = GET_REQUEST_TIMEOUT_MS;
+const REPORT_REQUEST_TIMEOUT_MS = 60000;
 export const TEMPORARY_SERVER_DELAY_MESSAGE = "Server is taking longer than expected. Please tap Retry.";
 export const PURCHASE_RETURNS_NOT_SUPPORTED_MESSAGE = "Purchase returns are not available on this deployment yet.";
 const STARTUP_RETRY_STATUS_CODES = new Set([500, 502, 503, 504]);
@@ -1405,7 +1406,7 @@ export async function fetchSalesDashboard(filterDate?: string): Promise<JsonObje
     : "/reports/sales-dashboard";
   
   const data = await jsonRequestWithBehavior<JsonObject>(url, undefined, {
-    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS,
+    timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
     retries: 1,
   });
   
@@ -1418,14 +1419,14 @@ export async function fetchSalesDashboard(filterDate?: string): Promise<JsonObje
 
 export async function fetchInventoryStatusReport(): Promise<JsonObject> {
   return jsonRequestWithBehavior<JsonObject>("/reports/inventory-status", undefined, {
-    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS,
+    timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
     retries: 1,
   });
 }
 
 export async function fetchCreditorsSummaryReport(): Promise<JsonObject> {
   return jsonRequestWithBehavior<JsonObject>("/reports/creditors-summary", undefined, {
-    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS,
+    timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
     retries: 1,
   });
 }
