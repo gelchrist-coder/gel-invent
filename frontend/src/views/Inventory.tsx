@@ -96,9 +96,9 @@ export default function Inventory() {
       if (allowWarmRetry && isTemporaryServerDelayError(err)) {
         setWarmingUp(true);
         const isReady = await warmBackend("/health/db", true, {
-          timeoutMs: 30000,
-          probeTimeoutMs: 10000,
-          retryIntervalMs: 1500,
+          timeoutMs: 90000,
+          probeTimeoutMs: 35000,
+          retryIntervalMs: 2000,
         });
         if (isReady) {
           await loadData(false);

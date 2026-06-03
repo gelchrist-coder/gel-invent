@@ -1,42 +1,35 @@
-import { Branch, NewMovement, NewProduct, NewPurchase, NewPurchaseOrder, NewPurchaseReturn, NewSale, NewSupplier, NewSupplierPayment, Product, Purchase, PurchaseOrder, PurchaseReturn, Sale, StockMovement, Supplier, SupplierDetail, SupplierPayment, SupplierUpdate } from "./types";
+import {
+  Branch,
+  NewMovement,
+  NewProduct,
+  NewPurchaseOrder,
+  NewPurchaseReturn,
+  NewSale,
+  NewSupplier,
+  NewSupplierPayment,
+  Product,
+  Purchase,
+  PurchaseOrder,
+  PurchaseReturn,
+  Sale,
+  StockMovement,
+  Supplier,
+  SupplierPayment,
+} from "./types";
 
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
-function isHostedVercelFrontend(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  return window.location.hostname.endsWith(".vercel.app");
-}
-
 function resolveApiBaseUrl(): string {
   const configured = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
 
-  // Use the same-origin /api proxy by default. The Vercel frontend rewrites
-  // /api/* to the backend, avoiding CORS preflights for authenticated requests.
+  // Use same-origin proxy by default so preview/staging deployments avoid CORS issues.
   if (!configured || configured === "https://your-backend.vercel.app") {
     return "/api";
   }
 
-  // Strip trailing /api if someone included it in the URL — backend routes
-  // are mounted at /products, /sales etc., not /api/products, /api/sales.
-  const normalized = configured.replace(/\/api\/?$/, "");
-
-  if (isHostedVercelFrontend()) {
-    try {
-      const configuredUrl = new URL(normalized);
-      if (configuredUrl.origin !== window.location.origin) {
-        return "/api";
-      }
-    } catch {
-      // Non-URL values like /api should flow through unchanged below.
-    }
-  }
-
-  return normalized;
+  return configured;
 }
 
 // API base URL (configure via VITE_API_URL on Vercel/Netlify/etc)
@@ -56,17 +49,13 @@ type CacheEntry<T> = {
 const dataCache = new Map<string, CacheEntry<unknown>>();
 const CACHE_TTL = 30000; // 30 seconds - data is considered fresh
 const inflightGetRequests = new Map<string, Promise<unknown>>();
-const inflightWarmupRequests = new Map<string, Promise<boolean>>();
 const REQUEST_TIMEOUT_MS = 25000;
-const GET_REQUEST_TIMEOUT_MS = 35000;
-const GET_RETRY_ATTEMPTS = 1;
-const STARTUP_REQUEST_TIMEOUT_MS = GET_REQUEST_TIMEOUT_MS;
 const REPORT_REQUEST_TIMEOUT_MS = 60000;
-export const TEMPORARY_SERVER_DELAY_MESSAGE = "Server is taking longer than expected. Please tap Retry.";
-export const PURCHASE_RETURNS_NOT_SUPPORTED_MESSAGE = "Purchase returns are not available on this deployment yet.";
-const STARTUP_RETRY_STATUS_CODES = new Set([500, 502, 503, 504]);
-let purchaseReturnsSupportCache: boolean | null = null;
-let purchaseReturnsSupportPromise: Promise<boolean> | null = null;
+const GET_RETRY_ATTEMPTS = 1;
+const COLD_START_RETRY_STATUS_CODES = new Set([500, 502, 503, 504]);
+const COLD_START_WARM_TIMEOUT_MS = 90000;
+const COLD_START_WARM_PROBE_TIMEOUT_MS = 35000;
+const COLD_START_WARM_RETRY_INTERVAL_MS = 2000;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -76,103 +65,19 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-export function isTemporaryServerDelayError(error: unknown): boolean {
-  return error instanceof Error && error.message === TEMPORARY_SERVER_DELAY_MESSAGE;
-}
-
-export function warmBackend(
-  path: string = "/health/db",
-  force = false,
-  options?: { timeoutMs?: number; probeTimeoutMs?: number; retryIntervalMs?: number },
-): Promise<boolean> {
-  const separator = path.includes("?") ? "&" : "?";
-  const existing = inflightWarmupRequests.get(path);
-  const timeoutMs = Math.max(1000, options?.timeoutMs ?? 30000);
-  const probeTimeoutMs = Math.max(1000, Math.min(timeoutMs, options?.probeTimeoutMs ?? 10000));
-  const retryIntervalMs = Math.max(250, options?.retryIntervalMs ?? 1500);
-
-  if (!force && existing) {
-    return existing;
-  }
-
-  const request = (async () => {
-    const deadline = Date.now() + timeoutMs;
-
-    while (Date.now() < deadline) {
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), probeTimeoutMs);
-
-      try {
-        const response = await fetch(`${API_BASE}${path}${separator}ts=${Date.now()}`, {
-          cache: "no-store",
-          headers: buildAuthHeaders(),
-          signal: controller.signal,
-        });
-        if (response.ok) {
-          return true;
-        }
-      } catch {
-        // keep probing until the deadline expires
-      } finally {
-        window.clearTimeout(timeoutId);
-      }
-
-      const remainingMs = deadline - Date.now();
-      if (remainingMs <= 0) {
-        break;
-      }
-      await delay(Math.min(retryIntervalMs, remainingMs));
-    }
-
-    return false;
-  })()
-    .finally(() => {
-      inflightWarmupRequests.delete(path);
-    });
-
-  inflightWarmupRequests.set(path, request);
-  return request;
-}
-
 export async function resilientFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
-  options?: {
-    timeoutMs?: number;
-    retries?: number;
-    allowWarmupRetry?: boolean;
-    warmupPath?: string;
-    warmupTimeoutMs?: number;
-    warmupProbeTimeoutMs?: number;
-    warmupRetryIntervalMs?: number;
-  },
+  options?: { timeoutMs?: number; retries?: number },
 ): Promise<Response> {
-  const method = (init?.method || "GET").toUpperCase();
-  const timeoutMs = options?.timeoutMs ?? (method === "GET" ? GET_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
+  const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
   const retries = Math.max(0, options?.retries ?? 1);
+  const method = (init?.method || "GET").toUpperCase();
   const maxAttempts = method === "GET" ? retries + 1 : 1;
-  const allowWarmupRetry = options?.allowWarmupRetry ?? method === "GET";
-  const maxTotalAttempts = maxAttempts + (allowWarmupRetry ? 1 : 0);
-  let warmupRetryAvailable = allowWarmupRetry;
 
   let response: Response | null = null;
 
-  const warmAndRetry = async (): Promise<boolean> => {
-    if (!warmupRetryAvailable) {
-      return false;
-    }
-
-    warmupRetryAvailable = false;
-    return warmBackend(options?.warmupPath ?? "/health/db", true, {
-      timeoutMs: options?.warmupTimeoutMs ?? 30000,
-      probeTimeoutMs: options?.warmupProbeTimeoutMs ?? 10000,
-      retryIntervalMs: options?.warmupRetryIntervalMs ?? 1500,
-    });
-  };
-
-  for (let attempt = 1; attempt <= maxTotalAttempts; attempt += 1) {
-    const canRetry = method === "GET" && attempt < maxAttempts;
-    const hasAnotherAttempt = attempt < maxTotalAttempts;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
@@ -183,27 +88,14 @@ export async function resilientFetch(
         signal: controller.signal,
       });
     } catch (error) {
-      if (hasAnotherAttempt && isAbortError(error)) {
-        const isReady = await warmAndRetry();
-        if (isReady) {
-          continue;
-        }
-      }
-
-      if (hasAnotherAttempt && error instanceof TypeError && navigator.onLine) {
-        const isReady = await warmAndRetry();
-        if (isReady) {
-          continue;
-        }
-      }
-
+      const canRetry = method === "GET" && attempt < maxAttempts;
       if (canRetry && (isAbortError(error) || error instanceof TypeError)) {
         await delay(500 * attempt);
         continue;
       }
 
       if (isAbortError(error)) {
-        throw new Error(TEMPORARY_SERVER_DELAY_MESSAGE);
+        throw new Error("Server is taking longer than expected. Please tap Retry.");
       }
 
       if (error instanceof TypeError) {
@@ -223,20 +115,10 @@ export async function resilientFetch(
       continue;
     }
 
-    if (method === "GET" && STARTUP_RETRY_STATUS_CODES.has(response.status)) {
-      if (hasAnotherAttempt) {
-        const isReady = await warmAndRetry();
-        if (isReady) {
-          response = null;
-          continue;
-        }
-      }
-
-      if (canRetry) {
-        await delay(500 * attempt);
-        response = null;
-        continue;
-      }
+    if (method === "GET" && [502, 503, 504].includes(response.status) && attempt < maxAttempts) {
+      await delay(500 * attempt);
+      response = null;
+      continue;
     }
 
     break;
@@ -247,6 +129,77 @@ export async function resilientFetch(
   }
 
   return response;
+}
+
+export function isTemporaryServerDelayError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("server is taking longer than expected") ||
+    message.includes("server is still starting up") ||
+    message.includes("temporarily unavailable while the server finishes starting up")
+  );
+}
+
+export async function warmBackend(
+  path: string,
+  waitForHealthy: boolean = false,
+  options?: {
+    timeoutMs?: number;
+    probeTimeoutMs?: number;
+    retryIntervalMs?: number;
+  },
+): Promise<boolean> {
+  const overallTimeoutMs = options?.timeoutMs ?? 20000;
+  const probeTimeoutMs = options?.probeTimeoutMs ?? 5000;
+  const retryIntervalMs = options?.retryIntervalMs ?? 1200;
+  const startedAt = Date.now();
+  const targetPath = path.startsWith("http://") || path.startsWith("https://")
+    ? path
+    : `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+
+  do {
+    try {
+      const response = await resilientFetch(
+        targetPath,
+        {
+          method: "GET",
+          headers: buildAuthHeaders(),
+        },
+        {
+          timeoutMs: probeTimeoutMs,
+          retries: 0,
+        },
+      );
+
+      if (response.ok) {
+        return true;
+      }
+
+      if (!waitForHealthy && response.status < 500) {
+        return false;
+      }
+    } catch (error) {
+      if (!waitForHealthy && !isTemporaryServerDelayError(error)) {
+        return false;
+      }
+    }
+
+    if (!waitForHealthy) {
+      return false;
+    }
+
+    if (Date.now() - startedAt >= overallTimeoutMs) {
+      break;
+    }
+
+    await delay(retryIntervalMs);
+  } while (Date.now() - startedAt < overallTimeoutMs);
+
+  return false;
 }
 
 function getCacheKey(key: string): string {
@@ -280,6 +233,26 @@ function isCacheFresh(key: string): boolean {
 
 export function clearDataCache(): void {
   dataCache.clear();
+}
+
+function invalidateCachePrefix(prefix: string): void {
+  for (const key of Array.from(dataCache.keys())) {
+    if (key.startsWith(`${prefix}:`)) {
+      dataCache.delete(key);
+    }
+  }
+}
+
+function invalidatePurchasingCaches(options?: { includeProducts?: boolean }): void {
+  invalidateCachePrefix("suppliers");
+  invalidateCachePrefix("purchases");
+  invalidateCachePrefix("supplierPayments");
+  invalidateCachePrefix("purchaseReturns");
+
+  if (options?.includeProducts) {
+    dataCache.delete(getCacheKey("products"));
+    dataCache.delete(getCacheKey("inventoryAnalytics"));
+  }
 }
 
 // Get cached data synchronously (for instant UI population)
@@ -322,6 +295,7 @@ export async function updateMyCategories(categories: string[]): Promise<AuthUser
 }
 
 export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
+  const token = localStorage.getItem("token");
   const formData = new FormData();
   formData.append("logo", file);
 
@@ -329,7 +303,7 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
     `${API_BASE}/auth/me/logo`,
     {
       method: "POST",
-      headers: buildAuthHeaders(),
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
     },
     {
@@ -345,9 +319,9 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
 
     if (response.status >= 500) {
       const isReady = await warmBackend("/health/db", true, {
-        timeoutMs: 30000,
-        probeTimeoutMs: 10000,
-        retryIntervalMs: 1500,
+        timeoutMs: COLD_START_WARM_TIMEOUT_MS,
+        probeTimeoutMs: COLD_START_WARM_PROBE_TIMEOUT_MS,
+        retryIntervalMs: COLD_START_WARM_RETRY_INTERVAL_MS,
       });
 
       if (!isReady) {
@@ -368,9 +342,9 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
     }
 
     const isReady = await warmBackend("/health/db", true, {
-      timeoutMs: 30000,
-      probeTimeoutMs: 10000,
-      retryIntervalMs: 1500,
+      timeoutMs: COLD_START_WARM_TIMEOUT_MS,
+      probeTimeoutMs: COLD_START_WARM_PROBE_TIMEOUT_MS,
+      retryIntervalMs: COLD_START_WARM_RETRY_INTERVAL_MS,
     });
 
     if (!isReady) {
@@ -387,22 +361,22 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
       window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
       throw new Error("Not authenticated");
     }
+
     const body = await response.text();
     try {
       const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
       const detail = parsed?.detail ?? parsed?.message;
       const message = typeof detail === "string" ? detail : response.statusText;
-      throw new Error(message || "Request failed");
+      throw new Error(message || "Failed to upload logo");
     } catch (error) {
       if (error instanceof SyntaxError) {
-        throw new Error(body || response.statusText);
+        throw new Error(body || response.statusText || "Failed to upload logo");
       }
       throw error;
     }
   }
 
-  const text = await response.text();
-  const updated = text ? (JSON.parse(text) as AuthUser) : ({} as AuthUser);
+  const updated = await response.json() as AuthUser;
   localStorage.setItem("user", JSON.stringify(updated));
   window.dispatchEvent(new CustomEvent("userChanged", { detail: updated }));
   return updated;
@@ -419,9 +393,6 @@ export type SystemSettings = {
 
 type JsonObject = Record<string, unknown>;
 type JsonArray = Record<string, unknown>[];
-type OpenApiDocument = {
-  paths?: Record<string, unknown>;
-};
 
 type StockMovementResponse = Omit<StockMovement, "change"> & { change: string | number };
 
@@ -438,7 +409,7 @@ export function buildAuthHeaders(extra?: Record<string, string>): Record<string,
 }
 
 async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
-  return jsonRequestWithBehavior<T>(path, options);
+  return jsonRequestWithBehavior(path, options);
 }
 
 async function jsonRequestWithBehavior<T>(
@@ -473,7 +444,7 @@ async function jsonRequestWithBehavior<T>(
       if (Number.isFinite(parsed) && parsed > 0) headers["X-Branch-Id"] = String(parsed);
     }
 
-    const response = await resilientFetch(
+    const request = () => resilientFetch(
       `${API_BASE}${path}`,
       {
         ...options,
@@ -481,10 +452,43 @@ async function jsonRequestWithBehavior<T>(
         headers,
       },
       {
-        timeoutMs: behavior?.timeoutMs ?? (method === "GET" ? GET_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS),
+        timeoutMs: behavior?.timeoutMs ?? REQUEST_TIMEOUT_MS,
         retries: method === "GET" ? (behavior?.retries ?? GET_RETRY_ATTEMPTS) : 0,
       },
     );
+
+    let response: Response;
+    try {
+      response = await request();
+    } catch (error) {
+      if (method === "GET" && isTemporaryServerDelayError(error)) {
+        const isReady = await warmBackend("/health/db", true, {
+          timeoutMs: COLD_START_WARM_TIMEOUT_MS,
+          probeTimeoutMs: COLD_START_WARM_PROBE_TIMEOUT_MS,
+          retryIntervalMs: COLD_START_WARM_RETRY_INTERVAL_MS,
+        });
+
+        if (isReady) {
+          response = await request();
+        } else {
+          throw error;
+        }
+      } else {
+        throw error;
+      }
+    }
+
+    if (method === "GET" && COLD_START_RETRY_STATUS_CODES.has(response.status)) {
+      const isReady = await warmBackend("/health/db", true, {
+        timeoutMs: COLD_START_WARM_TIMEOUT_MS,
+        probeTimeoutMs: COLD_START_WARM_PROBE_TIMEOUT_MS,
+        retryIntervalMs: COLD_START_WARM_RETRY_INTERVAL_MS,
+      });
+
+      if (isReady) {
+        response = await request();
+      }
+    }
 
     if (!response.ok) {
       if (response.status === 401) {
@@ -689,10 +693,7 @@ export async function deleteBranch(branchId: number): Promise<{ message: string 
 }
 
 export async function fetchMe(): Promise<AuthUser> {
-  return jsonRequestWithBehavior<AuthUser>("/auth/me", undefined, {
-    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS,
-    retries: 1,
-  });
+  return jsonRequest<AuthUser>("/auth/me");
 }
 
 export async function changePassword(payload: {
@@ -721,7 +722,7 @@ export async function fetchProducts(): Promise<Product[]> {
     return cached;
   }
   
-  const data = await jsonRequest<Product[]>("/products");
+  const data = await jsonRequest<Product[]>("/products/");
   setCache("products", data);
   return data;
 }
@@ -733,7 +734,7 @@ export async function fetchProductsCached(onUpdate?: (products: Product[]) => vo
   // If we have cached data, return it immediately and refresh in background
   if (cached) {
     // Refresh in background
-    jsonRequest<Product[]>("/products").then(fresh => {
+    jsonRequest<Product[]>("/products/").then(fresh => {
       setCache("products", fresh);
       if (onUpdate) onUpdate(fresh);
     }).catch(() => { /* ignore background refresh errors */ });
@@ -741,7 +742,7 @@ export async function fetchProductsCached(onUpdate?: (products: Product[]) => vo
   }
   
   // No cache, fetch fresh
-  const data = await jsonRequest<Product[]>("/products");
+  const data = await jsonRequest<Product[]>("/products/");
   setCache("products", data);
   return data;
 }
@@ -756,7 +757,7 @@ export async function createProduct(payload: NewProduct, branchIdOverride?: numb
   if (branchIdOverride != null) {
     headers["X-Branch-Id"] = String(branchIdOverride);
   }
-  const result = await jsonRequest<Product>("/products", {
+  const result = await jsonRequest<Product>("/products/", {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
@@ -852,6 +853,24 @@ export async function createSalesBulk(payloads: NewSale[]): Promise<Sale[]> {
   return result;
 }
 
+export async function assignSaleCustomer(
+  saleId: number,
+  payload: {
+    customer_name: string;
+    phone?: string;
+    email?: string;
+    notes?: string;
+  },
+): Promise<Sale> {
+  const result = await jsonRequest<Sale>(`/sales/${saleId}/customer`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  dataCache.delete(getCacheKey("sales"));
+  dataCache.delete(getCacheKey("salesDashboard"));
+  return result;
+}
+
 export async function sendSalesReceiptEmail(payload: {
   sale_ids: number[];
   to_email: string;
@@ -861,23 +880,6 @@ export async function sendSalesReceiptEmail(payload: {
     method: "POST",
     body: JSON.stringify(payload),
   });
-}
-
-export type AssignSaleCustomerPayload = {
-  customer_name: string;
-  phone?: string;
-  email?: string;
-  notes?: string;
-};
-
-export async function assignSaleCustomer(saleId: number, payload: AssignSaleCustomerPayload): Promise<Sale> {
-  const result = await jsonRequest<Sale>(`/sales/${saleId}/customer`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
-  dataCache.delete(getCacheKey("sales"));
-  dataCache.delete(getCacheKey("salesDashboard"));
-  return result;
 }
 
 export async function createSaleForBranch(payload: NewSale, branchIdOverride: string | number | null): Promise<Sale> {
@@ -931,7 +933,7 @@ export type NewSaleReturn = {
 };
 
 export async function createSaleReturn(payload: NewSaleReturn): Promise<SaleReturn> {
-  const result = await jsonRequest<SaleReturn>("/returns", {
+  const result = await jsonRequest<SaleReturn>("/returns/", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -944,7 +946,7 @@ export async function createSaleReturn(payload: NewSaleReturn): Promise<SaleRetu
 }
 
 export async function fetchReturns(): Promise<SaleReturn[]> {
-  return jsonRequest<SaleReturn[]>("/returns");
+  return jsonRequest<SaleReturn[]>("/returns/");
 }
 
 export async function fetchReturnsForSale(saleId: number): Promise<SaleReturn[]> {
@@ -986,21 +988,24 @@ export async function createBranchTransfer(payload: {
   return result;
 }
 
+// Purchasing API
+
 export async function fetchSuppliers(): Promise<Supplier[]> {
   const cached = getCached<Supplier[]>("suppliers");
   if (cached && isCacheFresh("suppliers")) {
     return cached;
   }
 
-  const data = await jsonRequest<Supplier[]>('/inventory/suppliers');
+  const data = await jsonRequest<Supplier[]>("/inventory/suppliers");
   setCache("suppliers", data);
   return data;
 }
 
 export async function fetchSuppliersCached(onUpdate?: (suppliers: Supplier[]) => void): Promise<Supplier[]> {
   const cached = getCached<Supplier[]>("suppliers");
+
   if (cached) {
-    jsonRequest<Supplier[]>('/inventory/suppliers')
+    jsonRequest<Supplier[]>("/inventory/suppliers")
       .then((fresh) => {
         setCache("suppliers", fresh);
         if (onUpdate) onUpdate(fresh);
@@ -1009,59 +1014,41 @@ export async function fetchSuppliersCached(onUpdate?: (suppliers: Supplier[]) =>
     return cached;
   }
 
-  return fetchSuppliers();
+  const data = await jsonRequest<Supplier[]>("/inventory/suppliers");
+  setCache("suppliers", data);
+  return data;
 }
 
 export async function createSupplier(payload: NewSupplier): Promise<Supplier> {
-  const result = await jsonRequest<Supplier>('/inventory/suppliers', {
-    method: 'POST',
+  const result = await jsonRequest<Supplier>("/inventory/suppliers", {
+    method: "POST",
     body: JSON.stringify(payload),
   });
-  clearDataCache();
+  invalidatePurchasingCaches();
   return result;
 }
 
-export async function fetchSupplierDetail(supplierId: number): Promise<SupplierDetail> {
-  return jsonRequest<SupplierDetail>(`/inventory/suppliers/${supplierId}`);
-}
-
-export async function updateSupplier(supplierId: number, payload: SupplierUpdate): Promise<Supplier> {
-  const result = await jsonRequest<Supplier>(`/inventory/suppliers/${supplierId}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  });
-  clearDataCache();
-  return result;
-}
-
-export async function deactivateSupplier(supplierId: number): Promise<{ message: string }> {
-  const result = await jsonRequest<{ message: string }>(`/inventory/suppliers/${supplierId}`, {
-    method: 'DELETE',
-  });
-  clearDataCache();
-  return result;
-}
-
-export async function fetchPurchases(limit = 40): Promise<Purchase[]> {
+export async function fetchPurchases(limit: number = 100): Promise<Purchase[]> {
   const cacheKey = `purchases:${limit}`;
   const cached = getCached<Purchase[]>(cacheKey);
   if (cached && isCacheFresh(cacheKey)) {
     return cached;
   }
 
-  const params = new URLSearchParams({ limit: String(limit) });
-  const data = await jsonRequest<Purchase[]>(`/inventory/purchases?${params.toString()}`);
+  const data = await jsonRequest<Purchase[]>(`/inventory/purchases?limit=${encodeURIComponent(String(limit))}`);
   setCache(cacheKey, data);
   return data;
 }
 
-export async function fetchPurchasesCached(limit = 40, onUpdate?: (purchases: Purchase[]) => void): Promise<Purchase[]> {
+export async function fetchPurchasesCached(
+  limit: number = 100,
+  onUpdate?: (purchases: Purchase[]) => void,
+): Promise<Purchase[]> {
   const cacheKey = `purchases:${limit}`;
   const cached = getCached<Purchase[]>(cacheKey);
-  const params = new URLSearchParams({ limit: String(limit) });
 
   if (cached) {
-    jsonRequest<Purchase[]>(`/inventory/purchases?${params.toString()}`)
+    jsonRequest<Purchase[]>(`/inventory/purchases?limit=${encodeURIComponent(String(limit))}`)
       .then((fresh) => {
         setCache(cacheKey, fresh);
         if (onUpdate) onUpdate(fresh);
@@ -1070,50 +1057,41 @@ export async function fetchPurchasesCached(limit = 40, onUpdate?: (purchases: Pu
     return cached;
   }
 
-  return fetchPurchases(limit);
-}
-
-export async function createPurchase(payload: NewPurchase): Promise<Purchase> {
-  const result = await jsonRequest<Purchase>('/inventory/purchases', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-  clearDataCache();
-  return result;
+  const data = await jsonRequest<Purchase[]>(`/inventory/purchases?limit=${encodeURIComponent(String(limit))}`);
+  setCache(cacheKey, data);
+  return data;
 }
 
 export async function createPurchaseOrder(payload: NewPurchaseOrder): Promise<PurchaseOrder> {
-  const result = await jsonRequest<PurchaseOrder>('/inventory/purchase-orders', {
-    method: 'POST',
+  const result = await jsonRequest<PurchaseOrder>("/inventory/purchase-orders", {
+    method: "POST",
     body: JSON.stringify(payload),
   });
-  clearDataCache();
+  invalidatePurchasingCaches({ includeProducts: true });
   return result;
 }
 
-export async function fetchSupplierPayments(limit = 40): Promise<SupplierPayment[]> {
+export async function fetchSupplierPayments(limit: number = 40): Promise<SupplierPayment[]> {
   const cacheKey = `supplierPayments:${limit}`;
   const cached = getCached<SupplierPayment[]>(cacheKey);
   if (cached && isCacheFresh(cacheKey)) {
     return cached;
   }
 
-  const params = new URLSearchParams({ limit: String(limit) });
-  const data = await jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?${params.toString()}`);
+  const data = await jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?limit=${encodeURIComponent(String(limit))}`);
   setCache(cacheKey, data);
   return data;
 }
 
 export async function fetchSupplierPaymentsCached(
-  limit = 40,
+  limit: number = 40,
   onUpdate?: (payments: SupplierPayment[]) => void,
 ): Promise<SupplierPayment[]> {
   const cacheKey = `supplierPayments:${limit}`;
   const cached = getCached<SupplierPayment[]>(cacheKey);
-  const params = new URLSearchParams({ limit: String(limit) });
 
   if (cached) {
-    jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?${params.toString()}`)
+    jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?limit=${encodeURIComponent(String(limit))}`)
       .then((fresh) => {
         setCache(cacheKey, fresh);
         if (onUpdate) onUpdate(fresh);
@@ -1122,97 +1100,57 @@ export async function fetchSupplierPaymentsCached(
     return cached;
   }
 
-  return fetchSupplierPayments(limit);
+  const data = await jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?limit=${encodeURIComponent(String(limit))}`);
+  setCache(cacheKey, data);
+  return data;
 }
 
 export async function createSupplierPayment(payload: NewSupplierPayment): Promise<SupplierPayment> {
-  const result = await jsonRequest<SupplierPayment>('/inventory/supplier-payments', {
-    method: 'POST',
+  const result = await jsonRequest<SupplierPayment>("/inventory/supplier-payments", {
+    method: "POST",
     body: JSON.stringify(payload),
   });
-  clearDataCache();
+  invalidatePurchasingCaches();
   return result;
 }
 
-export async function supportsPurchaseReturns(force = false): Promise<boolean> {
-  if (!force && purchaseReturnsSupportCache != null) {
-    return purchaseReturnsSupportCache;
+export async function supportsPurchaseReturns(): Promise<boolean> {
+  const response = await resilientFetch(`${API_BASE}/inventory/purchase-returns?limit=1`, {
+    method: "GET",
+    headers: buildAuthHeaders(),
+  });
+
+  if (response.status === 401) {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
+    throw new Error("Not authenticated");
   }
 
-  if (!force && purchaseReturnsSupportPromise) {
-    return purchaseReturnsSupportPromise;
-  }
-
-  const request = (async () => {
-    try {
-      const response = await resilientFetch(`${API_BASE}/openapi.json`, {
-        method: "GET",
-        headers: buildAuthHeaders(),
-      });
-
-      if (!response.ok) {
-        purchaseReturnsSupportCache = false;
-        return false;
-      }
-
-      const text = await response.text();
-      if (!text) {
-        purchaseReturnsSupportCache = false;
-        return false;
-      }
-
-      const openApi = JSON.parse(text) as OpenApiDocument;
-      const supported = Object.prototype.hasOwnProperty.call(openApi.paths ?? {}, "/inventory/purchase-returns");
-      purchaseReturnsSupportCache = supported;
-      return supported;
-    } catch {
-      purchaseReturnsSupportCache = false;
-      return false;
-    } finally {
-      purchaseReturnsSupportPromise = null;
-    }
-  })();
-
-  purchaseReturnsSupportPromise = request;
-  return request;
+  return response.status !== 404 && response.status !== 405;
 }
 
-export async function fetchPurchaseReturns(limit = 40): Promise<PurchaseReturn[]> {
+export async function fetchPurchaseReturns(limit: number = 40): Promise<PurchaseReturn[]> {
   const cacheKey = `purchaseReturns:${limit}`;
-  const supported = await supportsPurchaseReturns();
-  if (!supported) {
-    setCache(cacheKey, []);
-    return [];
-  }
-
   const cached = getCached<PurchaseReturn[]>(cacheKey);
   if (cached && isCacheFresh(cacheKey)) {
     return cached;
   }
 
-  const params = new URLSearchParams({ limit: String(limit) });
-  const data = await jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?${params.toString()}`);
+  const data = await jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?limit=${encodeURIComponent(String(limit))}`);
   setCache(cacheKey, data);
   return data;
 }
 
 export async function fetchPurchaseReturnsCached(
-  limit = 40,
+  limit: number = 40,
   onUpdate?: (purchaseReturns: PurchaseReturn[]) => void,
 ): Promise<PurchaseReturn[]> {
   const cacheKey = `purchaseReturns:${limit}`;
-  const supported = await supportsPurchaseReturns();
-  if (!supported) {
-    setCache(cacheKey, []);
-    if (onUpdate) onUpdate([]);
-    return [];
-  }
-
   const cached = getCached<PurchaseReturn[]>(cacheKey);
-  const params = new URLSearchParams({ limit: String(limit) });
 
   if (cached) {
-    jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?${params.toString()}`)
+    jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?limit=${encodeURIComponent(String(limit))}`)
       .then((fresh) => {
         setCache(cacheKey, fresh);
         if (onUpdate) onUpdate(fresh);
@@ -1221,20 +1159,17 @@ export async function fetchPurchaseReturnsCached(
     return cached;
   }
 
-  return fetchPurchaseReturns(limit);
+  const data = await jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?limit=${encodeURIComponent(String(limit))}`);
+  setCache(cacheKey, data);
+  return data;
 }
 
 export async function createPurchaseReturn(payload: NewPurchaseReturn): Promise<PurchaseReturn> {
-  const supported = await supportsPurchaseReturns();
-  if (!supported) {
-    throw new Error(PURCHASE_RETURNS_NOT_SUPPORTED_MESSAGE);
-  }
-
-  const result = await jsonRequest<PurchaseReturn>('/inventory/purchase-returns', {
-    method: 'POST',
+  const result = await jsonRequest<PurchaseReturn>("/inventory/purchase-returns", {
+    method: "POST",
     body: JSON.stringify(payload),
   });
-  clearDataCache();
+  invalidatePurchasingCaches({ includeProducts: true });
   return result;
 }
 
@@ -1382,10 +1317,7 @@ export async function fetchRevenueAnalytics(period: string = "30d", startDate?: 
   const params = new URLSearchParams({ period });
   if (startDate) params.append("start_date", startDate);
   if (endDate) params.append("end_date", endDate);
-  const data = await jsonRequestWithBehavior<JsonObject>(`/revenue/analytics?${params.toString()}`, undefined, {
-    timeoutMs: STARTUP_REQUEST_TIMEOUT_MS,
-    retries: 1,
-  });
+  const data = await jsonRequest<JsonObject>(`/revenue/analytics?${params.toString()}`);
   setCache(cacheKey, data);
   return data;
 }
@@ -1407,7 +1339,6 @@ export async function fetchSalesDashboard(filterDate?: string): Promise<JsonObje
   
   const data = await jsonRequestWithBehavior<JsonObject>(url, undefined, {
     timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
-    retries: 1,
   });
   
   // Only cache if no custom date
@@ -1418,15 +1349,29 @@ export async function fetchSalesDashboard(filterDate?: string): Promise<JsonObje
 }
 
 export async function fetchInventoryStatusReport(): Promise<JsonObject> {
-  return jsonRequestWithBehavior<JsonObject>("/reports/inventory-status", undefined, {
+  const cacheKey = "inventoryStatusReport";
+  const cached = getCached<JsonObject>(cacheKey);
+  if (cached && isCacheFresh(cacheKey)) {
+    return cached;
+  }
+
+  const data = await jsonRequestWithBehavior<JsonObject>("/reports/inventory-status", undefined, {
     timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
-    retries: 1,
   });
+  setCache(cacheKey, data);
+  return data;
 }
 
 export async function fetchCreditorsSummaryReport(): Promise<JsonObject> {
-  return jsonRequestWithBehavior<JsonObject>("/reports/creditors-summary", undefined, {
+  const cacheKey = "creditorsSummaryReport";
+  const cached = getCached<JsonObject>(cacheKey);
+  if (cached && isCacheFresh(cacheKey)) {
+    return cached;
+  }
+
+  const data = await jsonRequestWithBehavior<JsonObject>("/reports/creditors-summary", undefined, {
     timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
-    retries: 1,
   });
+  setCache(cacheKey, data);
+  return data;
 }
