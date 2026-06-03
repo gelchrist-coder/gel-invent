@@ -56,6 +56,22 @@ const COLD_START_RETRY_STATUS_CODES = new Set([500, 502, 503, 504]);
 const COLD_START_WARM_TIMEOUT_MS = 90000;
 const COLD_START_WARM_PROBE_TIMEOUT_MS = 35000;
 const COLD_START_WARM_RETRY_INTERVAL_MS = 2000;
+const AUTH_LOGOUT_GRACE_MS = 120000;
+const AUTH_LAST_LOGIN_AT_KEY = "lastSuccessfulLoginAt";
+
+function shouldDeferLogoutForUnauthorized(): boolean {
+  const raw = localStorage.getItem(AUTH_LAST_LOGIN_AT_KEY);
+  if (!raw) return false;
+  const ts = Number(raw);
+  if (!Number.isFinite(ts) || ts <= 0) return false;
+  return Date.now() - ts < AUTH_LOGOUT_GRACE_MS;
+}
+
+function clearAuthSession(): void {
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
+  window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -492,9 +508,10 @@ async function jsonRequestWithBehavior<T>(
 
     if (!response.ok) {
       if (response.status === 401) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
-        window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
+        if (shouldDeferLogoutForUnauthorized()) {
+          throw new Error("Authentication is still initializing. Please retry.");
+        }
+        clearAuthSession();
         throw new Error("Not authenticated");
       }
       const body = await response.text();

@@ -263,6 +263,7 @@ export default function Login({ onLogin }: LoginProps) {
 
   const completeAuthenticatedSession = async (authData: AuthResponse, identifier: string, password: string) => {
     localStorage.setItem("token", authData.access_token);
+    localStorage.setItem("lastSuccessfulLoginAt", String(Date.now()));
 
     const userData = authData.user ?? null;
     if (userData) {
