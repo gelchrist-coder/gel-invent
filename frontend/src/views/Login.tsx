@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { API_BASE, warmBackend } from "../api";
 import appLogo from "../asset/logo.png";
-import wareImage from "../asset/Ware.png";
+import wareImage from "../asset/Ware.jpg";
 
 function loadRecaptchaScript(): Promise<void> {
   if (typeof window === "undefined") {
@@ -338,9 +338,9 @@ export default function Login({ onLogin }: LoginProps) {
     const retryAfterWarmup = async (): Promise<Response> => {
       setInfo("Server is warming up — retrying…");
       const isReady = await warmBackend("/health/db", true, {
-        timeoutMs: 30000,
-        probeTimeoutMs: 10000,
-        retryIntervalMs: 1500,
+        timeoutMs: 90000,
+        probeTimeoutMs: 35000,
+        retryIntervalMs: 2000,
       });
 
       if (!isReady) {
@@ -349,7 +349,7 @@ export default function Login({ onLogin }: LoginProps) {
       }
 
       try {
-        return await attemptLoginRequest(identifier, password, 45000, captchaToken);
+        return await attemptLoginRequest(identifier, password, 90000, captchaToken);
       } catch (retryErr) {
         if (retryErr instanceof Error && retryErr.message === "__timeout__") {
           throw new Error("Login timed out. The server is still starting up — please try again in a moment.");
@@ -361,7 +361,7 @@ export default function Login({ onLogin }: LoginProps) {
     };
 
     try {
-      loginResponse = await attemptLoginRequest(identifier, password, 30000, captchaToken);
+      loginResponse = await attemptLoginRequest(identifier, password, 45000, captchaToken);
 
       // Retry once on server errors (cold-start 502/503/504)
       if (loginResponse.status >= 500) {
