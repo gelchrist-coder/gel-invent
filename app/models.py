@@ -64,6 +64,7 @@ class Product(Base):
     # Separate product lists per branch
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
     sku: Mapped[str] = mapped_column(String(64), index=True)
+    barcode: Mapped[str | None] = mapped_column(String(128), index=True, default=None)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(String(1024), default=None)
     unit: Mapped[str] = mapped_column(String(32), default="unit")

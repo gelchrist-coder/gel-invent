@@ -1,6 +1,7 @@
 export type Product = {
   id: number;
   sku: string;
+  barcode?: string | null;
   name: string;
   description?: string | null;
   unit: string;
@@ -32,6 +33,7 @@ export type StockMovement = {
 
 export type NewProduct = {
   sku: string;
+  barcode?: string | null;
   name: string;
   description?: string | null;
   unit?: string;

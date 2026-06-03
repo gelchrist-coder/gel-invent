@@ -234,6 +234,7 @@ export default function ProductForm({
       
       await onCreate({ 
         sku: form.sku,
+        barcode: (form.barcode || "").trim() || undefined,
         name: form.name,
         description: form.description || undefined,
         unit: form.unit || "pcs",

@@ -22,6 +22,7 @@ router = APIRouter(prefix="/products", tags=["products"])
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
     sku: Optional[str] = None
+    barcode: Optional[str] = None
     description: Optional[str] = None
     unit: Optional[str] = None
     category: Optional[str] = None
@@ -42,6 +43,8 @@ def create_product(
 ):
     ensure_permission(current_user, "manage_catalog", "Only Admin and Manager can manage products")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+    normalized_barcode = (payload.barcode or "").strip() or None
+
     # Check for duplicate SKU within the branch's products
     existing = db.query(models.Product).filter(
         models.Product.sku == payload.sku,
@@ -66,9 +69,23 @@ def create_product(
             detail="Product name already exists in this branch",
         )
 
+    # Check for duplicate barcode within the branch (if provided).
+    if normalized_barcode:
+        existing_barcode = db.query(models.Product).filter(
+            func.lower(func.trim(models.Product.barcode)) == normalized_barcode.lower(),
+            models.Product.branch_id == active_branch_id,
+            models.Product.user_id.in_(tenant_user_ids),
+        ).first()
+        if existing_barcode:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Barcode already exists in this branch",
+            )
+
     # Extract initial_stock before creating product
     initial_stock = payload.initial_stock
     product_data = payload.model_dump(exclude={'initial_stock', 'initial_location'})
+    product_data['barcode'] = normalized_barcode
     product_data['user_id'] = current_user.id
     product_data['branch_id'] = active_branch_id
     
@@ -339,6 +356,26 @@ def update_product(
                 detail=f"SKU '{payload.sku}' already exists"
             )
 
+    incoming_barcode = payload.barcode if payload.barcode is not None else None
+    normalized_barcode = incoming_barcode.strip() if isinstance(incoming_barcode, str) else None
+    normalized_barcode = normalized_barcode or None
+    current_barcode = (product.barcode or "").strip() or None
+
+    # Check barcode uniqueness if it's being updated.
+    if payload.barcode is not None and normalized_barcode != current_barcode:
+        if normalized_barcode:
+            existing_barcode = db.query(models.Product).filter(
+                models.Product.id != product.id,
+                func.lower(func.trim(models.Product.barcode)) == normalized_barcode.lower(),
+                models.Product.user_id.in_(tenant_user_ids),
+                models.Product.branch_id == active_branch_id,
+            ).first()
+            if existing_barcode:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Barcode already exists in this branch",
+                )
+
     # Check name uniqueness if it's being updated (case-insensitive)
     if payload.name and payload.name.strip() and payload.name.strip() != (product.name or ""):
         normalized_name = payload.name.strip().lower()
@@ -356,6 +393,8 @@ def update_product(
     
     # Update only provided fields
     update_data = payload.model_dump(exclude_unset=True)
+    if "barcode" in update_data:
+        update_data["barcode"] = normalized_barcode
     for key, value in update_data.items():
         setattr(product, key, value)
     

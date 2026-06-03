@@ -138,6 +138,9 @@ export default function POSSaleForm({
     const normalized = rawScanValue.trim().toLowerCase();
     if (!normalized) return null;
 
+    const exactBarcode = products.find((product) => String(product.barcode || "").trim().toLowerCase() === normalized);
+    if (exactBarcode) return exactBarcode;
+
     const exactSku = products.find((product) => String(product.sku || "").trim().toLowerCase() === normalized);
     if (exactSku) return exactSku;
 

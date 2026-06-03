@@ -1,23 +1,18 @@
 import os
 import asyncio
 from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .database import Base, engine, mark_critical_schema_ready
+from .database import Base, engine
 from .auth import get_current_active_user
 from .permissions import ensure_permission
 from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns
 from . import models
 
-app = FastAPI(
-    title="Gel Invent API",
-    version="0.1.0",
-    root_path="/api" if os.getenv("VERCEL") else "",
-    redirect_slashes=False,
-)
+app = FastAPI(title="Gel Invent API", version="0.1.0")
 
 # Startup migrations can take time (ALTER/UPDATE backfills). Railway healthchecks will fail
 # if we block application startup. Run them in the background instead.
@@ -39,6 +34,7 @@ def _ensure_critical_auth_schema_sync() -> None:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_name VARCHAR(255)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_logo_url VARCHAR(512)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode VARCHAR(128)"))
         conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS birthday DATE"))
         conn.execute(
             text(
@@ -50,71 +46,6 @@ def _ensure_critical_auth_schema_sync() -> None:
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique "
                 "ON users (phone) WHERE phone IS NOT NULL"
-            )
-        )
-
-
-def _ensure_critical_product_schema_sync() -> None:
-    """Apply tiny, idempotent product schema changes required for read safety.
-
-    Product queries select mapped columns directly. In serverless environments we
-    skip the heavier startup migration runner by default, so additive product
-    columns that ship in code must still be created here or `/products` and
-    inventory endpoints can fail immediately on deploy.
-    """
-    with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_size INTEGER"))
-        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(100)"))
-        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier VARCHAR(255)"))
-        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS expiry_date DATE"))
-        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC(10,2)"))
-        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_cost_price NUMERIC(10,2)"))
-        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS selling_price NUMERIC(10,2)"))
-        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_selling_price NUMERIC(10,2)"))
-        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS branch_id INTEGER"))
-
-
-def _ensure_critical_purchasing_schema_sync() -> None:
-    """Create purchasing tables used by inventory supplier workflows.
-
-    These are lightweight `checkfirst` creates for new tables only, keeping the
-    first supplier/purchase requests safe in serverless environments where full
-    startup migrations are disabled by default.
-    """
-    with engine.begin() as conn:
-        models.Supplier.__table__.create(bind=conn, checkfirst=True)
-        models.Purchase.__table__.create(bind=conn, checkfirst=True)
-        models.SupplierPayment.__table__.create(bind=conn, checkfirst=True)
-        models.PurchaseReturn.__table__.create(bind=conn, checkfirst=True)
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS order_number VARCHAR(80)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(12,2)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_due NUMERIC(12,2)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS due_date DATE"))
-        conn.execute(text("ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS order_number VARCHAR(80)"))
-        conn.execute(text("ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS order_number VARCHAR(80)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_purchases_order_number ON purchases (order_number)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_supplier_payments_order_number ON supplier_payments (order_number)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_purchase_returns_order_number ON purchase_returns (order_number)"))
-        conn.execute(
-            text(
-                """
-                UPDATE purchases
-                SET amount_paid = COALESCE(amount_paid, 0),
-                    amount_due = COALESCE(amount_due, total_cost),
-                    payment_status = COALESCE(
-                        payment_status,
-                        CASE
-                            WHEN COALESCE(amount_due, total_cost) <= 0 THEN 'paid'
-                            WHEN COALESCE(amount_paid, 0) > 0 THEN 'partial'
-                            ELSE 'unpaid'
-                        END
-                    )
-                WHERE amount_paid IS NULL
-                   OR amount_due IS NULL
-                   OR payment_status IS NULL
-                """
             )
         )
 
@@ -152,6 +83,7 @@ def _run_startup_migrations_sync() -> None:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_logo_url VARCHAR(512)"))
         conn.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id_unique "
@@ -165,46 +97,17 @@ def _run_startup_migrations_sync() -> None:
             )
         )
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_logo_url VARCHAR(512)"))
         conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
 
         # Product columns added over time
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_size INTEGER"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode VARCHAR(128)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(100)"))
-        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier VARCHAR(255)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS expiry_date DATE"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_cost_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS selling_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_selling_price NUMERIC(10,2)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS order_number VARCHAR(80)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(12,2)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS amount_due NUMERIC(12,2)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)"))
-        conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS due_date DATE"))
-        conn.execute(text("ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS order_number VARCHAR(80)"))
-        conn.execute(text("ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS order_number VARCHAR(80)"))
-        conn.execute(
-            text(
-                """
-                UPDATE purchases
-                SET amount_paid = COALESCE(amount_paid, 0),
-                    amount_due = COALESCE(amount_due, total_cost),
-                    payment_status = COALESCE(
-                        payment_status,
-                        CASE
-                            WHEN COALESCE(amount_due, total_cost) <= 0 THEN 'paid'
-                            WHEN COALESCE(amount_paid, 0) > 0 THEN 'partial'
-                            ELSE 'unpaid'
-                        END
-                    )
-                WHERE amount_paid IS NULL
-                   OR amount_due IS NULL
-                   OR payment_status IS NULL
-                """
-            )
-        )
 
         # Batch/expiry tracking + sale linkage on movements
         conn.execute(text("ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS batch_number VARCHAR(100)"))
@@ -275,9 +178,6 @@ def _run_startup_migrations_sync() -> None:
                 "ON products (branch_id, user_id, created_at DESC)"
             )
         )
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_purchases_order_number ON purchases (order_number)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_supplier_payments_order_number ON supplier_payments (order_number)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_purchase_returns_order_number ON purchase_returns (order_number)"))
         conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS idx_credit_transactions_branch_creditor_created_at "
@@ -297,6 +197,19 @@ def _run_startup_migrations_sync() -> None:
             # If existing duplicates are present, creating the unique index will fail.
             # Don't block startup; the API also enforces this rule at write-time.
             print(f"⚠️  Could not create unique index for product names: {e}")
+
+        # Prevent duplicate barcodes within a branch (case-insensitive, ignores NULL/empty).
+        try:
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_branch_lower_barcode_unique "
+                    "ON products (branch_id, lower(trim(barcode))) "
+                    "WHERE barcode IS NOT NULL AND length(trim(barcode)) > 0"
+                )
+            )
+        except Exception as e:
+            # Existing duplicate barcodes may block this index creation.
+            print(f"⚠️  Could not create unique index for product barcodes: {e}")
 
     # Use SQL for branch-scoped bulk backfills (idempotent).
     with engine.begin() as conn:
@@ -467,15 +380,8 @@ else:
     ]
 
 # FastAPI CORS does not support wildcard domains in allow_origins (e.g. https://*.vercel.app).
-# Use allow_origin_regex to support common hosted frontend URLs when the UI is
-# deployed separately from the backend.
-allow_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX") or (
-    r"^https://(" 
-    r"([a-z0-9-]+\.)?vercel\.app|"
-    r"[a-z0-9-]+\.netlify\.app|"
-    r"[a-z0-9-]+\.up\.railway\.app"
-    r")$"
-)
+# Use allow_origin_regex to support Vercel preview deployment URLs.
+allow_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX") or r"^https://gel-invent(-[a-z0-9-]+)?\.vercel\.app$"
 
 app.add_middleware(
     CORSMiddleware,
@@ -494,42 +400,13 @@ async def on_startup() -> None:
     print(f"Railway Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'Not set')}")
     print(f"Database URL set: {'Yes' if os.getenv('DATABASE_URL') else 'No'}")
 
-    # Always apply critical auth/product schema changes first to avoid request-time
+    # Always apply critical auth schema changes first to avoid request-time
     # failures when background/full migrations are disabled or still running.
-    # Cap at 5 s each so a slow/hung DB proxy never blocks startup too long.
     try:
-        await asyncio.wait_for(
-            asyncio.to_thread(_ensure_critical_auth_schema_sync),
-            timeout=5.0,
-        )
-        mark_critical_schema_ready()
+        await asyncio.to_thread(_ensure_critical_auth_schema_sync)
         print("✅ Critical auth schema verified")
-    except asyncio.TimeoutError:
-        print("⚠️ Critical auth schema sync skipped — timed out after 5 s")
     except Exception as e:
         print(f"⚠️ Could not verify critical auth schema: {type(e).__name__}: {e}")
-
-    try:
-        await asyncio.wait_for(
-            asyncio.to_thread(_ensure_critical_product_schema_sync),
-            timeout=5.0,
-        )
-        print("✅ Critical product schema verified")
-    except asyncio.TimeoutError:
-        print("⚠️ Critical product schema sync skipped — timed out after 5 s")
-    except Exception as e:
-        print(f"⚠️ Could not verify critical product schema: {type(e).__name__}: {e}")
-
-    try:
-        await asyncio.wait_for(
-            asyncio.to_thread(_ensure_critical_purchasing_schema_sync),
-            timeout=5.0,
-        )
-        print("✅ Critical purchasing schema verified")
-    except asyncio.TimeoutError:
-        print("⚠️ Critical purchasing schema sync skipped — timed out after 5 s")
-    except Exception as e:
-        print(f"⚠️ Could not verify critical purchasing schema: {type(e).__name__}: {e}")
 
     if not _should_run_startup_migrations():
         print("ℹ️ Startup migrations skipped (RUN_STARTUP_MIGRATIONS disabled)")
@@ -548,11 +425,6 @@ async def on_startup() -> None:
     # Schedule migrations/backfills without blocking app readiness.
     asyncio.create_task(_runner())
     print("✅ Application started (migrations running in background)")
-
-
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon() -> Response:
-    return Response(status_code=204)
 
 
 @app.get("/")
