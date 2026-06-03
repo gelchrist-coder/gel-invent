@@ -63,7 +63,7 @@ const GET_RETRY_ATTEMPTS = 1;
 const STARTUP_REQUEST_TIMEOUT_MS = GET_REQUEST_TIMEOUT_MS;
 export const TEMPORARY_SERVER_DELAY_MESSAGE = "Server is taking longer than expected. Please tap Retry.";
 export const PURCHASE_RETURNS_NOT_SUPPORTED_MESSAGE = "Purchase returns are not available on this deployment yet.";
-const STARTUP_RETRY_STATUS_CODES = new Set([502, 503, 504]);
+const STARTUP_RETRY_STATUS_CODES = new Set([500, 502, 503, 504]);
 let purchaseReturnsSupportCache: boolean | null = null;
 let purchaseReturnsSupportPromise: Promise<boolean> | null = null;
 
