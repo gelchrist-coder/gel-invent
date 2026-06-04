@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .database import Base, engine
+from .database import Base, engine, ensure_critical_schema
 from .auth import get_current_active_user
 from .permissions import ensure_permission
 from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns
@@ -407,6 +407,14 @@ async def on_startup() -> None:
         print("✅ Critical auth schema verified")
     except Exception as e:
         print(f"⚠️ Could not verify critical auth schema: {type(e).__name__}: {e}")
+
+    # Apply tiny non-auth schema guards once at startup (not on each request)
+    # to prevent request-time DDL from causing lock contention.
+    try:
+        await asyncio.to_thread(ensure_critical_schema)
+        print("✅ Critical runtime schema guard verified")
+    except Exception as e:
+        print(f"⚠️ Could not verify critical runtime schema guard: {type(e).__name__}: {e}")
 
     if not _should_run_startup_migrations():
         print("ℹ️ Startup migrations skipped (RUN_STARTUP_MIGRATIONS disabled)")

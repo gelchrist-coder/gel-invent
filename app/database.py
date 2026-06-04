@@ -33,19 +33,15 @@ class Base(DeclarativeBase):
 
 is_serverless_runtime = bool(os.getenv("VERCEL"))
 
-# On serverless (Vercel) use a short connect timeout so a hung Railway proxy
-# doesn't block function startup and delay user-facing login requests.
-_connect_timeout = 5 if is_serverless_runtime else 10
-
 connect_args = {
-    "connect_timeout": _connect_timeout,
+    "connect_timeout": 10,
     # TCP keepalive settings reduce idle SSL disconnects on managed Postgres.
     "keepalives": 1,
     "keepalives_idle": 30,
     "keepalives_interval": 10,
     "keepalives_count": 5,
     # Avoid overly aggressive DB-side defaults cancelling simple auth queries.
-    "options": "-c statement_timeout=10000 -c lock_timeout=5000",
+    "options": "-c statement_timeout=30000 -c lock_timeout=5000",
 }
 
 
@@ -71,12 +67,6 @@ _critical_schema_ready = False
 _critical_schema_lock = threading.Lock()
 
 
-def mark_critical_schema_ready() -> None:
-    """Mark auth-critical runtime schema as already verified for this process."""
-    global _critical_schema_ready
-    _critical_schema_ready = True
-
-
 def ensure_critical_schema() -> None:
     """Best-effort runtime schema guard for columns queried on every request.
 
@@ -95,30 +85,7 @@ def ensure_critical_schema() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
-                conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_logo_url VARCHAR(512)"))
                 conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
-
-                # Index creation is optional at runtime; do not block requests if
-                # legacy duplicate data prevents creating a unique index.
-                try:
-                    conn.execute(
-                        text(
-                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id_unique "
-                            "ON users (supabase_user_id) WHERE supabase_user_id IS NOT NULL"
-                        )
-                    )
-                except Exception as exc:
-                    print(f"⚠️ Could not ensure idx_users_supabase_user_id_unique: {exc}")
-
-                try:
-                    conn.execute(
-                        text(
-                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique "
-                            "ON users (phone) WHERE phone IS NOT NULL"
-                        )
-                    )
-                except Exception as exc:
-                    print(f"⚠️ Could not ensure idx_users_phone_unique: {exc}")
 
             _critical_schema_ready = True
         except Exception as exc:
@@ -128,7 +95,6 @@ def ensure_critical_schema() -> None:
 
 def get_db():
     """Dependency that yields a database session."""
-    ensure_critical_schema()
     db = SessionLocal()
     try:
         yield db

@@ -431,7 +431,7 @@ async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
 async function jsonRequestWithBehavior<T>(
   path: string,
   options?: RequestInit,
-  behavior?: { timeoutMs?: number; retries?: number },
+  behavior?: { timeoutMs?: number; retries?: number; branchRetryDone?: boolean },
 ): Promise<T> {
   const token = localStorage.getItem("token");
   const activeBranchId = localStorage.getItem("activeBranchId");
@@ -507,6 +507,34 @@ async function jsonRequestWithBehavior<T>(
     }
 
     if (!response.ok) {
+      const body = await response.text();
+      let message = response.statusText || "Request failed";
+      try {
+        const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
+        const detail = parsed?.detail ?? parsed?.message;
+        if (typeof detail === "string" && detail.trim()) {
+          message = detail;
+        }
+      } catch {
+        if (body?.trim()) {
+          message = body;
+        }
+      }
+
+      const isBranchContextError =
+        response.status === 400
+        && /invalid branch|no active branch/i.test(message)
+        && !!localStorage.getItem("activeBranchId");
+
+      if (isBranchContextError && !behavior?.branchRetryDone) {
+        localStorage.removeItem("activeBranchId");
+        window.dispatchEvent(new CustomEvent("activeBranchChanged", { detail: null }));
+        return jsonRequestWithBehavior<T>(path, options, {
+          ...behavior,
+          branchRetryDone: true,
+        });
+      }
+
       if (response.status === 401) {
         if (shouldDeferLogoutForUnauthorized()) {
           throw new Error("Authentication is still initializing. Please retry.");
@@ -514,18 +542,7 @@ async function jsonRequestWithBehavior<T>(
         clearAuthSession();
         throw new Error("Not authenticated");
       }
-      const body = await response.text();
-      try {
-        const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
-        const detail = parsed?.detail ?? parsed?.message;
-        const message = typeof detail === "string" ? detail : response.statusText;
-        throw new Error(message || "Request failed");
-      } catch (error) {
-        if (error instanceof SyntaxError) {
-          throw new Error(body || response.statusText);
-        }
-        throw error;
-      }
+      throw new Error(message || "Request failed");
     }
 
     if (response.status === 204) {
