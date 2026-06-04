@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
@@ -29,6 +29,14 @@ def _to_int(value: object) -> int | None:
         return int(value)  # type: ignore[arg-type]
     except Exception:
         return None
+
+
+def _to_utc_datetime(value: object) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _sale_transaction_key(sale_id: object, client_sale_id: object) -> str:
@@ -71,7 +79,7 @@ def get_sales_dashboard(
     # Get tenant user IDs for multi-tenant filtering
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
@@ -124,8 +132,8 @@ def get_sales_dashboard(
     payment_method_totals: dict[str, dict[str, float | int]] = {}
 
     for transaction in monthly_transactions.values():
-        created_at = transaction.get("created_at")
-        if not isinstance(created_at, datetime):
+        created_at = _to_utc_datetime(transaction.get("created_at"))
+        if created_at is None:
             continue
 
         total_value = _to_float(transaction.get("total"))
