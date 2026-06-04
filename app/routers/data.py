@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 try:
     import openpyxl  # type: ignore[import-not-found]
     from openpyxl.styles import Font  # type: ignore[import-not-found]
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     openpyxl = None
     Font = None
 

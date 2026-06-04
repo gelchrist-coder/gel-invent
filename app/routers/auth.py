@@ -328,37 +328,37 @@ async def signup(request: Request, db: Session = Depends(get_db)):
         is_active=True,
     )
 
-    db.add(new_user)
+    # The requested business location becomes the first branch name.
+    branch_names = _ordered_branch_names(user_data.business_location, user_data.branches)
+    if not branch_names:
+        branch_names = ["Main Store"]
+
     try:
+        db.add(new_user)
+        db.flush()
+
+        for branch_name in branch_names:
+            db.add(Branch(owner_user_id=new_user.id, name=branch_name, is_active=True))
+
+        # Create SystemSettings with default values
+        db.add(
+            SystemSettings(
+                owner_user_id=new_user.id,
+                uses_expiry_tracking=True,
+            )
+        )
+
         db.commit()
+        db.refresh(new_user)
     except Exception as exc:
         db.rollback()
         if supabase_user_id:
             try:
                 delete_auth_user(supabase_user_id)
             except Exception:
+                # Keep original failure path; orphan cleanup can be retried manually.
                 pass
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create user") from exc
-
-    db.refresh(new_user)
-
-    # The requested business location becomes the first branch name.
-    branch_names = _ordered_branch_names(user_data.business_location, user_data.branches)
-    if not branch_names:
-        branch_names = ["Main Store"]
-
-    for branch_name in branch_names:
-        branch = Branch(owner_user_id=new_user.id, name=branch_name, is_active=True)
-        db.add(branch)
-    db.commit()
-
-    # Create SystemSettings with default values
-    settings = SystemSettings(
-        owner_user_id=new_user.id,
-        uses_expiry_tracking=True,
-    )
-    db.add(settings)
-    db.commit()
 
     return _build_token_response(new_user)
 

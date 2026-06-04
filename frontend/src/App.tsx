@@ -355,10 +355,11 @@ export default function App() {
           }
         }
 
-        // Branches are optional UI, but stale branch headers can break all data reads.
-        setBranches([]);
-        setActiveBranchId(null);
-        localStorage.removeItem("activeBranchId");
+        // Keep existing branch context on transient failures to avoid blanking
+        // authenticated views during cold starts or mobile network hiccups.
+        if (import.meta.env.DEV) {
+          console.warn("Branch load failed; preserving previous branch context.", error);
+        }
       }
     };
 
@@ -385,9 +386,9 @@ export default function App() {
           else localStorage.removeItem("activeBranchId");
         })
         .catch(() => {
-          setBranches([]);
-          setActiveBranchId(null);
-          localStorage.removeItem("activeBranchId");
+          if (import.meta.env.DEV) {
+            console.warn("Branches refresh failed; keeping previous branch context.");
+          }
         });
     };
 

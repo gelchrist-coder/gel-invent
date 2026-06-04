@@ -149,7 +149,7 @@ export function groupSalesIntoTransactions(
 
   for (const sale of sales) {
     const explicitToken = getExplicitSaleTransactionToken(sale);
-    const key = explicitToken
+    const key: string = explicitToken
       ? explicitToken
       : previousLegacySale && canGroupLegacySales(previousLegacySale.sale, sale)
         ? previousLegacySale.key

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import os
 from typing import Optional
 
 from jose import JWTError, jwt
@@ -11,7 +12,12 @@ from app.database import get_db
 from app.models import User
 
 # Configuration
-SECRET_KEY = "your-secret-key-here-change-in-production"  # Change this in production!
+SECRET_KEY = (os.getenv("SECRET_KEY") or os.getenv("JWT_SECRET_KEY") or "").strip()
+if not SECRET_KEY:
+    # Keep a non-empty fallback to avoid hard-crash in misconfigured environments,
+    # but make it explicit so deployment can be fixed quickly.
+    SECRET_KEY = "development-insecure-secret-change-me"
+    print("⚠️ SECRET_KEY/JWT_SECRET_KEY is not set. Using insecure fallback secret.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
@@ -83,5 +89,5 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 def get_current_active_user(current_user: User = Depends(get_current_user)):
     """Get the current active user"""
     if not current_user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")
     return current_user
