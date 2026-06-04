@@ -975,7 +975,7 @@ export type NewSaleReturn = {
 };
 
 export async function createSaleReturn(payload: NewSaleReturn): Promise<SaleReturn> {
-  const result = await jsonRequest<SaleReturn>("/returns/", {
+  const result = await jsonRequest<SaleReturn>("/returns", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -988,7 +988,7 @@ export async function createSaleReturn(payload: NewSaleReturn): Promise<SaleRetu
 }
 
 export async function fetchReturns(): Promise<SaleReturn[]> {
-  return jsonRequest<SaleReturn[]>("/returns/");
+  return jsonRequest<SaleReturn[]>("/returns");
 }
 
 export async function fetchReturnsForSale(saleId: number): Promise<SaleReturn[]> {
