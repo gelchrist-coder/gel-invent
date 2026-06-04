@@ -11,6 +11,7 @@ from ..auth import get_current_active_user
 from app.permissions import ensure_permission, is_admin
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
+from app.utils.expiry import get_batch_balances
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 LEGACY_EXPIRY_WARNING_DAYS = 180
@@ -150,19 +151,45 @@ def get_morning_summary(
                 }
             )
 
-        if row.expiry_date and stock > 0:
-            if today_start.date() <= row.expiry_date <= expiry_cutoff:
-                days_until = (row.expiry_date - today_start.date()).days
-                expiring_items.append(
-                    {
-                        "id": int(row.id),
-                        "name": row.name,
-                        "sku": row.sku,
-                        "expiry_date": row.expiry_date.isoformat(),
-                        "days_until_expiry": days_until,
-                        "current_stock": stock,
-                    }
-                )
+        if stock <= 0:
+            continue
+
+        soonest_expiry_date = None
+        soonest_days_until = None
+
+        if row.expiry_date and today_start.date() <= row.expiry_date <= expiry_cutoff:
+            soonest_expiry_date = row.expiry_date
+            soonest_days_until = (row.expiry_date - today_start.date()).days
+
+        balances = get_batch_balances(
+            db=db,
+            tenant_user_ids=tenant_user_ids,
+            branch_id=active_branch_id,
+            product_id=int(row.id),
+            include_null_expiry=False,
+        )
+        for batch in balances:
+            if batch.balance <= 0 or batch.expiry_date is None:
+                continue
+            if not (today_start.date() <= batch.expiry_date <= expiry_cutoff):
+                continue
+
+            days_until = (batch.expiry_date - today_start.date()).days
+            if soonest_days_until is None or days_until < soonest_days_until:
+                soonest_days_until = days_until
+                soonest_expiry_date = batch.expiry_date
+
+        if soonest_expiry_date is not None and soonest_days_until is not None:
+            expiring_items.append(
+                {
+                    "id": int(row.id),
+                    "name": row.name,
+                    "sku": row.sku,
+                    "expiry_date": soonest_expiry_date.isoformat(),
+                    "days_until_expiry": soonest_days_until,
+                    "current_stock": stock,
+                }
+            )
 
     low_stock_items.sort(key=lambda item: (item["current_stock"], item["name"]))
     expiring_items.sort(key=lambda item: (item["days_until_expiry"], item["name"]))
