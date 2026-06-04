@@ -3,6 +3,8 @@ import {
   fetchCreditorsSummaryReport,
   fetchInventoryStatusReport,
   fetchSalesDashboard,
+  isTemporaryServerDelayError,
+  warmBackend,
 } from "../api";
 import RevenueAnalysis from "./RevenueAnalysis";
 import { useExpiryTracking } from "../settings";
@@ -260,6 +262,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
   const [inventoryData, setInventoryData] = useState<InventoryStatus | null>(null);
   const [creditorsData, setCreditorsData] = useState<CreditorsSummary | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     const shouldLoadSales = activeTab === "sales" && !salesData;
@@ -271,6 +274,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
     }
 
     setLoading(true);
+    setLoadError(null);
     try {
       if (shouldLoadSales) {
         const data = await fetchSalesDashboard();
@@ -283,6 +287,38 @@ export default function Reports({ initialTab = "sales" }: Props) {
         setCreditorsData(data as CreditorsSummary);
       }
     } catch (error) {
+      if (isTemporaryServerDelayError(error)) {
+        const isReady = await warmBackend("/health/db", true, {
+          timeoutMs: 90000,
+          probeTimeoutMs: 35000,
+          retryIntervalMs: 2000,
+        });
+
+        if (isReady) {
+          try {
+            if (shouldLoadSales) {
+              const data = await fetchSalesDashboard();
+              setSalesData(data as SalesDashboard);
+              return;
+            }
+            if (shouldLoadInventory) {
+              const data = await fetchInventoryStatusReport();
+              setInventoryData(data as InventoryStatus);
+              return;
+            }
+            if (shouldLoadCreditors) {
+              const data = await fetchCreditorsSummaryReport();
+              setCreditorsData(data as CreditorsSummary);
+              return;
+            }
+          } catch (retryError) {
+            error = retryError;
+          }
+        }
+      }
+
+      const message = error instanceof Error ? error.message : "Failed to load report data.";
+      setLoadError(message);
       console.error("Failed to load report data:", error);
     } finally {
       setLoading(false);
@@ -305,6 +341,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
       setSalesData(null);
       setInventoryData(null);
       setCreditorsData(null);
+      setLoadError(null);
     };
 
     window.addEventListener("activeBranchChanged", handleBranchChange);
@@ -365,6 +402,38 @@ export default function Reports({ initialTab = "sales" }: Props) {
 
       {loading && (
         <div style={{ textAlign: "center", padding: 36, color: "#6b7280", background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 14 }}>Loading...</div>
+      )}
+
+      {!loading && loadError && (
+        <div
+          style={{
+            marginBottom: 20,
+            padding: 18,
+            background: "#fff7ed",
+            border: "1px solid #fdba74",
+            borderRadius: 14,
+            color: "#9a3412",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Report data could not be loaded.</div>
+          <div style={{ fontSize: 14, marginBottom: 12 }}>{loadError}</div>
+          <button
+            onClick={() => {
+              void loadData();
+            }}
+            style={{
+              border: "1px solid #ea580c",
+              background: "#ffffff",
+              color: "#c2410c",
+              borderRadius: 10,
+              padding: "10px 14px",
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Retry report load
+          </button>
+        </div>
       )}
 
       {/* Sales Dashboard */}
