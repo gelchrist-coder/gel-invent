@@ -13,6 +13,8 @@ from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+LEGACY_EXPIRY_WARNING_DAYS = 180
+DEFAULT_EXPIRY_WARNING_DAYS = 45
 
 
 def _to_float(value: object, default: float = 0.0) -> float:
@@ -55,6 +57,11 @@ def _get_tenant_owner_id(user: User) -> int:
 def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
     settings = db.query(SystemSettings).filter(SystemSettings.owner_user_id == owner_user_id).first()
     if settings:
+        if int(settings.expiry_warning_days or 0) == LEGACY_EXPIRY_WARNING_DAYS:
+            settings.expiry_warning_days = DEFAULT_EXPIRY_WARNING_DAYS
+            db.add(settings)
+            db.commit()
+            db.refresh(settings)
         return settings
     settings = SystemSettings(owner_user_id=owner_user_id)
     db.add(settings)

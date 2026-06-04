@@ -14,6 +14,8 @@ from app.permissions import ensure_permission, is_admin
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 ALLOWED_CURRENCIES = {"GHS", "USD", "EUR", "GBP"}
+LEGACY_EXPIRY_WARNING_DAYS = 180
+DEFAULT_EXPIRY_WARNING_DAYS = 45
 
 
 def _get_tenant_owner_id(user: User) -> int:
@@ -25,6 +27,11 @@ def _get_tenant_owner_id(user: User) -> int:
 def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
     settings = db.query(SystemSettings).filter(SystemSettings.owner_user_id == owner_user_id).first()
     if settings:
+        if int(settings.expiry_warning_days or 0) == LEGACY_EXPIRY_WARNING_DAYS:
+            settings.expiry_warning_days = DEFAULT_EXPIRY_WARNING_DAYS
+            db.add(settings)
+            db.commit()
+            db.refresh(settings)
         return settings
 
     settings = SystemSettings(owner_user_id=owner_user_id)

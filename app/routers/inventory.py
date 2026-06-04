@@ -610,6 +610,11 @@ def _get_purchase_returnable_quantity(
 def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
     settings = db.query(SystemSettings).filter(SystemSettings.owner_user_id == owner_user_id).first()
     if settings:
+        if int(settings.expiry_warning_days or 0) == 180:
+            settings.expiry_warning_days = 45
+            db.add(settings)
+            db.commit()
+            db.refresh(settings)
         return settings
     settings = SystemSettings(owner_user_id=owner_user_id)
     db.add(settings)
