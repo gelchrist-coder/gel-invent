@@ -255,7 +255,7 @@ export default function Dashboard({ onNavigate }: Props) {
   const [salesForTrend, setSalesForTrend] = useState<TrendSale[]>([]);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
-  const [expiryWarningDays, setExpiryWarningDays] = useState<number>(180);
+  const [expiryWarningDays, setExpiryWarningDays] = useState<number>(45);
   const usesExpiryTracking = useExpiryTracking();
   const [selectedRange, setSelectedRange] = useState<GlobalRangeKey>("30d");
   const [customRangeStartDate, setCustomRangeStartDate] = useState<string>("");

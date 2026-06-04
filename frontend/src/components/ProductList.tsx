@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Product } from "../types";
 import { updateMyCategories } from "../api";
 import { useAppCategories } from "../categories";
-import { useExpiryTracking } from "../settings";
+import { useExpiryTracking, useSystemSettings } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type Props = {
@@ -38,6 +38,9 @@ export default function ProductList({
   const canManageCatalog = hasUserPermission("manage_catalog", accessUser);
   const categoryOptions = useAppCategories();
   const usesExpiryTracking = useExpiryTracking();
+  const systemSettings = useSystemSettings();
+  const expiryWarningDays = Number(systemSettings.expiry_warning_days) || 45;
+  const expiryWindowMs = expiryWarningDays * 24 * 60 * 60 * 1000;
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
   const effectiveFilterExpiry = showExpiryStatusFilter ? filterExpiry : "all";
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -197,11 +200,11 @@ export default function ProductList({
     } else if (effectiveFilterExpiry === "expiring") {
       matchesExpiry = effectiveExpiry ? 
         new Date(effectiveExpiry) >= new Date() && 
-        new Date(effectiveExpiry) <= new Date(Date.now() + 180 * 24 * 60 * 60 * 1000) : 
+        new Date(effectiveExpiry) <= new Date(Date.now() + expiryWindowMs) : 
         false;
     } else if (effectiveFilterExpiry === "fresh") {
       matchesExpiry = !effectiveExpiry || 
-        new Date(effectiveExpiry) > new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+        new Date(effectiveExpiry) > new Date(Date.now() + expiryWindowMs);
     }
 
     // Stock filter

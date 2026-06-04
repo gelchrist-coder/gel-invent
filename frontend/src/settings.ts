@@ -3,7 +3,7 @@ import { fetchSystemSettings, SystemSettings } from "./api";
 
 const DEFAULT_SETTINGS: SystemSettings = {
   low_stock_threshold: 10,
-  expiry_warning_days: 180,
+  expiry_warning_days: 45,
   uses_expiry_tracking: true,
   currency_code: "GHS",
   auto_backup: true,

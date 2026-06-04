@@ -79,7 +79,7 @@ export default function Profile() {
 
   const [systemSettings, setSystemSettings] = useState({
     lowStockThreshold: "10",
-    expiryWarningDays: "180",
+    expiryWarningDays: "45",
     currencyCode: "GHS",
     autoBackup: true,
     emailNotifications: false,

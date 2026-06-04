@@ -306,7 +306,7 @@ class SystemSettings(Base):
         ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True
     )
     low_stock_threshold: Mapped[int] = mapped_column(Integer, default=10)
-    expiry_warning_days: Mapped[int] = mapped_column(Integer, default=180)
+    expiry_warning_days: Mapped[int] = mapped_column(Integer, default=45)
     uses_expiry_tracking: Mapped[bool] = mapped_column(Boolean, default=True)
     currency_code: Mapped[str] = mapped_column(String(3), default="GHS")
     auto_backup: Mapped[bool] = mapped_column(Boolean, default=True)
