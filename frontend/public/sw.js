@@ -1,5 +1,5 @@
-const SHELL_CACHE = "gel-invent-shell-v3";
-const ASSET_CACHE = "gel-invent-assets-v3";
+const SHELL_CACHE = "gel-invent-shell-v4";
+const ASSET_CACHE = "gel-invent-assets-v4";
 const APP_SHELL_URLS = [
   "/offline.html",
   "/manifest.webmanifest",
@@ -90,7 +90,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (["script", "style", "image", "font", "manifest"].includes(request.destination)) {
+  if (["script", "style"].includes(request.destination)) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  if (["image", "font", "manifest"].includes(request.destination)) {
     event.respondWith(staleWhileRevalidate(request));
   }
 });

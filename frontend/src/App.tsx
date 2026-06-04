@@ -145,6 +145,11 @@ export default function App() {
   }, [filterSupplier, supplierOptions]);
 
   useEffect(() => {
+    const autoSupplierSyncEnabled = localStorage.getItem("enableSupplierAutoSync") === "1";
+    if (!autoSupplierSyncEnabled) {
+      return;
+    }
+
     if (!isAuthenticated) {
       return;
     }
