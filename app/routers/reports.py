@@ -1,14 +1,14 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Sale, Product, StockMovement, Creditor, CreditTransaction, User, SystemSettings
 from ..auth import get_current_active_user
-from app.permissions import ensure_permission
+from app.permissions import ensure_permission, is_admin
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 
@@ -22,8 +22,15 @@ def _to_float(value: object, default: float = 0.0) -> float:
         return default
 
 
+def _sale_transaction_key(sale_id: object, client_sale_id: object) -> str:
+    raw = str(client_sale_id or "").strip()
+    if not raw:
+        return f"sale:{sale_id}"
+    return raw.split(":")[0] or f"sale:{sale_id}"
+
+
 def _get_tenant_owner_id(user: User) -> int:
-    if user.role == "Admin":
+    if is_admin(user):
         return user.id
     return user.created_by or user.id
 
@@ -72,39 +79,72 @@ def get_sales_dashboard(
         except ValueError:
             pass
     
-    # Today's sales
-    today_sales = db.execute(
+    sales_since_month = db.execute(
         select(
-            func.count(Sale.id).label("count"),
-            func.coalesce(func.sum(Sale.total_price), 0).label("total")
-        ).where(and_(Sale.created_at >= today_start, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
-    ).first()
-    
-    # This week's sales
-    week_sales = db.execute(
-        select(
-            func.count(Sale.id).label("count"),
-            func.coalesce(func.sum(Sale.total_price), 0).label("total")
-        ).where(and_(Sale.created_at >= week_start, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
-    ).first()
-    
-    # This month's sales
-    month_sales = db.execute(
-        select(
-            func.count(Sale.id).label("count"),
-            func.coalesce(func.sum(Sale.total_price), 0).label("total")
-        ).where(and_(Sale.created_at >= month_start, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
-    ).first()
-    
-    # Sales by payment method (this month)
-    payment_methods = db.execute(
-        select(
+            Sale.id,
+            Sale.client_sale_id,
+            Sale.total_price,
             Sale.payment_method,
-            func.count(Sale.id).label("count"),
-            func.coalesce(func.sum(Sale.total_price), 0).label("total")
-        ).where(and_(Sale.created_at >= month_start, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
-        .group_by(Sale.payment_method)
+            Sale.customer_name,
+            Sale.created_at,
+        )
+        .where(and_(Sale.created_at >= month_start, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
+        .order_by(Sale.created_at.desc(), Sale.id.desc())
     ).all()
+
+    monthly_transactions: dict[str, dict[str, object]] = {}
+    for sale in sales_since_month:
+        key = _sale_transaction_key(sale.id, sale.client_sale_id)
+        transaction = monthly_transactions.get(key)
+        if transaction is None:
+            transaction = {
+                "created_at": sale.created_at,
+                "payment_method": sale.payment_method,
+                "customer_name": sale.customer_name,
+                "total": 0.0,
+            }
+            monthly_transactions[key] = transaction
+
+        transaction["total"] = _to_float(transaction.get("total")) + _to_float(sale.total_price)
+        if not transaction.get("customer_name") and sale.customer_name:
+            transaction["customer_name"] = sale.customer_name
+
+    today_summary = {"count": 0, "total": 0.0}
+    week_summary = {"count": 0, "total": 0.0}
+    month_summary = {"count": 0, "total": 0.0}
+    payment_method_totals: dict[str, dict[str, float | int]] = {}
+
+    for transaction in monthly_transactions.values():
+        created_at = transaction.get("created_at")
+        if not isinstance(created_at, datetime):
+            continue
+
+        total_value = _to_float(transaction.get("total"))
+        payment_key = str(transaction.get("payment_method") or "unknown")
+
+        month_summary["count"] += 1
+        month_summary["total"] += total_value
+
+        if created_at >= week_start:
+            week_summary["count"] += 1
+            week_summary["total"] += total_value
+
+        if created_at >= today_start:
+            today_summary["count"] += 1
+            today_summary["total"] += total_value
+
+        payment_meta = payment_method_totals.setdefault(payment_key, {"count": 0, "total": 0.0})
+        payment_meta["count"] = int(payment_meta["count"]) + 1
+        payment_meta["total"] = _to_float(payment_meta["total"]) + total_value
+
+    payment_methods = [
+        {
+            "method": method,
+            "count": int(data["count"]),
+            "total": _to_float(data["total"]),
+        }
+        for method, data in payment_method_totals.items()
+    ]
     
     # Top selling products (filtered by date range).
     # Aggregate from sales first so legacy/misaligned product rows do not hide valid sales.
@@ -135,10 +175,11 @@ def get_sales_dashboard(
     ).all() if top_product_ids else []
     top_product_by_id = {int(product.id): product for product in top_product_records}
     
-    # Recent sales with product details in one query (avoids N+1 lookups)
+    # Recent sales grouped by checkout transaction so multi-item purchases appear on one line.
     recent_sales_rows = db.execute(
         select(
             Sale.id,
+            Sale.client_sale_id,
             Sale.product_id,
             Sale.quantity,
             Sale.total_price,
@@ -157,48 +198,54 @@ def get_sales_dashboard(
             ),
         )
         .where(Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id)
-        .order_by(Sale.created_at.desc())
-        .limit(10)
+        .order_by(Sale.created_at.desc(), Sale.id.desc())
+        .limit(80)
     ).all()
 
-    recent_sales_data = [
-        {
-            "id": s.id,
-            "product_id": s.product_id,
-            "product": {
-                "name": s.product_name or "Unknown",
-                "sku": s.product_sku or "N/A",
-            },
-            "quantity": _to_float(s.quantity),
-            "total_price": _to_float(s.total_price),
-            "customer_name": s.customer_name,
-            "payment_method": s.payment_method,
-            "created_at": s.created_at.isoformat(),
-        }
-        for s in recent_sales_rows
-    ]
+    recent_sales_grouped: dict[str, dict[str, object]] = {}
+    for sale in recent_sales_rows:
+        key = _sale_transaction_key(sale.id, sale.client_sale_id)
+        transaction = recent_sales_grouped.get(key)
+        if transaction is None:
+            transaction = {
+                "id": sale.id,
+                "receipt_number": key.split(":")[0][-8:].upper() if not str(key).startswith("sale:") else str(sale.id).zfill(6),
+                "customer_name": sale.customer_name,
+                "payment_method": sale.payment_method,
+                "created_at": sale.created_at.isoformat(),
+                "total_price": 0.0,
+                "item_count": 0,
+                "items": [],
+            }
+            recent_sales_grouped[key] = transaction
+
+        transaction["total_price"] = _to_float(transaction.get("total_price")) + _to_float(sale.total_price)
+        transaction["item_count"] = int(transaction.get("item_count", 0)) + 1
+        if not transaction.get("customer_name") and sale.customer_name:
+            transaction["customer_name"] = sale.customer_name
+        transaction_items = transaction.setdefault("items", [])
+        if isinstance(transaction_items, list):
+            transaction_items.append({
+                "name": sale.product_name or f"Product #{sale.product_id}",
+                "quantity": _to_float(sale.quantity),
+            })
+
+    recent_sales_data = list(recent_sales_grouped.values())[:10]
     
     return {
         "today": {
-            "count": today_sales.count,
-            "total": float(today_sales.total)
+            "count": int(today_summary["count"]),
+            "total": float(today_summary["total"])
         },
         "week": {
-            "count": week_sales.count,
-            "total": float(week_sales.total)
+            "count": int(week_summary["count"]),
+            "total": float(week_summary["total"])
         },
         "month": {
-            "count": month_sales.count,
-            "total": float(month_sales.total)
+            "count": int(month_summary["count"]),
+            "total": float(month_summary["total"])
         },
-        "payment_methods": [
-            {
-                "method": pm.payment_method,
-                "count": pm.count,
-                "total": float(pm.total)
-            }
-            for pm in payment_methods
-        ],
+        "payment_methods": payment_methods,
         "top_products": [
             {
                 "name": (top_product_by_id.get(int(tp.product_id)).name if top_product_by_id.get(int(tp.product_id)) else f"Product #{tp.product_id}"),
