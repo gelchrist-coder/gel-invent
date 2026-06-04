@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSystemSettingsCached, getCachedProducts } from "../api";
+import { fetchMorningSummary, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSystemSettingsCached, getCachedProducts } from "../api";
 import { Product } from "../types";
 import { useExpiryTracking } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
@@ -19,6 +19,52 @@ type SalesDashboardResponse = {
   top_products?: DashboardTopProduct[];
   recent_sales?: DashboardRecentSale[];
   [key: string]: unknown;
+};
+
+type MorningSummaryItem = {
+  id?: number | string;
+  product_id?: number | string;
+  name: string;
+  sku?: string;
+  current_stock?: number;
+  quantity_sold?: number;
+  revenue?: number;
+};
+
+type MorningSummaryBranch = {
+  branch_id: number;
+  branch_name: string;
+  transactions: number;
+  revenue: number;
+  rank: number;
+  share_percent: number;
+};
+
+type MorningSummaryResponse = {
+  generated_at: string;
+  yesterday_sales: {
+    transactions: number;
+    revenue: number;
+  };
+  low_stock: {
+    count: number;
+    threshold: number;
+    items: MorningSummaryItem[];
+  };
+  expiring_products: {
+    count: number;
+    window_days: number;
+    items: Array<MorningSummaryItem & { expiry_date?: string; days_until_expiry?: number }>;
+  };
+  debt_due: {
+    supplier_due_amount: number;
+    supplier_due_count: number;
+    customer_debt_amount: number;
+    customer_debt_count: number;
+  };
+  best_sellers: MorningSummaryItem[];
+  slow_movers: MorningSummaryItem[];
+  branch_comparison: MorningSummaryBranch[];
 };
 
 type LowStockItem = {
@@ -205,6 +251,7 @@ export default function Dashboard({ onNavigate }: Props) {
   const [products, setProducts] = useState<Product[]>(cachedProducts || []);
   const [loading, setLoading] = useState(!cachedProducts); // Only show loading if no cache
   const [dashboardData, setDashboardData] = useState<SalesDashboardResponse | null>(null);
+  const [morningSummary, setMorningSummary] = useState<MorningSummaryResponse | null>(null);
   const [salesForTrend, setSalesForTrend] = useState<TrendSale[]>([]);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [lowStockThreshold, setLowStockThreshold] = useState<number>(10);
@@ -231,6 +278,7 @@ export default function Dashboard({ onNavigate }: Props) {
 
   const currentUser = readStoredUser();
   const canViewReports = hasUserPermission("view_reports", currentUser);
+  const canViewMorningSummary = hasUserPermission("manage_branches", currentUser);
   const token = localStorage.getItem("token");
 
   const loadDashboardData = useCallback(async () => {
@@ -243,7 +291,7 @@ export default function Dashboard({ onNavigate }: Props) {
     setDashboardLoading(true);
 
     try {
-      const [productsData, settingsData, dashboardResponse, salesData] = await Promise.all([
+      const [productsData, settingsData, dashboardResponse, salesData, morningSummaryResponse] = await Promise.all([
         fetchProductsCached((fresh) => setProducts(fresh)),
         fetchSystemSettingsCached((fresh) => {
           setLowStockThreshold(fresh.low_stock_threshold);
@@ -251,6 +299,7 @@ export default function Dashboard({ onNavigate }: Props) {
         }).catch(() => null),
         canViewReports ? fetchSalesDashboard(rangeStartDate) : Promise.resolve(null),
         canViewReports ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])).catch(() => []) : Promise.resolve([]),
+        canViewMorningSummary ? fetchMorningSummary().catch(() => null) : Promise.resolve(null),
       ]);
 
       setProducts(productsData);
@@ -269,6 +318,12 @@ export default function Dashboard({ onNavigate }: Props) {
         setDashboardData(null);
         setSalesForTrend([]);
       }
+
+      if (canViewMorningSummary && morningSummaryResponse) {
+        setMorningSummary(morningSummaryResponse as MorningSummaryResponse);
+      } else if (!canViewMorningSummary) {
+        setMorningSummary(null);
+      }
     } catch (error) {
       if (import.meta.env.DEV) {
         console.warn("Dashboard load degraded due to temporary error:", error);
@@ -277,7 +332,12 @@ export default function Dashboard({ onNavigate }: Props) {
       setLoading(false);
       setDashboardLoading(false);
     }
-  }, [canViewReports, rangeStartDate, token]);
+  }, [canViewMorningSummary, canViewReports, rangeStartDate, token]);
+
+  const leadingBranch = useMemo(
+    () => (morningSummary?.branch_comparison?.[0] ?? null),
+    [morningSummary?.branch_comparison],
+  );
 
   useEffect(() => {
     void loadDashboardData();
@@ -731,6 +791,91 @@ export default function Dashboard({ onNavigate }: Props) {
           <span style={{ marginLeft: "auto", fontSize: 12, color: "#64748b" }}>Viewing {rangeLabel}</span>
         </div>
       </div>
+
+      {canViewMorningSummary && morningSummary && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", flexWrap: "wrap", marginBottom: 14 }}>
+            <h2 className="section-title" style={{ margin: 0 }}>Morning Command Center</h2>
+            <div style={{ fontSize: 12, color: "#64748b" }}>
+              Snapshot for yesterday · {new Date(morningSummary.generated_at).toLocaleString()}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, marginBottom: 14 }}>
+            <div style={{ padding: 12, borderRadius: 10, border: "1px solid #dbeafe", background: "#eff6ff" }}>
+              <div style={{ fontSize: 12, color: "#1d4ed8", fontWeight: 700 }}>Yesterday Sales</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#1e3a8a" }}>{toCurrency(Number(morningSummary.yesterday_sales.revenue || 0))}</div>
+              <div style={{ fontSize: 12, color: "#1d4ed8" }}>{morningSummary.yesterday_sales.transactions} transactions</div>
+            </div>
+            <div style={{ padding: 12, borderRadius: 10, border: "1px solid #fed7aa", background: "#fff7ed" }}>
+              <div style={{ fontSize: 12, color: "#c2410c", fontWeight: 700 }}>Low Stock</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#9a3412" }}>{morningSummary.low_stock.count}</div>
+              <div style={{ fontSize: 12, color: "#c2410c" }}>Threshold {morningSummary.low_stock.threshold}</div>
+            </div>
+            <div style={{ padding: 12, borderRadius: 10, border: "1px solid #fde68a", background: "#fefce8" }}>
+              <div style={{ fontSize: 12, color: "#a16207", fontWeight: 700 }}>Expiring Products</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#854d0e" }}>{morningSummary.expiring_products.count}</div>
+              <div style={{ fontSize: 12, color: "#a16207" }}>Within {morningSummary.expiring_products.window_days} days</div>
+            </div>
+            <div style={{ padding: 12, borderRadius: 10, border: "1px solid #fecaca", background: "#fef2f2" }}>
+              <div style={{ fontSize: 12, color: "#b91c1c", fontWeight: 700 }}>Debt Due</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#991b1b" }}>
+                {toCurrency(Number(morningSummary.debt_due.supplier_due_amount || 0) + Number(morningSummary.debt_due.customer_debt_amount || 0))}
+              </div>
+              <div style={{ fontSize: 12, color: "#b91c1c" }}>
+                {morningSummary.debt_due.supplier_due_count} supplier due · {morningSummary.debt_due.customer_debt_count} customer debts
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: "#0f172a" }}>Best Sellers (Yesterday)</div>
+              {morningSummary.best_sellers.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#64748b" }}>No sales yesterday.</div>
+              ) : morningSummary.best_sellers.slice(0, 5).map((item) => (
+                <div key={`${item.product_id ?? item.name}-best`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "5px 0", borderBottom: "1px solid #f1f5f9" }}>
+                  <span>{item.name}</span>
+                  <span style={{ fontWeight: 700 }}>{Number(item.quantity_sold ?? 0).toFixed(0)} units</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: "#0f172a" }}>Slow Movers (No sales in 30d)</div>
+              {morningSummary.slow_movers.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#64748b" }}>No slow movers detected.</div>
+              ) : morningSummary.slow_movers.slice(0, 5).map((item) => (
+                <div key={`${item.product_id ?? item.name}-slow`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "5px 0", borderBottom: "1px solid #f1f5f9" }}>
+                  <span>{item.name}</span>
+                  <span style={{ color: "#b45309", fontWeight: 700 }}>Stock {Number(item.current_stock ?? 0).toFixed(0)}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: "#0f172a" }}>Branch Comparison (Yesterday)</div>
+              {morningSummary.branch_comparison.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#64748b" }}>No active branches to compare.</div>
+              ) : (
+                <>
+                  {leadingBranch ? (
+                    <div style={{ fontSize: 12, marginBottom: 8, color: "#1d4ed8" }}>
+                      Leading branch: <strong>{leadingBranch.branch_name}</strong> ({toCurrency(Number(leadingBranch.revenue || 0))})
+                    </div>
+                  ) : null}
+                  {morningSummary.branch_comparison.slice(0, 5).map((branch) => (
+                    <div key={branch.branch_id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "5px 0", borderBottom: "1px solid #f1f5f9" }}>
+                      <span>#{branch.rank} {branch.branch_name}</span>
+                      <span style={{ fontWeight: 700 }}>{toCurrency(Number(branch.revenue || 0))}</span>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div
         className="grid"

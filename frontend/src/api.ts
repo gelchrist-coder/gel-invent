@@ -1417,3 +1417,17 @@ export async function fetchCreditorsSummaryReport(): Promise<JsonObject> {
   setCache(cacheKey, data);
   return data;
 }
+
+export async function fetchMorningSummary(): Promise<JsonObject> {
+  const cacheKey = "morningSummary";
+  const cached = getCached<JsonObject>(cacheKey);
+  if (cached && isCacheFresh(cacheKey)) {
+    return cached;
+  }
+
+  const data = await jsonRequestWithBehavior<JsonObject>("/reports/morning-summary", undefined, {
+    timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
+  });
+  setCache(cacheKey, data);
+  return data;
+}

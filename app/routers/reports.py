@@ -6,7 +6,7 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Sale, Product, StockMovement, Creditor, CreditTransaction, User, SystemSettings
+from ..models import Sale, Product, StockMovement, Creditor, CreditTransaction, User, SystemSettings, Branch, Purchase
 from ..auth import get_current_active_user
 from app.permissions import ensure_permission, is_admin
 from app.utils.tenant import get_tenant_user_ids
@@ -61,6 +61,307 @@ def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
     db.commit()
     db.refresh(settings)
     return settings
+
+
+@router.get("/morning-summary")
+def get_morning_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    """Owner morning command center with daily operational priorities."""
+    ensure_permission(current_user, "view_reports", "Only Admin and Manager can access reports")
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    owner_user_id = _get_tenant_owner_id(current_user)
+    settings = _get_or_create_settings(db, owner_user_id)
+
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+    slow_mover_start = today_start - timedelta(days=30)
+    expiry_cutoff = today_start.date() + timedelta(days=settings.expiry_warning_days)
+
+    yesterday_sales_rows = db.execute(
+        select(
+            Sale.id,
+            Sale.client_sale_id,
+            Sale.total_price,
+        )
+        .where(
+            and_(
+                Sale.created_at >= yesterday_start,
+                Sale.created_at < today_start,
+                Sale.user_id.in_(tenant_user_ids),
+                Sale.branch_id == active_branch_id,
+            )
+        )
+        .order_by(Sale.id.desc())
+    ).all()
+
+    yesterday_transactions: dict[str, float] = {}
+    for sale in yesterday_sales_rows:
+        key = _sale_transaction_key(sale.id, sale.client_sale_id)
+        yesterday_transactions[key] = yesterday_transactions.get(key, 0.0) + _to_float(sale.total_price)
+
+    yesterday_sales_total = sum(yesterday_transactions.values())
+    yesterday_sales_count = len(yesterday_transactions)
+
+    stock_rows = db.execute(
+        select(
+            Product.id,
+            Product.name,
+            Product.sku,
+            Product.expiry_date,
+            func.coalesce(func.sum(StockMovement.change), 0).label("current_stock"),
+        )
+        .outerjoin(
+            StockMovement,
+            and_(
+                StockMovement.product_id == Product.id,
+                StockMovement.branch_id == active_branch_id,
+            ),
+        )
+        .where(
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        )
+        .group_by(Product.id)
+    ).all()
+
+    low_stock_items = []
+    expiring_items = []
+    for row in stock_rows:
+        stock = max(0.0, _to_float(row.current_stock))
+        if stock < float(settings.low_stock_threshold):
+            low_stock_items.append(
+                {
+                    "id": int(row.id),
+                    "name": row.name,
+                    "sku": row.sku,
+                    "current_stock": stock,
+                    "threshold": int(settings.low_stock_threshold),
+                }
+            )
+
+        if row.expiry_date and stock > 0:
+            if today_start.date() <= row.expiry_date <= expiry_cutoff:
+                days_until = (row.expiry_date - today_start.date()).days
+                expiring_items.append(
+                    {
+                        "id": int(row.id),
+                        "name": row.name,
+                        "sku": row.sku,
+                        "expiry_date": row.expiry_date.isoformat(),
+                        "days_until_expiry": days_until,
+                        "current_stock": stock,
+                    }
+                )
+
+    low_stock_items.sort(key=lambda item: (item["current_stock"], item["name"]))
+    expiring_items.sort(key=lambda item: (item["days_until_expiry"], item["name"]))
+
+    best_seller_rows = db.execute(
+        select(
+            Sale.product_id,
+            func.coalesce(func.sum(Sale.quantity), 0).label("qty"),
+            func.coalesce(func.sum(Sale.total_price), 0).label("revenue"),
+        )
+        .where(
+            and_(
+                Sale.created_at >= yesterday_start,
+                Sale.created_at < today_start,
+                Sale.user_id.in_(tenant_user_ids),
+                Sale.branch_id == active_branch_id,
+            )
+        )
+        .group_by(Sale.product_id)
+        .order_by(func.sum(Sale.quantity).desc())
+        .limit(5)
+    ).all()
+
+    best_seller_ids = [_to_int(row.product_id) for row in best_seller_rows]
+    valid_best_seller_ids = [pid for pid in best_seller_ids if pid is not None]
+    best_seller_products = db.scalars(
+        select(Product).where(
+            Product.id.in_(valid_best_seller_ids),
+            Product.user_id.in_(tenant_user_ids),
+            Product.branch_id == active_branch_id,
+        )
+    ).all() if valid_best_seller_ids else []
+    best_seller_name_by_id = {int(product.id): product.name for product in best_seller_products}
+
+    best_sellers = []
+    for row in best_seller_rows:
+        product_id = _to_int(row.product_id)
+        best_sellers.append(
+            {
+                "product_id": product_id,
+                "name": best_seller_name_by_id.get(product_id, f"Product #{product_id}" if product_id is not None else "Unknown product"),
+                "quantity_sold": _to_float(row.qty),
+                "revenue": _to_float(row.revenue),
+            }
+        )
+
+    sold_last_30_rows = db.execute(
+        select(
+            Sale.product_id,
+            func.coalesce(func.sum(Sale.quantity), 0).label("qty"),
+        )
+        .where(
+            and_(
+                Sale.created_at >= slow_mover_start,
+                Sale.created_at < today_start,
+                Sale.user_id.in_(tenant_user_ids),
+                Sale.branch_id == active_branch_id,
+            )
+        )
+        .group_by(Sale.product_id)
+    ).all()
+    sold_last_30_by_product = {
+        _to_int(row.product_id): _to_float(row.qty)
+        for row in sold_last_30_rows
+        if _to_int(row.product_id) is not None
+    }
+
+    slow_movers = []
+    for row in stock_rows:
+        product_id = _to_int(row.id)
+        if product_id is None:
+            continue
+        stock = max(0.0, _to_float(row.current_stock))
+        if stock <= 0:
+            continue
+        sold_qty = sold_last_30_by_product.get(product_id, 0.0)
+        if sold_qty <= 0:
+            slow_movers.append(
+                {
+                    "product_id": product_id,
+                    "name": row.name,
+                    "sku": row.sku,
+                    "current_stock": stock,
+                    "sold_last_30_days": sold_qty,
+                }
+            )
+    slow_movers.sort(key=lambda item: (-item["current_stock"], item["name"]))
+
+    purchase_due_row = db.execute(
+        select(
+            func.coalesce(func.sum(Purchase.amount_due), 0).label("amount_due"),
+            func.count(Purchase.id).label("due_count"),
+        )
+        .where(
+            and_(
+                Purchase.user_id.in_(tenant_user_ids),
+                Purchase.branch_id == active_branch_id,
+                Purchase.amount_due > 0,
+                or_(Purchase.due_date.is_(None), Purchase.due_date <= today_start.date()),
+            )
+        )
+    ).first()
+
+    creditor_due_row = db.execute(
+        select(
+            func.coalesce(func.sum(Creditor.total_debt), 0).label("total_debt"),
+            func.count(Creditor.id).label("creditor_count"),
+        )
+        .where(
+            and_(
+                Creditor.user_id.in_(tenant_user_ids),
+                Creditor.branch_id == active_branch_id,
+                Creditor.total_debt > 0,
+            )
+        )
+    ).first()
+
+    branches = db.scalars(
+        select(Branch)
+        .where(
+            Branch.owner_user_id == owner_user_id,
+            Branch.is_active.is_(True),
+        )
+        .order_by(Branch.created_at.asc(), Branch.id.asc())
+    ).all()
+    branch_name_by_id = {int(branch.id): branch.name for branch in branches}
+    branch_ids = list(branch_name_by_id.keys())
+
+    branch_sales_rows = db.execute(
+        select(
+            Sale.branch_id,
+            Sale.id,
+            Sale.client_sale_id,
+            Sale.total_price,
+        )
+        .where(
+            and_(
+                Sale.created_at >= yesterday_start,
+                Sale.created_at < today_start,
+                Sale.user_id.in_(tenant_user_ids),
+                Sale.branch_id.in_(branch_ids),
+            )
+        )
+        .order_by(Sale.branch_id.asc(), Sale.id.desc())
+    ).all() if branch_ids else []
+
+    branch_transactions: dict[int, dict[str, float]] = {branch_id: {} for branch_id in branch_ids}
+    for sale in branch_sales_rows:
+        branch_id = _to_int(sale.branch_id)
+        if branch_id is None or branch_id not in branch_transactions:
+            continue
+        key = _sale_transaction_key(sale.id, sale.client_sale_id)
+        branch_bucket = branch_transactions[branch_id]
+        branch_bucket[key] = branch_bucket.get(key, 0.0) + _to_float(sale.total_price)
+
+    total_branch_revenue = 0.0
+    branch_comparison = []
+    for branch_id in branch_ids:
+        transactions = branch_transactions.get(branch_id, {})
+        revenue = sum(transactions.values())
+        total_branch_revenue += revenue
+        branch_comparison.append(
+            {
+                "branch_id": branch_id,
+                "branch_name": branch_name_by_id.get(branch_id, f"Branch {branch_id}"),
+                "transactions": len(transactions),
+                "revenue": revenue,
+            }
+        )
+
+    branch_comparison.sort(key=lambda item: item["revenue"], reverse=True)
+    for index, item in enumerate(branch_comparison, start=1):
+        item["rank"] = index
+        item["share_percent"] = (item["revenue"] / total_branch_revenue * 100.0) if total_branch_revenue > 0 else 0.0
+
+    return {
+        "generated_at": now.isoformat(),
+        "window": {
+            "label": "yesterday",
+            "start": yesterday_start.date().isoformat(),
+            "end": (today_start.date() - timedelta(days=1)).isoformat(),
+        },
+        "yesterday_sales": {
+            "transactions": yesterday_sales_count,
+            "revenue": yesterday_sales_total,
+        },
+        "low_stock": {
+            "count": len(low_stock_items),
+            "items": low_stock_items[:8],
+            "threshold": int(settings.low_stock_threshold),
+        },
+        "expiring_products": {
+            "count": len(expiring_items),
+            "window_days": int(settings.expiry_warning_days),
+            "items": expiring_items[:8],
+        },
+        "debt_due": {
+            "supplier_due_amount": _to_float(getattr(purchase_due_row, "amount_due", 0)),
+            "supplier_due_count": _to_int(getattr(purchase_due_row, "due_count", 0)) or 0,
+            "customer_debt_amount": _to_float(getattr(creditor_due_row, "total_debt", 0)),
+            "customer_debt_count": _to_int(getattr(creditor_due_row, "creditor_count", 0)) or 0,
+        },
+        "best_sellers": best_sellers,
+        "slow_movers": slow_movers[:8],
+        "branch_comparison": branch_comparison,
+    }
 
 
 @router.get("/sales-dashboard")
