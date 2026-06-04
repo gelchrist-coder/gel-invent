@@ -13,6 +13,7 @@ if (typeof window !== "undefined" && navigator.onLine) {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
+    const swVersion = "20260604";
     const hadController = Boolean(navigator.serviceWorker.controller);
     let refreshing = false;
 
@@ -24,7 +25,7 @@ if ("serviceWorker" in navigator) {
       window.location.reload();
     });
 
-    navigator.serviceWorker.register("/sw.js").then((registration) => {
+    navigator.serviceWorker.register(`/sw.js?v=${swVersion}`).then((registration) => {
       void registration.update();
 
       if (registration.waiting && hadController) {

@@ -26,15 +26,14 @@ function resolveApiBaseUrl(): string {
   const hostname = typeof window !== "undefined" ? window.location.hostname : "";
   const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1";
 
-  // Use same-origin proxy by default so preview/staging deployments avoid CORS issues.
-  if (!configured || configured === "https://your-backend.vercel.app") {
+  // In hosted environments we always use same-origin /api rewrites.
+  // This prevents direct cross-origin backend calls and stale-token/domain issues.
+  if (!isLocalhost) {
     return "/api";
   }
 
-  // Hosted frontends should prefer the local /api rewrite even if VITE_API_URL
-  // is configured to the backend origin. Direct cross-origin calls can fail CORS
-  // on preview/staging deployments, while /api stays same-origin.
-  if (!isLocalhost && /^https?:\/\//i.test(configured)) {
+  // Use same-origin proxy by default so preview/staging deployments avoid CORS issues.
+  if (!configured || configured === "https://your-backend.vercel.app") {
     return "/api";
   }
 
