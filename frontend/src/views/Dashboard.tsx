@@ -289,38 +289,47 @@ export default function Dashboard({ onNavigate }: Props) {
     }
 
     setDashboardLoading(true);
+    const safetyTimeout = window.setTimeout(() => {
+      setLoading(false);
+      setDashboardLoading(false);
+    }, 20000);
 
     try {
-      const [productsData, settingsData, dashboardResponse, salesData, morningSummaryResponse] = await Promise.all([
+      const [productsResult, settingsResult, dashboardResult, salesResult, morningSummaryResult] = await Promise.allSettled([
         fetchProductsCached((fresh) => setProducts(fresh)),
         fetchSystemSettingsCached((fresh) => {
           setLowStockThreshold(fresh.low_stock_threshold);
           setExpiryWarningDays(fresh.expiry_warning_days);
-        }).catch(() => null),
+        }),
         canViewReports ? fetchSalesDashboard(rangeStartDate) : Promise.resolve(null),
-        canViewReports ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])).catch(() => []) : Promise.resolve([]),
-        canViewMorningSummary ? fetchMorningSummary().catch(() => null) : Promise.resolve(null),
+        canViewReports ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])) : Promise.resolve([]),
+        canViewMorningSummary ? fetchMorningSummary() : Promise.resolve(null),
       ]);
 
-      setProducts(productsData);
+      if (productsResult.status === "fulfilled") {
+        setProducts(productsResult.value as Product[]);
+      }
 
-      if (settingsData) {
+      if (settingsResult.status === "fulfilled" && settingsResult.value) {
+        const settingsData = settingsResult.value as { low_stock_threshold: number; expiry_warning_days: number };
         setLowStockThreshold(settingsData.low_stock_threshold);
         setExpiryWarningDays(settingsData.expiry_warning_days);
       }
 
       if (canViewReports) {
-        if (dashboardResponse) {
-          setDashboardData(dashboardResponse);
+        if (dashboardResult.status === "fulfilled" && dashboardResult.value) {
+          setDashboardData(dashboardResult.value as SalesDashboardResponse);
         }
-        setSalesForTrend(salesData as TrendSale[]);
+        if (salesResult.status === "fulfilled") {
+          setSalesForTrend(salesResult.value as TrendSale[]);
+        }
       } else {
         setDashboardData(null);
         setSalesForTrend([]);
       }
 
-      if (canViewMorningSummary && morningSummaryResponse) {
-        setMorningSummary(morningSummaryResponse as MorningSummaryResponse);
+      if (canViewMorningSummary && morningSummaryResult.status === "fulfilled" && morningSummaryResult.value) {
+        setMorningSummary(morningSummaryResult.value as MorningSummaryResponse);
       } else if (!canViewMorningSummary) {
         setMorningSummary(null);
       }
@@ -329,6 +338,7 @@ export default function Dashboard({ onNavigate }: Props) {
         console.warn("Dashboard load degraded due to temporary error:", error);
       }
     } finally {
+      window.clearTimeout(safetyTimeout);
       setLoading(false);
       setDashboardLoading(false);
     }
@@ -337,6 +347,40 @@ export default function Dashboard({ onNavigate }: Props) {
   const leadingBranch = useMemo(
     () => (morningSummary?.branch_comparison?.[0] ?? null),
     [morningSummary?.branch_comparison],
+  );
+
+  const morningActions = useMemo(
+    () => [
+      {
+        key: "restock",
+        label: "Restock Low Stock",
+        helper: `${morningSummary?.low_stock.count ?? 0} items`,
+        action: "inventory",
+        color: "#c2410c",
+      },
+      {
+        key: "expiry",
+        label: "Handle Expiring",
+        helper: `${morningSummary?.expiring_products.count ?? 0} products`,
+        action: "inventory",
+        color: "#a16207",
+      },
+      {
+        key: "debt",
+        label: "Review Debt Due",
+        helper: `${toCurrency(Number(morningSummary?.debt_due.customer_debt_amount || 0) + Number(morningSummary?.debt_due.supplier_due_amount || 0))}`,
+        action: "creditors",
+        color: "#b91c1c",
+      },
+      {
+        key: "branches",
+        label: "Open Branch Reports",
+        helper: leadingBranch ? `Leader: ${leadingBranch.branch_name}` : "Compare branches",
+        action: "reports",
+        color: "#1d4ed8",
+      },
+    ],
+    [leadingBranch, morningSummary],
   );
 
   useEffect(() => {
@@ -826,6 +870,27 @@ export default function Dashboard({ onNavigate }: Props) {
                 {morningSummary.debt_due.supplier_due_count} supplier due · {morningSummary.debt_due.customer_debt_count} customer debts
               </div>
             </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, marginBottom: 14 }}>
+            {morningActions.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onNavigate(item.action)}
+                style={{
+                  borderRadius: 10,
+                  border: "1px solid #dbe5f2",
+                  background: "#ffffff",
+                  padding: "10px 12px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 800, color: item.color, marginBottom: 4 }}>{item.label}</div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>{item.helper}</div>
+              </button>
+            ))}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
