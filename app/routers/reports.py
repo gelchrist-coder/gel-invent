@@ -22,6 +22,15 @@ def _to_float(value: object, default: float = 0.0) -> float:
         return default
 
 
+def _to_int(value: object) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)  # type: ignore[arg-type]
+    except Exception:
+        return None
+
+
 def _sale_transaction_key(sale_id: object, client_sale_id: object) -> str:
     raw = str(client_sale_id or "").strip()
     if not raw:
@@ -165,7 +174,12 @@ def get_sales_dashboard(
         .limit(10)
     ).all()
 
-    top_product_ids = sorted({int(tp.product_id) for tp in top_product_rows})
+    top_product_ids_set: set[int] = set()
+    for row in top_product_rows:
+        product_id = _to_int(row.product_id)
+        if product_id is not None:
+            top_product_ids_set.add(product_id)
+    top_product_ids = sorted(top_product_ids_set)
     top_product_records = db.scalars(
         select(Product).where(
             Product.id.in_(top_product_ids),
@@ -226,11 +240,24 @@ def get_sales_dashboard(
         transaction_items = transaction.setdefault("items", [])
         if isinstance(transaction_items, list):
             transaction_items.append({
-                "name": sale.product_name or f"Product #{sale.product_id}",
+                "name": sale.product_name or (f"Product #{sale.product_id}" if sale.product_id is not None else "Unknown product"),
                 "quantity": _to_float(sale.quantity),
             })
 
     recent_sales_data = list(recent_sales_grouped.values())[:10]
+
+    top_products_data = []
+    for row in top_product_rows:
+        product_id = _to_int(row.product_id)
+        product = top_product_by_id.get(product_id) if product_id is not None else None
+        fallback_name = f"Product #{product_id}" if product_id is not None else "Unknown product"
+        top_products_data.append(
+            {
+                "name": product.name if product else fallback_name,
+                "quantity_sold": float(row.quantity_sold),
+                "revenue": float(row.revenue),
+            }
+        )
     
     return {
         "today": {
@@ -246,14 +273,7 @@ def get_sales_dashboard(
             "total": float(month_summary["total"])
         },
         "payment_methods": payment_methods,
-        "top_products": [
-            {
-                "name": (top_product_by_id.get(int(tp.product_id)).name if top_product_by_id.get(int(tp.product_id)) else f"Product #{tp.product_id}"),
-                "quantity_sold": float(tp.quantity_sold),
-                "revenue": float(tp.revenue)
-            }
-            for tp in top_product_rows
-        ],
+        "top_products": top_products_data,
         "recent_sales": recent_sales_data
     }
 
