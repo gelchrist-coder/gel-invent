@@ -406,7 +406,9 @@ export default function Login({ onLogin }: LoginProps) {
     "Cosmetics",
     "Fashion",
     "Hardware",
+    "Construction Materials",
     "Agro",
+    "Electronics",
   ];
 
   const FEATURE_ITEMS = [

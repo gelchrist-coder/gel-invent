@@ -43,9 +43,16 @@ BUSINESS_TYPE_ALIASES = {
     "cosmetics": "Cosmetics",
     "fashion": "Fashion",
     "hardware": "Hardware",
+    "construction": "Construction Materials",
+    "construction material": "Construction Materials",
+    "construction materials": "Construction Materials",
+    "building material": "Construction Materials",
+    "building materials": "Construction Materials",
     "agro": "Agro",
     "agro input": "Agro",
     "agro inputs": "Agro",
+    "electronic": "Electronics",
+    "electronics": "Electronics",
 }
 
 
