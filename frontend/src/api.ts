@@ -689,11 +689,15 @@ export async function importData(payload: unknown, force: boolean = false): Prom
 
 export type ClearAllDataResponse = {
   message: string;
-  deleted: Record<string, number>;
-  total_deleted: number;
+  truncated_tables: string[];
+  truncated_count: number;
 };
 
 const CLIENT_DATA_CLEAR_KEYS = [
+  "token",
+  "user",
+  "activeBranchId",
+  "lastSuccessfulLoginAt",
   "businessInfo",
   "userInfo",
   "enableSupplierAutoSync",
@@ -744,7 +748,7 @@ export async function clearAllData(): Promise<ClearAllDataResponse> {
 
   const text = await response.text();
   if (!text) {
-    return { message: "All operational data cleared.", deleted: {}, total_deleted: 0 };
+    return { message: "Application database reset completed.", truncated_tables: [], truncated_count: 0 };
   }
 
   return JSON.parse(text) as ClearAllDataResponse;
@@ -770,6 +774,7 @@ export async function clearClientOperationalData(): Promise<void> {
     );
   }
 
+  window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
   window.dispatchEvent(new Event("offlineOutboxChanged"));
   window.dispatchEvent(new Event("productsUpdated"));
 }

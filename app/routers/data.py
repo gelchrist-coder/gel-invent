@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 try:
@@ -39,6 +40,23 @@ TENANT_OPERATIONAL_MODELS = (
     ("products", models.Product),
 )
 
+FULL_RESET_TABLE_NAMES = (
+    models.PasswordResetToken.__tablename__,
+    models.CreditTransaction.__tablename__,
+    models.SaleReturn.__tablename__,
+    models.PurchaseReturn.__tablename__,
+    models.SupplierPayment.__tablename__,
+    models.Purchase.__tablename__,
+    models.Sale.__tablename__,
+    models.StockMovement.__tablename__,
+    models.Creditor.__tablename__,
+    models.Supplier.__tablename__,
+    models.Product.__tablename__,
+    models.SystemSettings.__tablename__,
+    models.User.__tablename__,
+    models.Branch.__tablename__,
+)
+
 
 def _require_admin(current_user: models.User) -> None:
     ensure_permission(current_user, "manage_data", "Admin access required")
@@ -57,6 +75,13 @@ def _clear_tenant_operational_data(db: Session, tenant_user_ids: list[int]) -> d
 
     db.flush()
     return deleted_counts
+
+
+def _reset_application_database(db: Session) -> list[str]:
+    quoted_table_names = ", ".join(f'"{table_name}"' for table_name in FULL_RESET_TABLE_NAMES)
+    db.execute(text(f"TRUNCATE TABLE {quoted_table_names} RESTART IDENTITY CASCADE"))
+    db.flush()
+    return list(FULL_RESET_TABLE_NAMES)
 
 
 def _serialize_dt(value: Any) -> Any:
@@ -497,18 +522,16 @@ def clear_data(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    """Clear tenant operational data while keeping users, branches, and settings."""
+    """Reset the application database and restart IDs from 1."""
     _require_admin(current_user)
 
-    tenant_user_ids = get_tenant_user_ids(current_user, db)
-    deleted_counts = _clear_tenant_operational_data(db, tenant_user_ids)
-    total_deleted = sum(deleted_counts.values())
+    truncated_tables = _reset_application_database(db)
 
     db.commit()
     return {
-        "message": "All operational data cleared. Users, branches, and settings were kept.",
-        "deleted": deleted_counts,
-        "total_deleted": total_deleted,
+        "message": "Application database reset completed. All data was removed and IDs were restarted.",
+        "truncated_tables": truncated_tables,
+        "truncated_count": len(truncated_tables),
     }
 
 

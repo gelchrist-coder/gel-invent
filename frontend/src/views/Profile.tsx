@@ -354,7 +354,7 @@ export default function Profile() {
 
   const handleClearAllData = async () => {
     const confirmed = confirm(
-      "Clear all business data for this account? This permanently deletes products, suppliers, purchases, stock movements, sales, returns, creditors, and cached offline app data. Your login, branches, and system settings will stay intact."
+      "Reset the entire application database? This permanently deletes users, branches, products, suppliers, purchases, sales, settings, returns, creditors, and cached offline app data. All IDs will restart from 1."
     );
     if (!confirmed) {
       return;
@@ -368,17 +368,19 @@ export default function Profile() {
 
     setDataMessage(null);
     setClearingData(true);
+    let didResetDatabase = false;
     try {
       const result = await clearAllData();
+      didResetDatabase = true;
+      window.alert(`${result.message} You will be signed out now. Create a new account to start again from ID 1.`);
       await clearClientOperationalData();
-      const summary = result.total_deleted === 1
-        ? "1 record cleared."
-        : `${result.total_deleted} records cleared.`;
-      setDataMessage(`${result.message} ${summary}`.trim());
+      return;
     } catch (error) {
       setDataMessage(error instanceof Error ? error.message : "Failed to clear data");
     } finally {
-      setClearingData(false);
+      if (!didResetDatabase) {
+        setClearingData(false);
+      }
     }
   };
 
