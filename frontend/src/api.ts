@@ -303,6 +303,9 @@ export type AuthUser = {
   permissions?: string[] | null;
   business_name?: string | null;
   business_logo_url?: string | null;
+  business_types?: string[] | null;
+  product_categories?: string[] | null;
+  // Legacy compatibility alias for product_categories.
   categories?: string[] | null;
   branch_id?: number | null;
   is_active: boolean;
@@ -311,7 +314,7 @@ export type AuthUser = {
 export async function updateMyCategories(categories: string[]): Promise<AuthUser> {
   const updated = await jsonRequest<AuthUser>("/auth/me", {
     method: "PUT",
-    body: JSON.stringify({ categories }),
+    body: JSON.stringify({ product_categories: categories, categories }),
   });
   localStorage.setItem("user", JSON.stringify(updated));
   window.dispatchEvent(new CustomEvent("userChanged", { detail: updated }));

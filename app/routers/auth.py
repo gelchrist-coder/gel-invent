@@ -36,6 +36,18 @@ from app.permissions import ensure_permission, get_effective_role_name, get_role
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+BUSINESS_TYPE_ALIASES = {
+    "pharmacy": "Pharmacy",
+    "grocery": "Grocery",
+    "groceries": "Grocery",
+    "cosmetics": "Cosmetics",
+    "fashion": "Fashion",
+    "hardware": "Hardware",
+    "agro": "Agro",
+    "agro input": "Agro",
+    "agro inputs": "Agro",
+}
+
 
 # Schemas
 class UserCreate(BaseModel):
@@ -47,6 +59,9 @@ class UserCreate(BaseModel):
     business_location: Optional[str] = None
     recaptcha_token: Optional[str] = None
     business_logo_url: Optional[str] = None
+    business_types: Optional[list[str]] = None
+    product_categories: Optional[list[str]] = None
+    # Legacy input kept for compatibility during migration.
     categories: Optional[list[str]] = None
     branches: Optional[list[str]] = None  # Optional list of branch names
 
@@ -60,6 +75,9 @@ class UserResponse(BaseModel):
     permissions: list[str]
     business_name: Optional[str] = None
     business_logo_url: Optional[str] = None
+    business_types: Optional[list[str]] = None
+    product_categories: Optional[list[str]] = None
+    # Legacy compatibility alias for product_categories.
     categories: Optional[list[str]] = None
     branch_id: Optional[int] = None
     is_active: bool
@@ -85,6 +103,78 @@ def _parse_categories(value: Optional[str]) -> Optional[list[str]]:
     # Fallback: treat as comma-separated
     cleaned = [v.strip() for v in value.split(",") if v.strip()]
     return cleaned or None
+
+
+def _clean_string_list(values: Optional[list[str]]) -> Optional[list[str]]:
+    if not values:
+        return None
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        value = str(raw).strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(value)
+    return cleaned or None
+
+
+def _normalize_business_type(value: str) -> str | None:
+    normalized = " ".join(str(value or "").strip().lower().replace("_", " ").replace("-", " ").split())
+    if not normalized:
+        return None
+    return BUSINESS_TYPE_ALIASES.get(normalized)
+
+
+def _normalize_business_types(values: Optional[list[str]]) -> Optional[list[str]]:
+    if not values:
+        return None
+
+    normalized_values: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        normalized = _normalize_business_type(str(raw))
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized_values.append(normalized)
+    return normalized_values or None
+
+
+def _effective_business_types(user: User | None) -> Optional[list[str]]:
+    if user is None:
+        return None
+
+    explicit = _normalize_business_types(_parse_categories(getattr(user, "business_types", None)))
+    if explicit:
+        return explicit
+
+    legacy_categories = _parse_categories(getattr(user, "categories", None))
+    return _normalize_business_types(legacy_categories)
+
+
+def _effective_product_categories(user: User | None) -> Optional[list[str]]:
+    if user is None:
+        return None
+
+    explicit = _clean_string_list(_parse_categories(getattr(user, "product_categories", None)))
+    if explicit:
+        return explicit
+
+    return _clean_string_list(_parse_categories(getattr(user, "categories", None)))
+
+
+def _get_owner_profile_user(user: User, db: Session | None) -> User | None:
+    if db is None or is_admin(user) or not user.created_by:
+        return None
+    return db.query(User).filter(User.id == user.created_by).first()
 
 
 def _ordered_branch_names(primary_location: Optional[str], branches: Optional[list[str]]) -> list[str]:
@@ -132,7 +222,11 @@ def _verify_recaptcha_or_raise(token: Optional[str]) -> None:
         )
 
 
-def _serialize_user(user: User) -> UserResponse:
+def _serialize_user(user: User, db: Session | None = None) -> UserResponse:
+    owner = _get_owner_profile_user(user, db)
+    business_types = _effective_business_types(user) or _effective_business_types(owner)
+    product_categories = _effective_product_categories(user) or _effective_product_categories(owner)
+
     return UserResponse(
         id=user.id,
         email=user.email,
@@ -142,7 +236,9 @@ def _serialize_user(user: User) -> UserResponse:
         permissions=get_role_permissions(user),
         business_name=user.business_name,
         business_logo_url=getattr(user, "business_logo_url", None),
-        categories=_parse_categories(getattr(user, "categories", None)),
+        business_types=business_types,
+        product_categories=product_categories,
+        categories=product_categories,
         branch_id=getattr(user, "branch_id", None),
         is_active=user.is_active,
     )
@@ -158,7 +254,7 @@ class Token(BaseModel):
     user: UserResponse
 
 
-def _build_token_response(user: User) -> dict[str, object]:
+def _build_token_response(user: User, db: Session | None = None) -> dict[str, object]:
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email}, expires_delta=access_token_expires
@@ -166,7 +262,7 @@ def _build_token_response(user: User) -> dict[str, object]:
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": _serialize_user(user),
+        "user": _serialize_user(user, db),
     }
 
 
@@ -207,6 +303,8 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
         business_name = str(form.get("business_name") or "").strip() or None
         business_location = str(form.get("business_location") or "").strip() or None
         recaptcha_token = str(form.get("recaptcha_token") or "").strip() or None
+        business_types = _parse_list_input(form.get("business_types"))
+        product_categories = _parse_list_input(form.get("product_categories"))
         categories = _parse_list_input(form.get("categories"))
         branches = _parse_list_input(form.get("branches"))
         logo_file = form.get("business_logo")
@@ -220,6 +318,8 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
             business_name=business_name,
             business_location=business_location,
             recaptcha_token=recaptcha_token,
+            business_types=business_types,
+            product_categories=product_categories,
             categories=categories,
             branches=branches,
         )
@@ -255,6 +355,9 @@ class DeleteAccountRequest(BaseModel):
 
 
 class UpdateMeRequest(BaseModel):
+    business_types: Optional[list[str]] = None
+    product_categories: Optional[list[str]] = None
+    # Legacy compatibility alias for product_categories.
     categories: Optional[list[str]] = None
 
 
@@ -315,6 +418,9 @@ async def signup(request: Request, db: Session = Depends(get_db)):
         except Exception as exc:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
+    normalized_business_types = _normalize_business_types(user_data.business_types) or _normalize_business_types(user_data.categories)
+    normalized_product_categories = _clean_string_list(user_data.product_categories) or _clean_string_list(user_data.categories)
+
     new_user = User(
         supabase_user_id=supabase_user_id,
         email=email,
@@ -323,7 +429,9 @@ async def signup(request: Request, db: Session = Depends(get_db)):
         hashed_password=get_password_hash(user_data.password),
         business_name=user_data.business_name,
         business_logo_url=logo_url,
-        categories=json.dumps(user_data.categories) if user_data.categories else None,
+        categories=json.dumps(normalized_product_categories) if normalized_product_categories else None,
+        business_types=json.dumps(normalized_business_types) if normalized_business_types else None,
+        product_categories=json.dumps(normalized_product_categories) if normalized_product_categories else None,
         role="Admin",
         is_active=True,
     )
@@ -360,7 +468,7 @@ async def signup(request: Request, db: Session = Depends(get_db)):
                 pass
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create user") from exc
 
-    return _build_token_response(new_user)
+    return _build_token_response(new_user, db)
 
 
 @router.post("/login", response_model=Token)
@@ -404,7 +512,7 @@ def login(
 
     # Email verification disabled.
     
-    return _build_token_response(user)
+    return _build_token_response(user, db)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -413,26 +521,7 @@ def get_current_user_info(
     db: Session = Depends(get_db),
 ):
     """Get current user information"""
-    # Employees should see the business categories configured by the owner.
-    categories = _parse_categories(getattr(current_user, "categories", None))
-    if not categories and not is_admin(current_user) and current_user.created_by:
-        owner = db.query(User).filter(User.id == current_user.created_by).first()
-        if owner:
-            categories = _parse_categories(getattr(owner, "categories", None))
-
-    return UserResponse(
-        id=current_user.id,
-        email=current_user.email,
-        phone=getattr(current_user, "phone", None),
-        name=current_user.name,
-        role=get_effective_role_name(current_user),
-        permissions=get_role_permissions(current_user),
-        business_name=current_user.business_name,
-        business_logo_url=getattr(current_user, "business_logo_url", None),
-        categories=categories,
-        branch_id=getattr(current_user, "branch_id", None),
-        is_active=current_user.is_active,
-    )
+    return _serialize_user(current_user, db)
 
 
 @router.put("/me", response_model=UserResponse)
@@ -443,30 +532,27 @@ def update_current_user_info(
 ):
     """Update current user's info.
 
-    Currently supports updating business categories (Admin only).
+    Supports updating business types and product categories (Admin only).
     """
-    if payload.categories is None:
-        return _serialize_user(current_user)
+    next_product_categories = payload.product_categories if payload.product_categories is not None else payload.categories
+    if next_product_categories is None and payload.business_types is None:
+        return _serialize_user(current_user, db)
 
-    ensure_permission(current_user, "manage_business_profile", "Only Admin can update categories")
+    ensure_permission(current_user, "manage_business_profile", "Only Admin can update business profile")
 
-    cleaned: list[str] = []
-    seen = set()
-    for raw in payload.categories:
-        value = str(raw).strip()
-        if not value:
-            continue
-        key = value.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        cleaned.append(value)
+    if payload.business_types is not None:
+        normalized_business_types = _normalize_business_types(payload.business_types)
+        current_user.business_types = json.dumps(normalized_business_types) if normalized_business_types else None
 
-    current_user.categories = json.dumps(cleaned) if cleaned else None
+    if next_product_categories is not None:
+        cleaned_product_categories = _clean_string_list(next_product_categories)
+        serialized_categories = json.dumps(cleaned_product_categories) if cleaned_product_categories else None
+        current_user.product_categories = serialized_categories
+        current_user.categories = serialized_categories
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
-    return _serialize_user(current_user)
+    return _serialize_user(current_user, db)
 
 
 @router.post("/me/logo", response_model=UserResponse)
@@ -496,7 +582,7 @@ async def upload_business_logo(
     db.add(current_user)
     db.commit()
     db.refresh(current_user)
-    return _serialize_user(current_user)
+    return _serialize_user(current_user, db)
 
 
 

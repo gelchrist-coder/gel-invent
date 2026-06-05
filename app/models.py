@@ -23,8 +23,14 @@ class User(Base):
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), index=True, default=None)
     business_name: Mapped[str | None] = mapped_column(String(255), default=None)
     business_logo_url: Mapped[str | None] = mapped_column(String(512), default=None)
-    # JSON string (list of categories). Kept as Text for portability.
+    # Legacy JSON string used for business/profile categories and later reused
+    # as the product category library. Kept for compatibility during the
+    # business_types/product_categories migration.
     categories: Mapped[str | None] = mapped_column(Text, default=None)
+    # JSON string (list of business types such as pharmacy, grocery, fashion).
+    business_types: Mapped[str | None] = mapped_column(Text, default=None)
+    # JSON string (list of product categories for catalog organization).
+    product_categories: Mapped[str | None] = mapped_column(Text, default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

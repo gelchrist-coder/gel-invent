@@ -110,6 +110,9 @@ export type StoredUser = {
   phone?: string | null;
   business_name?: string;
   business_logo_url?: string | null;
+  business_types?: string[] | null;
+  product_categories?: string[] | null;
+  categories?: string[] | null;
   role?: string;
   permissions?: FrontendPermission[] | null;
   branch_id?: number | null;

@@ -44,6 +44,9 @@ type AuthResponse = {
     permissions?: string[] | null;
     business_name?: string | null;
     business_logo_url?: string | null;
+    business_types?: string[] | null;
+    product_categories?: string[] | null;
+    categories?: string[] | null;
     branch_id?: number | null;
   } | null;
 };
@@ -116,12 +119,11 @@ export default function Login({ onLogin }: LoginProps) {
     confirmPassword: "",
     businessName: "",
     businessLocation: "",
-    categories: [] as string[],
+    businessTypes: [] as string[],
     hasBranches: false,
     branches: [] as string[],
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [categoryInput, setCategoryInput] = useState("");
   const [branchInput, setBranchInput] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -398,17 +400,13 @@ export default function Login({ onLogin }: LoginProps) {
     await completeAuthenticatedSession(loginData, identifier, password);
   };
 
-  const COMMON_CATEGORIES = [
-    "Beverages",
-    "Food",
-    "Groceries",
-    "Cosmetics",
+  const BUSINESS_TYPE_OPTIONS = [
     "Pharmacy",
-    "Stationery",
-    "Electronics",
-    "Household",
-    "Baby Products",
-    "Cleaning",
+    "Grocery",
+    "Cosmetics",
+    "Fashion",
+    "Hardware",
+    "Agro",
   ];
 
   const FEATURE_ITEMS = [
@@ -445,21 +443,13 @@ export default function Login({ onLogin }: LoginProps) {
     },
   ];
 
-  const addCategory = (raw: string) => {
-    const value = raw.trim();
-    if (!value) return;
-    if (formData.categories.some((c) => c.toLowerCase() === value.toLowerCase())) return;
+  const toggleBusinessType = (value: string) => {
+    const exists = formData.businessTypes.some((businessType) => businessType.toLowerCase() === value.toLowerCase());
     setFormData({
       ...formData,
-      categories: [...formData.categories, value],
-    });
-    setCategoryInput("");
-  };
-
-  const removeCategory = (value: string) => {
-    setFormData({
-      ...formData,
-      categories: formData.categories.filter((c) => c !== value),
+      businessTypes: exists
+        ? formData.businessTypes.filter((businessType) => businessType.toLowerCase() !== value.toLowerCase())
+        : [...formData.businessTypes, value],
     });
   };
 
@@ -606,6 +596,11 @@ export default function Login({ onLogin }: LoginProps) {
           setLoading(false);
           return;
         }
+        if (formData.businessTypes.length === 0) {
+          setError("Please select at least one business type");
+          setLoading(false);
+          return;
+        }
         if (formData.password !== formData.confirmPassword) {
           setError("Passwords do not match");
           setLoading(false);
@@ -651,7 +646,7 @@ export default function Login({ onLogin }: LoginProps) {
         signupFormData.append("password", formData.password);
         signupFormData.append("business_name", formData.businessName.trim());
         signupFormData.append("business_location", formData.businessLocation.trim());
-        signupFormData.append("categories", JSON.stringify(formData.categories));
+        signupFormData.append("business_types", JSON.stringify(formData.businessTypes));
         signupFormData.append("branches", JSON.stringify(formData.hasBranches ? formData.branches : []));
         if (recaptchaEnabled) {
           signupFormData.append("recaptcha_token", recaptchaToken);
@@ -955,63 +950,42 @@ export default function Login({ onLogin }: LoginProps) {
 
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    Business Categories
+                    Business Types *
                   </span>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input
-                      type="text"
-                      value={categoryInput}
-                      onChange={(e) => setCategoryInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addCategory(categoryInput);
-                        }
-                      }}
-                      placeholder="Type a category and press Enter"
-                      list="category-suggestions"
-                      className="input"
-                      style={{ padding: 12, flex: 1 }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => addCategory(categoryInput)}
-                      className="button"
-                      style={{ padding: "12px 14px" }}
-                    >
-                      Add
-                    </button>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+                    {BUSINESS_TYPE_OPTIONS.map((businessType) => {
+                      const isSelected = formData.businessTypes.some((value) => value === businessType);
+                      return (
+                        <button
+                          key={businessType}
+                          type="button"
+                          onClick={() => toggleBusinessType(businessType)}
+                          style={{
+                            padding: "12px 14px",
+                            borderRadius: 10,
+                            border: isSelected ? "1px solid #1d4ed8" : "1px solid #d1d5db",
+                            background: isSelected ? "#eff6ff" : "#ffffff",
+                            color: isSelected ? "#1d4ed8" : "#374151",
+                            fontSize: 14,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            textAlign: "left",
+                          }}
+                        >
+                          {businessType}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <datalist id="category-suggestions">
-                    {COMMON_CATEGORIES.map((c) => (
-                      <option key={c} value={c} />
-                    ))}
-                  </datalist>
+                  <span style={{ fontSize: 12, color: "#6b7280" }}>
+                    Choose the type of business you run. Product categories can be managed separately after signup.
+                  </span>
 
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      addCategory(e.target.value);
-                      e.currentTarget.value = "";
-                    }}
-                    className="input"
-                    style={{ padding: 12 }}
-                  >
-                    <option value="" disabled>
-                      Or select a common category
-                    </option>
-                    {COMMON_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-
-                  {formData.categories.length > 0 && (
+                  {formData.businessTypes.length > 0 && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-                      {formData.categories.map((c) => (
+                      {formData.businessTypes.map((businessType) => (
                         <span
-                          key={c}
+                          key={businessType}
                           style={{
                             display: "inline-flex",
                             alignItems: "center",
@@ -1025,10 +999,10 @@ export default function Login({ onLogin }: LoginProps) {
                             fontWeight: 600,
                           }}
                         >
-                          {c}
+                          {businessType}
                           <button
                             type="button"
-                            onClick={() => removeCategory(c)}
+                            onClick={() => toggleBusinessType(businessType)}
                             style={{
                               border: "none",
                               background: "transparent",
@@ -1037,7 +1011,7 @@ export default function Login({ onLogin }: LoginProps) {
                               fontWeight: 800,
                               lineHeight: 1,
                             }}
-                            aria-label={`Remove ${c}`}
+                            aria-label={`Remove ${businessType}`}
                           >
                             ×
                           </button>
