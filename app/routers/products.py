@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func
-from sqlalchemy.orm import Session
-from typing import Optional
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, selectinload
+from typing import Any, Optional
 from pydantic import BaseModel
 from datetime import date, datetime
 from decimal import Decimal
@@ -167,6 +167,105 @@ def _apply_product_defaults(product_data: dict) -> dict:
     return normalized
 
 
+def _normalize_extension_text(value: str, *, field_name: str) -> str:
+    normalized = " ".join(str(value).strip().split())
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} is required")
+    return normalized
+
+
+def _normalize_variant_attributes(attributes_json: dict[str, Any] | None) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in (attributes_json or {}).items():
+        key = " ".join(str(raw_key).strip().split())
+        if not key:
+            continue
+        if isinstance(raw_value, str):
+            value = " ".join(raw_value.strip().split())
+            normalized[key] = value or None
+            continue
+        normalized[key] = raw_value
+    return normalized
+
+
+def _prepare_product_variants(items: list[schemas.ProductVariantCreate]) -> list[dict[str, Any]]:
+    prepared: list[dict[str, Any]] = []
+    seen_labels: set[str] = set()
+    for index, item in enumerate(items):
+        label = _normalize_extension_text(item.label, field_name="Variant label")
+        signature = label.lower()
+        if signature in seen_labels:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Variant labels must be unique per product")
+        seen_labels.add(signature)
+        prepared.append(
+            {
+                "label": label,
+                "attributes_json": _normalize_variant_attributes(item.attributes_json),
+                "is_active": bool(item.is_active),
+                "sort_order": item.sort_order if item.sort_order is not None else index,
+            }
+        )
+    return prepared
+
+
+def _prepare_product_unit_conversions(items: list[schemas.ProductUnitConversionCreate]) -> list[dict[str, Any]]:
+    prepared: list[dict[str, Any]] = []
+    seen_units: set[str] = set()
+    for index, item in enumerate(items):
+        unit_name = _normalize_extension_text(item.unit_name, field_name="Conversion unit name")
+        signature = unit_name.lower()
+        if signature in seen_units:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unit conversion names must be unique per product",
+            )
+        seen_units.add(signature)
+        prepared.append(
+            {
+                "unit_name": unit_name,
+                "base_quantity": item.base_quantity,
+                "is_sale_unit": bool(item.is_sale_unit),
+                "is_purchase_unit": bool(item.is_purchase_unit),
+                "sort_order": item.sort_order if item.sort_order is not None else index,
+            }
+        )
+    return prepared
+
+
+def _sync_product_extensions(
+    product: models.Product,
+    *,
+    variants: list[dict[str, Any]] | None = None,
+    unit_conversions: list[dict[str, Any]] | None = None,
+) -> None:
+    if variants is not None:
+        product.variants = [models.ProductVariant(**item) for item in variants]
+    if unit_conversions is not None:
+        product.unit_conversions = [models.ProductUnitConversion(**item) for item in unit_conversions]
+
+
+def _resolve_product_variant(
+    db: Session,
+    *,
+    tenant_user_ids: list[int],
+    active_branch_id: int,
+    product_id: int,
+    variant_id: int | None,
+) -> models.ProductVariant | None:
+    if variant_id is None:
+        return None
+
+    variant = db.query(models.ProductVariant).join(models.Product).filter(
+        models.ProductVariant.id == variant_id,
+        models.ProductVariant.product_id == product_id,
+        models.Product.branch_id == active_branch_id,
+        models.Product.user_id.in_(tenant_user_ids),
+    ).first()
+    if not variant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product variant not found")
+    return variant
+
+
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
     sku: Optional[str] = None
@@ -189,6 +288,8 @@ class ProductUpdate(BaseModel):
     pack_cost_price: Optional[Decimal] = None
     selling_price: Optional[Decimal] = None
     pack_selling_price: Optional[Decimal] = None
+    variants: list[schemas.ProductVariantCreate] | None = None
+    unit_conversions: list[schemas.ProductUnitConversionCreate] | None = None
 
 
 @router.post("", response_model=schemas.ProductRead, status_code=status.HTTP_201_CREATED)
@@ -201,6 +302,8 @@ def create_product(
     ensure_permission(current_user, "manage_catalog", "Only Admin and Manager can manage products")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     normalized_barcode = (payload.barcode or "").strip() or None
+    prepared_variants = _prepare_product_variants(payload.variants)
+    prepared_unit_conversions = _prepare_product_unit_conversions(payload.unit_conversions)
 
     # Check for duplicate SKU within the branch's products
     existing = db.query(models.Product).filter(
@@ -228,7 +331,7 @@ def create_product(
 
     # Extract initial_stock before creating product
     initial_stock = payload.initial_stock
-    product_data = payload.model_dump(exclude={'initial_stock', 'initial_location'})
+    product_data = payload.model_dump(exclude={'initial_stock', 'initial_location', 'variants', 'unit_conversions'})
     product_data['barcode'] = normalized_barcode
     product_data['user_id'] = current_user.id
     product_data['branch_id'] = active_branch_id
@@ -247,8 +350,12 @@ def create_product(
     
     product = models.Product(**product_data)
     db.add(product)
-    db.commit()
-    db.refresh(product)
+    db.flush()
+    _sync_product_extensions(
+        product,
+        variants=prepared_variants,
+        unit_conversions=prepared_unit_conversions,
+    )
     
     # Create initial stock movement if initial_stock was provided
     if initial_stock and initial_stock > 0:
@@ -265,7 +372,8 @@ def create_product(
             expiry_date=product.expiry_date,
         )
         db.add(movement)
-        db.commit()
+    db.commit()
+    db.refresh(product)
 
     product.current_stock = initial_stock if (initial_stock and initial_stock > 0) else Decimal(0)
 
@@ -302,7 +410,10 @@ def list_products(
     )
     db.commit()
 
-    products = db.query(models.Product).filter(
+    products = db.query(models.Product).options(
+        selectinload(models.Product.variants),
+        selectinload(models.Product.unit_conversions),
+    ).filter(
         models.Product.user_id.in_(tenant_user_ids),
         models.Product.branch_id == active_branch_id,
     ).order_by(models.Product.created_at.desc()).all()
@@ -369,13 +480,24 @@ def get_product(
     )
     db.commit()
 
-    product = db.query(models.Product).filter(
+    product = db.query(models.Product).options(
+        selectinload(models.Product.variants),
+        selectinload(models.Product.unit_conversions),
+    ).filter(
         models.Product.id == product_id,
         models.Product.user_id.in_(tenant_user_ids),
         models.Product.branch_id == active_branch_id,
     ).first()
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    variant = _resolve_product_variant(
+        db,
+        tenant_user_ids=tenant_user_ids,
+        active_branch_id=active_branch_id,
+        product_id=product_id,
+        variant_id=payload.variant_id,
+    )
     
     # Add created_by_name
     creator = db.query(models.User).filter(models.User.id == product.user_id).first()
@@ -444,11 +566,19 @@ def record_movement(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expiry date is required for New Stock of perishable products")
 
     if payload.change < 0:
-        available_stock = db.query(func.coalesce(func.sum(models.StockMovement.change), 0)).filter(
+        available_stock_query = db.query(func.coalesce(func.sum(models.StockMovement.change), 0)).filter(
             models.StockMovement.product_id == product_id,
             models.StockMovement.user_id.in_(tenant_user_ids),
             models.StockMovement.branch_id == active_branch_id,
-        ).scalar()
+        )
+        if variant is not None:
+            available_stock_query = available_stock_query.filter(
+                or_(
+                    models.StockMovement.variant_id == variant.id,
+                    models.StockMovement.variant_id.is_(None),
+                )
+            )
+        available_stock = available_stock_query.scalar()
         if available_stock is None:
             available_stock = Decimal(0)
         if (-payload.change) > available_stock:
@@ -466,6 +596,7 @@ def record_movement(
         movement_data["batch_number"] = movement_data.get("batch_number")
     movement_data["user_id"] = current_user.id
     movement_data["branch_id"] = active_branch_id
+    movement_data["variant_id"] = variant.id if variant is not None else None
     # IMPORTANT: do not fall back to product.expiry_date for new stock.
     # Expiry must be recorded per batch (movement), not inherited from a previous batch.
     
@@ -486,7 +617,10 @@ def list_movements(
 ):
     ensure_permission(current_user, "view_inventory")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
-    product = db.query(models.Product).filter(
+    product = db.query(models.Product).options(
+        selectinload(models.Product.variants),
+        selectinload(models.Product.unit_conversions),
+    ).filter(
         models.Product.id == product_id,
         models.Product.user_id.in_(tenant_user_ids),
         models.Product.branch_id == active_branch_id,
@@ -558,7 +692,8 @@ def update_product(
                 )
 
     # Update only provided fields
-    update_data = payload.model_dump(exclude_unset=True)
+    provided_fields = payload.model_fields_set
+    update_data = payload.model_dump(exclude_unset=True, exclude={"variants", "unit_conversions"})
     if "barcode" in update_data:
         update_data["barcode"] = normalized_barcode
     if any(key in update_data for key in PRODUCT_METADATA_FIELDS):
@@ -589,6 +724,14 @@ def update_product(
             )
     for key, value in update_data.items():
         setattr(product, key, value)
+
+    if "variants" in provided_fields:
+        _sync_product_extensions(product, variants=_prepare_product_variants(payload.variants or []))
+    if "unit_conversions" in provided_fields:
+        _sync_product_extensions(
+            product,
+            unit_conversions=_prepare_product_unit_conversions(payload.unit_conversions or []),
+        )
     
     db.commit()
     db.refresh(product)

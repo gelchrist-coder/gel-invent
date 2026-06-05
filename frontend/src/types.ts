@@ -1,5 +1,41 @@
 export type MeasurementType = "count" | "weight" | "volume" | "length";
 
+export type ProductVariant = {
+  id: number;
+  label: string;
+  attributes_json: Record<string, unknown>;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProductUnitConversion = {
+  id: number;
+  unit_name: string;
+  base_quantity: number;
+  is_sale_unit: boolean;
+  is_purchase_unit: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NewProductVariant = {
+  label: string;
+  attributes_json?: Record<string, unknown>;
+  is_active?: boolean;
+  sort_order?: number;
+};
+
+export type NewProductUnitConversion = {
+  unit_name: string;
+  base_quantity: number;
+  is_sale_unit?: boolean;
+  is_purchase_unit?: boolean;
+  sort_order?: number;
+};
+
 export type Product = {
   id: number;
   sku: string;
@@ -30,11 +66,14 @@ export type Product = {
   current_stock?: number | null;
   active_batch_count?: number | null;
   next_batch_expiry_date?: string | null;
+  variants?: ProductVariant[];
+  unit_conversions?: ProductUnitConversion[];
 };
 
 export type StockMovement = {
   id: number;
   product_id: number;
+  variant_id?: number | null;
   change: number;
   reason: string;
   batch_number?: string | null;
@@ -68,11 +107,14 @@ export type NewProduct = {
   selling_price?: number | null;
   pack_selling_price?: number | null;
   initial_stock?: number;
+  variants?: NewProductVariant[];
+  unit_conversions?: NewProductUnitConversion[];
 };
 
 export type NewMovement = {
   change: number;
   reason?: string;
+  variant_id?: number | null;
   batch_number?: string | null;
   expiry_date?: string | null;
   unit_cost_price?: number | null;
@@ -83,8 +125,9 @@ export type Sale = {
   id: number;
   client_sale_id?: string | null;
   product_id: number;
+  variant_id?: number | null;
   quantity: number;
-  sale_unit_type?: "piece" | "pack";
+  sale_unit_type?: string;
   pack_quantity?: number | null;
   unit_price: number;
   total_price: number;
@@ -112,8 +155,9 @@ export type SaleBatchOption = {
 export type NewSale = {
   client_sale_id?: string;
   product_id: number;
+  variant_id?: number | null;
   quantity: number;
-  sale_unit_type?: "piece" | "pack";
+  sale_unit_type?: string;
   pack_quantity?: number;
   preferred_batch_number?: string | null;
   unit_price: number;
@@ -174,6 +218,7 @@ export type Purchase = {
   supplier_id?: number | null;
   supplier_name: string;
   product_id?: number | null;
+  variant_id?: number | null;
   product_name: string;
   product_sku: string;
   stock_movement_id?: number | null;
@@ -195,6 +240,7 @@ export type Purchase = {
 
 export type NewPurchase = {
   product_id: number;
+  variant_id?: number | null;
   supplier_id?: number | null;
   supplier_name?: string | null;
   invoice_number?: string | null;
@@ -211,6 +257,7 @@ export type NewPurchase = {
 
 export type NewPurchaseOrderItem = {
   product_id: number;
+  variant_id?: number | null;
   quantity: number;
   unit_cost_price: number;
   unit_selling_price?: number | null;

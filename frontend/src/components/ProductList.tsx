@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Product } from "../types";
 import { updateMyCategories } from "../api";
 import { useAppCategories } from "../categories";
-import { getProductBatchSummary, getProductSearchText, getProductVariantSummary } from "../product-display";
+import { getProductBatchSummary, getProductSearchText, getProductUnitConversionSummary, getProductVariantSummary } from "../product-display";
 import { useCapabilities, useExpiryTracking, useSystemSettings } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
@@ -631,6 +631,7 @@ export default function ProductList({
             const stockLoaded = stock !== undefined;
             const profitMargin = calculateProfitMargin(p.cost_price, p.selling_price);
             const variantSummary = showVariantMetadata ? getProductVariantSummary(p) : null;
+            const unitConversionSummary = capabilities.unit_conversions ? getProductUnitConversionSummary(p) : null;
             const batchSummary = showBatchMetadata ? getProductBatchSummary(p, { includeNextExpiry: usesExpiryTracking }) : null;
 
             return (
@@ -650,6 +651,9 @@ export default function ProductList({
                     <div style={{ fontSize: 12, color: "#6b7280" }}>SKU: {p.sku}</div>
                     {variantSummary ? (
                       <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{variantSummary}</div>
+                    ) : null}
+                    {unitConversionSummary ? (
+                      <div style={{ fontSize: 12, color: "#0f766e", marginTop: 4 }}>{unitConversionSummary}</div>
                     ) : null}
                     {p.supplier ? (
                       <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>Supplier: {p.supplier}</div>
@@ -788,6 +792,7 @@ export default function ProductList({
                 const stockLoaded = stock !== undefined;
                 const profitMargin = calculateProfitMargin(p.cost_price, p.selling_price);
                 const variantSummary = showVariantMetadata ? getProductVariantSummary(p) : null;
+                const unitConversionSummary = capabilities.unit_conversions ? getProductUnitConversionSummary(p) : null;
                 const batchSummary = showBatchMetadata ? getProductBatchSummary(p, { includeNextExpiry: usesExpiryTracking }) : null;
 
                 return (
@@ -802,6 +807,9 @@ export default function ProductList({
                       <div>{p.name}</div>
                       {variantSummary ? (
                         <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{variantSummary}</div>
+                      ) : null}
+                      {unitConversionSummary ? (
+                        <div style={{ fontSize: 12, color: "#0f766e", marginTop: 4 }}>{unitConversionSummary}</div>
                       ) : null}
                       {p.supplier ? (
                         <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>

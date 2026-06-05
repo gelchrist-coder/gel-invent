@@ -18,12 +18,82 @@ type Props = {
   layoutMode?: "card" | "modal";
 };
 
-const UNITS = ["pcs", "box", "pack", "dozen", "carton", "bundle", "unit"];
+type VariantDraft = {
+  label: string;
+  attributesText: string;
+  isActive: boolean;
+};
+
+type UnitConversionDraft = {
+  unit_name: string;
+  base_quantity: string;
+  is_sale_unit: boolean;
+  is_purchase_unit: boolean;
+};
+
+const UNIT_SUGGESTIONS = [
+  "pcs",
+  "unit",
+  "box",
+  "pack",
+  "dozen",
+  "carton",
+  "bundle",
+  "kg",
+  "g",
+  "litre",
+  "ml",
+  "meter",
+  "cm",
+  "bag",
+  "sack",
+  "rod",
+];
 const MAX_VISIBLE_SUPPLIER_OPTIONS = 100;
 
 const cleanOptionalText = (value: string | null | undefined): string | undefined => {
   const normalized = (value ?? "").trim();
   return normalized || undefined;
+};
+
+const createVariantDraft = (): VariantDraft => ({
+  label: "",
+  attributesText: "",
+  isActive: true,
+});
+
+const createUnitConversionDraft = (): UnitConversionDraft => ({
+  unit_name: "",
+  base_quantity: "",
+  is_sale_unit: true,
+  is_purchase_unit: false,
+});
+
+const parseVariantAttributes = (value: string): { attributes: Record<string, string>; invalidTokens: string[] } => {
+  const attributes: Record<string, string> = {};
+  const invalidTokens: string[] = [];
+  const tokens = value
+    .split(/\n|,/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  tokens.forEach((token) => {
+    const separatorIndex = token.includes(":") ? token.indexOf(":") : token.indexOf("=");
+    if (separatorIndex <= 0) {
+      invalidTokens.push(token);
+      return;
+    }
+
+    const rawKey = token.slice(0, separatorIndex).trim();
+    const rawValue = token.slice(separatorIndex + 1).trim();
+    if (!rawKey || !rawValue) {
+      invalidTokens.push(token);
+      return;
+    }
+    attributes[rawKey] = rawValue;
+  });
+
+  return { attributes, invalidTokens };
 };
 
 export default function ProductForm({
@@ -69,6 +139,8 @@ export default function ProductForm({
   const [cameraStatus, setCameraStatus] = useState<string | null>(null);
 
   const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
+  const [variantDrafts, setVariantDrafts] = useState<VariantDraft[]>([]);
+  const [unitConversionDrafts, setUnitConversionDrafts] = useState<UnitConversionDraft[]>([]);
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const stopCameraScannerRef = useRef<(() => void) | null>(null);
@@ -324,6 +396,53 @@ export default function ProductForm({
       allSupplierNames.find((name) => name.toLowerCase() === supplierName.toLowerCase()) ?? supplierName;
 
     const isKnownSupplier = allSupplierNames.some((name) => name.toLowerCase() === normalizedSupplierName.toLowerCase());
+    const preparedVariants = variantDrafts.reduce<NewProduct["variants"]>((items, draft, index) => {
+      const label = cleanOptionalText(draft.label);
+      const rawAttributes = draft.attributesText.trim();
+
+      if (!label && !rawAttributes) {
+        return items;
+      }
+
+      if (!label) {
+        throw new Error("Each product variant row needs a label.");
+      }
+
+      const { attributes, invalidTokens } = parseVariantAttributes(rawAttributes);
+      if (invalidTokens.length > 0) {
+        throw new Error("Variant attributes must use key:value or key=value format.");
+      }
+
+      items.push({
+        label,
+        attributes_json: attributes,
+        is_active: draft.isActive,
+        sort_order: index,
+      });
+      return items;
+    }, []);
+    const preparedUnitConversions = unitConversionDrafts.reduce<NewProduct["unit_conversions"]>((items, draft, index) => {
+      const unitName = cleanOptionalText(draft.unit_name);
+      const rawBaseQuantity = draft.base_quantity.trim();
+
+      if (!unitName && !rawBaseQuantity) {
+        return items;
+      }
+
+      const baseQuantity = Number.parseFloat(rawBaseQuantity);
+      if (!unitName || !Number.isFinite(baseQuantity) || baseQuantity <= 0) {
+        throw new Error("Each unit conversion needs a unit name and a positive base quantity.");
+      }
+
+      items.push({
+        unit_name: unitName,
+        base_quantity: baseQuantity,
+        is_sale_unit: draft.is_sale_unit,
+        is_purchase_unit: draft.is_purchase_unit,
+        sort_order: index,
+      });
+      return items;
+    }, []);
 
     setBusy(true);
     setSubmittingMode(mode);
@@ -400,6 +519,8 @@ export default function ProductForm({
         selling_price: form.sellingPrice ? parseFloat(form.sellingPrice) : undefined,
         pack_selling_price: form.packSellingPrice ? parseFloat(form.packSellingPrice) : undefined,
         initial_stock: actualStock,
+        variants: preparedVariants,
+        unit_conversions: preparedUnitConversions,
       }, canManageBranches ? effectiveBranchId : null);
       
       if (mode === "saveAndNew") {
@@ -432,6 +553,8 @@ export default function ProductForm({
           supplier: normalizedSupplierName,
           status: form.status || "active",
         });
+        setVariantDrafts([]);
+        setUnitConversionDrafts([]);
         setIsPerishable(false);
         // Focus on name field
         setTimeout(() => {
@@ -473,10 +596,10 @@ export default function ProductForm({
       </div>
 
       <form onSubmit={submit} className="grid" style={{ gap: isModalLayout ? 14 : 20 }}>
-        {/* Basic Information */}
+        {/* Core */}
         <div style={modalSectionStyle}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
-            Basic Information
+            Core
           </h3>
           <div className="grid" style={{ gap: 12 }}>
             <div className="form-row">
@@ -622,143 +745,115 @@ export default function ProductForm({
                 rows={3}
               />
             </label>
-
-            {capabilities.expiry_tracking ? (
-              <div style={{ marginTop: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "block" }}>Product Type</span>
-                <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                    <input
-                      type="radio"
-                      name="perishableType"
-                      checked={!isPerishable}
-                      onChange={() => {
-                        setIsPerishable(false);
-                        setForm({ ...form, expiry_date: null });
-                      }}
-                      style={{ width: 18, height: 18, accentColor: "#3b82f6" }}
-                    />
-                    <span style={{ fontSize: 14 }}>Non-Perishable</span>
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                    <input
-                      type="radio"
-                      name="perishableType"
-                      checked={isPerishable}
-                      onChange={() => setIsPerishable(true)}
-                      style={{ width: 18, height: 18, accentColor: "#3b82f6" }}
-                    />
-                    <span style={{ fontSize: 14 }}>Perishable</span>
-                  </label>
-                </div>
-
-                {isPerishable ? (
-                  <label>
-                    Expiry Date *
-                    <input
-                      className="input"
-                      type="date"
-                      value={form.expiry_date ?? ""}
-                      onChange={(e) => setForm({ ...form, expiry_date: e.target.value || null })}
-                      min={new Date().toISOString().split("T")[0]}
-                      required
-                    />
-                    <small style={{ color: "#ef4444", fontSize: 12, marginTop: 4, display: "block" }}>
-                      Required for perishable goods
-                    </small>
-                  </label>
-                ) : null}
-              </div>
-            ) : null}
-
-            {canConfigureVariants ? (
-              <div style={{ marginTop: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "block" }}>Variant Details</span>
-                <div className="grid" style={{ gap: 12 }}>
-                  {capabilities.variants ? (
-                    <div className="form-row">
-                      <label>
-                        Product Family / Model
-                        <input
-                          className="input"
-                          type="text"
-                          value={form.variant_group ?? ""}
-                          onChange={(e) => setForm({ ...form, variant_group: e.target.value })}
-                          placeholder="e.g. Air Max, Series 5"
-                        />
-                      </label>
-                      <label>
-                        Variant Name
-                        <input
-                          className="input"
-                          type="text"
-                          value={form.variant_label ?? ""}
-                          onChange={(e) => setForm({ ...form, variant_label: e.target.value })}
-                          placeholder="e.g. Blue / Medium, 64GB"
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-
-                  {capabilities.brand_shade_attributes ? (
-                    <div className="form-row">
-                      <label>
-                        Brand
-                        <input
-                          className="input"
-                          type="text"
-                          value={form.brand ?? ""}
-                          onChange={(e) => setForm({ ...form, brand: e.target.value })}
-                          placeholder="e.g. Nike, Samsung"
-                        />
-                      </label>
-                      <label>
-                        Shade / Finish
-                        <input
-                          className="input"
-                          type="text"
-                          value={form.shade ?? ""}
-                          onChange={(e) => setForm({ ...form, shade: e.target.value })}
-                          placeholder="e.g. Rose Gold, Matte Nude"
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-
-                  {capabilities.size_color_variants ? (
-                    <div className="form-row">
-                      <label>
-                        Size
-                        <input
-                          className="input"
-                          type="text"
-                          value={form.size ?? ""}
-                          onChange={(e) => setForm({ ...form, size: e.target.value })}
-                          placeholder="e.g. Medium, 42"
-                        />
-                      </label>
-                      <label>
-                        Color
-                        <input
-                          className="input"
-                          type="text"
-                          value={form.color ?? ""}
-                          onChange={(e) => setForm({ ...form, color: e.target.value })}
-                          placeholder="e.g. Black, Blue"
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
+            <label>
+              Saved Suppliers
+              <input
+                className="input"
+                value={supplierSearchTerm}
+                onChange={(e) => setSupplierSearchTerm(e.target.value)}
+                placeholder={allSupplierNames.length > MAX_VISIBLE_SUPPLIER_OPTIONS ? "Search suppliers by name" : "Filter saved suppliers"}
+                style={{ marginBottom: 8 }}
+              />
+              <select
+                className="input"
+                value={selectedKnownSupplierName}
+                onChange={(e) => {
+                  const supplierName = e.target.value;
+                  if (!supplierName) {
+                    return;
+                  }
+                  setForm({ ...form, supplier: supplierName });
+                }}
+                disabled={allSupplierNames.length === 0}
+              >
+                <option value="">{allSupplierNames.length === 0 ? "No saved suppliers available" : `Select an existing supplier (${allSupplierNames.length} saved)`}</option>
+                {visibleSupplierOptions.map((supplierName) => (
+                  <option key={supplierName} value={supplierName}>
+                    {supplierName}
+                  </option>
+                ))}
+              </select>
+              <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
+                Pick a supplier from your supplier directory or type a new one below. This supplier is used to match products in Purchasing.
+              </small>
+              {hiddenSupplierOptionCount > 0 ? (
+                <small style={{ color: "#1d4ed8", fontSize: 12, marginTop: 4, display: "block", fontWeight: 600 }}>
+                  Showing first {MAX_VISIBLE_SUPPLIER_OPTIONS} results. Refine search to find the remaining {hiddenSupplierOptionCount} suppliers.
+                </small>
+              ) : null}
+            </label>
+            <label>
+              Supplier Name *
+              <input
+                className="input"
+                value={form.supplier}
+                onChange={(e) => setForm({ ...form, supplier: e.target.value })}
+                placeholder="Supplier name or company"
+                required
+              />
+            </label>
           </div>
         </div>
 
-        {/* Pricing & Inventory */}
+        {/* Expiry */}
         <div style={modalSectionStyle}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
-            Pricing & Inventory
+            Expiry
+          </h3>
+          {capabilities.expiry_tracking ? (
+            <div className="grid" style={{ gap: 12 }}>
+              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="perishableType"
+                    checked={!isPerishable}
+                    onChange={() => {
+                      setIsPerishable(false);
+                      setForm({ ...form, expiry_date: null });
+                    }}
+                    style={{ width: 18, height: 18, accentColor: "#3b82f6" }}
+                  />
+                  <span style={{ fontSize: 14 }}>Non-Perishable</span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="perishableType"
+                    checked={isPerishable}
+                    onChange={() => setIsPerishable(true)}
+                    style={{ width: 18, height: 18, accentColor: "#3b82f6" }}
+                  />
+                  <span style={{ fontSize: 14 }}>Perishable</span>
+                </label>
+              </div>
+              <label>
+                Expiry Date {isPerishable ? "*" : ""}
+                <input
+                  className="input"
+                  type="date"
+                  value={form.expiry_date ?? ""}
+                  onChange={(e) => setForm({ ...form, expiry_date: e.target.value || null })}
+                  min={new Date().toISOString().split("T")[0]}
+                  required={isPerishable}
+                  disabled={!isPerishable}
+                />
+                <small style={{ color: isPerishable ? "#ef4444" : "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
+                  {isPerishable ? "Required for perishable goods." : "Optional while this product is marked non-perishable."}
+                </small>
+              </label>
+            </div>
+          ) : (
+            <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>
+              Expiry tracking is currently disabled for this business type.
+            </p>
+          )}
+        </div>
+
+        {/* Units */}
+        <div style={modalSectionStyle}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
+            Units
           </h3>
           <div className="grid" style={{ gap: 12 }}>
             <div className="form-row">
@@ -832,15 +927,18 @@ export default function ProductForm({
             <div className="form-row">
               <label>
                 Unit of Measure
-                <select
+                <input
                   className="input"
+                  list="product-unit-suggestions"
                   value={form.unit}
                   onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                >
-                  {UNITS.map((u) => (
-                    <option key={u} value={u}>{u}</option>
+                  placeholder="e.g. pcs, kg, litre, meter"
+                />
+                <datalist id="product-unit-suggestions">
+                  {UNIT_SUGGESTIONS.map((unit) => (
+                    <option key={unit} value={unit} />
                   ))}
-                </select>
+                </datalist>
               </label>
               {form.unit !== "pcs" && form.unit !== "unit" && (
                 <label>
@@ -933,6 +1031,84 @@ export default function ProductForm({
                 ) : null}
               </>
             ) : null}
+            {capabilities.unit_conversions ? (
+              <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Alternate Sale Units</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                      Define additional sale units like sack, half-bag, or rod using this product&apos;s base unit.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => setUnitConversionDrafts((previous) => [...previous, createUnitConversionDraft()])}
+                    style={{ padding: "8px 12px", fontSize: 12, fontWeight: 700 }}
+                  >
+                    Add Unit
+                  </button>
+                </div>
+                {unitConversionDrafts.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    No extra sale units yet. Base sales will use {form.unit || "the chosen unit"}.
+                  </div>
+                ) : (
+                  unitConversionDrafts.map((draft, index) => (
+                    <div key={`unit-conversion-${index}`} style={{ display: "grid", gap: 8, padding: 10, borderRadius: 8, border: "1px solid #dbe5f2", background: "#fff" }}>
+                      <div className="form-row">
+                        <label>
+                          Unit Name
+                          <input
+                            className="input"
+                            value={draft.unit_name}
+                            onChange={(e) => setUnitConversionDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, unit_name: e.target.value } : entry))}
+                            placeholder="e.g. sack, half-bag, rod"
+                          />
+                        </label>
+                        <label>
+                          Base Quantity
+                          <input
+                            className="input"
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={draft.base_quantity}
+                            onChange={(e) => setUnitConversionDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, base_quantity: e.target.value } : entry))}
+                            placeholder={`How many ${form.unit || "base units"}?`}
+                          />
+                        </label>
+                      </div>
+                      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155" }}>
+                          <input
+                            type="checkbox"
+                            checked={draft.is_sale_unit}
+                            onChange={(e) => setUnitConversionDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, is_sale_unit: e.target.checked } : entry))}
+                          />
+                          Available in POS
+                        </label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155" }}>
+                          <input
+                            type="checkbox"
+                            checked={draft.is_purchase_unit}
+                            onChange={(e) => setUnitConversionDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, is_purchase_unit: e.target.checked } : entry))}
+                          />
+                          Available in purchasing
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setUnitConversionDrafts((previous) => previous.filter((_, entryIndex) => entryIndex !== index))}
+                          style={{ border: "none", background: "transparent", color: "#dc2626", fontWeight: 700, cursor: "pointer", padding: 0 }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : null}
             <div className="form-row">
               <label>
                 Initial Stock
@@ -993,84 +1169,163 @@ export default function ProductForm({
           </div>
         </div>
 
-        {/* Additional Details */}
+        {/* Variants */}
         <div style={modalSectionStyle}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
-            Additional Details
+            Variants
           </h3>
           <div className="grid" style={{ gap: 12 }}>
-            <label>
-              Saved Suppliers
-              <input
-                className="input"
-                value={supplierSearchTerm}
-                onChange={(e) => setSupplierSearchTerm(e.target.value)}
-                placeholder={allSupplierNames.length > MAX_VISIBLE_SUPPLIER_OPTIONS ? "Search suppliers by name" : "Filter saved suppliers"}
-                style={{ marginBottom: 8 }}
-              />
-              <select
-                className="input"
-                value={selectedKnownSupplierName}
-                onChange={(e) => {
-                  const supplierName = e.target.value;
-                  if (!supplierName) {
-                    return;
-                  }
-                  setForm({ ...form, supplier: supplierName });
-                }}
-                disabled={allSupplierNames.length === 0}
-              >
-                <option value="">{allSupplierNames.length === 0 ? "No saved suppliers available" : `Select an existing supplier (${allSupplierNames.length} saved)`}</option>
-                {visibleSupplierOptions.map((supplierName) => (
-                  <option key={supplierName} value={supplierName}>
-                    {supplierName}
-                  </option>
-                ))}
-              </select>
-              <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
-                Pick a supplier from your supplier directory or type a new one below. This supplier is used to match products in Purchasing.
-              </small>
-              {hiddenSupplierOptionCount > 0 ? (
-                <small style={{ color: "#1d4ed8", fontSize: 12, marginTop: 4, display: "block", fontWeight: 600 }}>
-                  Showing first {MAX_VISIBLE_SUPPLIER_OPTIONS} results. Refine search to find the remaining {hiddenSupplierOptionCount} suppliers.
-                </small>
-              ) : null}
-            </label>
-            <label>
-              Supplier Name *
-              <input
-                className="input"
-                value={form.supplier}
-                onChange={(e) => setForm({ ...form, supplier: e.target.value })}
-                placeholder="Supplier name or company"
-                required
-              />
-            </label>
-            <label>
-              Status
-              <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    name="status"
-                    value="active"
-                    checked={form.status === "active"}
-                    onChange={(e) => setForm({ ...form, status: e.target.value })}
-                  />
-                  <span>Active</span>
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    name="status"
-                    value="inactive"
-                    checked={form.status === "inactive"}
-                    onChange={(e) => setForm({ ...form, status: e.target.value })}
-                  />
-                  <span>Inactive</span>
-                </label>
+            {canConfigureVariants ? (
+              <>
+                {capabilities.variants ? (
+                  <div className="form-row">
+                    <label>
+                      Product Family / Model
+                      <input
+                        className="input"
+                        type="text"
+                        value={form.variant_group ?? ""}
+                        onChange={(e) => setForm({ ...form, variant_group: e.target.value })}
+                        placeholder="e.g. Air Max, Series 5"
+                      />
+                    </label>
+                    <label>
+                      Variant Name
+                      <input
+                        className="input"
+                        type="text"
+                        value={form.variant_label ?? ""}
+                        onChange={(e) => setForm({ ...form, variant_label: e.target.value })}
+                        placeholder="e.g. Blue / Medium, 64GB"
+                      />
+                    </label>
+                  </div>
+                ) : null}
+
+                {capabilities.brand_shade_attributes ? (
+                  <div className="form-row">
+                    <label>
+                      Brand
+                      <input
+                        className="input"
+                        type="text"
+                        value={form.brand ?? ""}
+                        onChange={(e) => setForm({ ...form, brand: e.target.value })}
+                        placeholder="e.g. Nike, Samsung"
+                      />
+                    </label>
+                    <label>
+                      Shade / Finish
+                      <input
+                        className="input"
+                        type="text"
+                        value={form.shade ?? ""}
+                        onChange={(e) => setForm({ ...form, shade: e.target.value })}
+                        placeholder="e.g. Rose Gold, Matte Nude"
+                      />
+                    </label>
+                  </div>
+                ) : null}
+
+                {capabilities.size_color_variants ? (
+                  <div className="form-row">
+                    <label>
+                      Size
+                      <input
+                        className="input"
+                        type="text"
+                        value={form.size ?? ""}
+                        onChange={(e) => setForm({ ...form, size: e.target.value })}
+                        placeholder="e.g. Medium, 42"
+                      />
+                    </label>
+                    <label>
+                      Color
+                      <input
+                        className="input"
+                        type="text"
+                        value={form.color ?? ""}
+                        onChange={(e) => setForm({ ...form, color: e.target.value })}
+                        placeholder="e.g. Black, Blue"
+                      />
+                    </label>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>
+                Variant controls are currently disabled for this business type.
+              </p>
+            )}
+
+            {(capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes) ? (
+              <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Variant Options</div>
+                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                      Add optional sellable variants. Use attributes like size=42 or color=navy.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => setVariantDrafts((previous) => [...previous, createVariantDraft()])}
+                    style={{ padding: "8px 12px", fontSize: 12, fontWeight: 700 }}
+                  >
+                    Add Variant
+                  </button>
+                </div>
+                {variantDrafts.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    No product variants added yet. Leave this empty if one product row is enough.
+                  </div>
+                ) : (
+                  variantDrafts.map((draft, index) => (
+                    <div key={`variant-draft-${index}`} style={{ display: "grid", gap: 8, padding: 10, borderRadius: 8, border: "1px solid #dbe5f2", background: "#fff" }}>
+                      <div className="form-row">
+                        <label>
+                          Variant Label
+                          <input
+                            className="input"
+                            value={draft.label}
+                            onChange={(e) => setVariantDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, label: e.target.value } : entry))}
+                            placeholder="e.g. Medium / Navy"
+                          />
+                        </label>
+                        <label>
+                          Attributes
+                          <textarea
+                            className="textarea"
+                            rows={2}
+                            value={draft.attributesText}
+                            onChange={(e) => setVariantDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, attributesText: e.target.value } : entry))}
+                            placeholder="size=42, color=navy, shade=matte"
+                          />
+                        </label>
+                      </div>
+                      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155" }}>
+                          <input
+                            type="checkbox"
+                            checked={draft.isActive}
+                            onChange={(e) => setVariantDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, isActive: e.target.checked } : entry))}
+                          />
+                          Active in POS
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setVariantDrafts((previous) => previous.filter((_, entryIndex) => entryIndex !== index))}
+                          style={{ border: "none", background: "transparent", color: "#dc2626", fontWeight: 700, cursor: "pointer", padding: 0 }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
-            </label>
+            ) : null}
           </div>
         </div>
 

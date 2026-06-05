@@ -21,9 +21,12 @@ type POSSaleFormProps = {
 };
 
 interface CartItem {
+  id: string;
   product: Product;
   quantity: number;
-  sellingUnit: 'piece' | 'pack'; // Whether selling by piece or pack
+  saleUnitType: string;
+  selectedConversionId?: number | null;
+  selectedVariantId?: number | null;
   preferredBatchNumber?: string | null;
 }
 
@@ -34,7 +37,9 @@ const MAX_SUSPENDED_CARTS = 20;
 type SuspendedCartLine = {
   product_id: number;
   quantity: number;
-  sellingUnit: "piece" | "pack";
+  sale_unit_type: string;
+  selected_conversion_id?: number | null;
+  variant_id?: number | null;
   preferred_batch_number?: string | null;
 };
 
@@ -88,10 +93,101 @@ const formatBatchOptionLabel = (batch: SaleBatchOption): string => {
     : `${batch.batch_number} · ${availability}`;
 };
 
-const getCartItemPieceQuantity = (item: Pick<CartItem, "product" | "quantity" | "sellingUnit">): number => {
-  return item.sellingUnit === "pack"
-    ? item.quantity * (item.product.pack_size || 1)
-    : item.quantity;
+const createCartLineId = (): string => {
+  return (globalThis.crypto as Crypto | undefined)?.randomUUID?.() ?? `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const normalizeSaleUnitType = (value: string | null | undefined): string => {
+  const normalized = String(value || "piece").trim();
+  return normalized || "piece";
+};
+
+const getProductVariantOptions = (product: Product) => {
+  return (product.variants ?? [])
+    .filter((variant) => variant.is_active !== false)
+    .sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0) || left.label.localeCompare(right.label));
+};
+
+const getProductSaleUnitOptions = (product: Product) => {
+  const options: Array<{ value: string; label: string; baseQuantity: number; conversionId: number | null; unitPrice: number }> = [
+    {
+      value: "piece",
+      label: `Base unit (${product.unit})`,
+      baseQuantity: 1,
+      conversionId: null,
+      unitPrice: Number(product.selling_price || 0),
+    },
+  ];
+
+  if (Number(product.pack_size || 0) > 0) {
+    options.push({
+      value: "pack",
+      label: `Pack (${Number(product.pack_size || 0)} ${product.unit})`,
+      baseQuantity: Number(product.pack_size || 0),
+      conversionId: null,
+      unitPrice: Number(product.pack_selling_price || 0) || (Number(product.selling_price || 0) * Number(product.pack_size || 0)),
+    });
+  }
+
+  (product.unit_conversions ?? [])
+    .filter((conversion) => conversion.is_sale_unit !== false)
+    .sort((left, right) => (left.sort_order ?? 0) - (right.sort_order ?? 0) || left.unit_name.localeCompare(right.unit_name))
+    .forEach((conversion) => {
+      options.push({
+        value: conversion.unit_name,
+        label: `${conversion.unit_name} (${Number(conversion.base_quantity || 0)} ${product.unit})`,
+        baseQuantity: Number(conversion.base_quantity || 0),
+        conversionId: conversion.id,
+        unitPrice: Number(product.selling_price || 0) * Number(conversion.base_quantity || 0),
+      });
+    });
+
+  return options;
+};
+
+const getCartItemBaseQuantity = (item: Pick<CartItem, "product" | "quantity" | "saleUnitType" | "selectedConversionId">): number => {
+  const saleUnitType = normalizeSaleUnitType(item.saleUnitType).toLowerCase();
+  if (saleUnitType === "piece") {
+    return item.quantity;
+  }
+
+  if (saleUnitType === "pack") {
+    return item.quantity * Number(item.product.pack_size || 1);
+  }
+
+  const conversion = (item.product.unit_conversions ?? []).find((entry) => entry.id === item.selectedConversionId);
+  return item.quantity * Number(conversion?.base_quantity || 1);
+};
+
+const getCartItemUnitPrice = (item: Pick<CartItem, "product" | "saleUnitType" | "selectedConversionId">): number => {
+  const saleUnitType = normalizeSaleUnitType(item.saleUnitType).toLowerCase();
+  if (saleUnitType === "piece") {
+    return Number(item.product.selling_price || 0);
+  }
+  if (saleUnitType === "pack") {
+    return Number(item.product.pack_selling_price || 0) || (Number(item.product.selling_price || 0) * Number(item.product.pack_size || 0));
+  }
+  const conversion = (item.product.unit_conversions ?? []).find((entry) => entry.id === item.selectedConversionId);
+  return Number(item.product.selling_price || 0) * Number(conversion?.base_quantity || 1);
+};
+
+const getCartItemDisplayUnit = (item: Pick<CartItem, "saleUnitType" | "quantity">): string => {
+  const saleUnitType = normalizeSaleUnitType(item.saleUnitType).toLowerCase();
+  if (saleUnitType === "piece") {
+    return item.quantity === 1 ? "unit" : "units";
+  }
+  if (saleUnitType === "pack") {
+    return item.quantity === 1 ? "pack" : "packs";
+  }
+  return normalizeSaleUnitType(item.saleUnitType);
+};
+
+const getBatchCacheKey = (productId: number, variantId?: number | null): string => {
+  return `${productId}:${variantId ?? "base"}`;
+};
+
+const getCartItemPieceQuantity = (item: Pick<CartItem, "product" | "quantity" | "saleUnitType" | "selectedConversionId">): number => {
+  return getCartItemBaseQuantity(item);
 };
 
 const getPieceQuantityStep = (product: Product, fractionalSalesEnabled: boolean): number => {
@@ -120,9 +216,9 @@ export default function POSSaleForm({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [suspendedCarts, setSuspendedCarts] = useState<SuspendedCart[]>([]);
   const [selectedSuspendedCartId, setSelectedSuspendedCartId] = useState("");
-  const [batchOptionsByProductId, setBatchOptionsByProductId] = useState<Record<number, SaleBatchOption[]>>({});
-  const [batchLoadingByProductId, setBatchLoadingByProductId] = useState<Record<number, boolean>>({});
-  const [batchErrorByProductId, setBatchErrorByProductId] = useState<Record<number, string | null>>({});
+  const [batchOptionsByKey, setBatchOptionsByKey] = useState<Record<string, SaleBatchOption[]>>({});
+  const [batchLoadingByKey, setBatchLoadingByKey] = useState<Record<string, boolean>>({});
+  const [batchErrorByKey, setBatchErrorByKey] = useState<Record<string, string | null>>({});
 
   const messageTimeoutRef = useRef<number | null>(null);
   const customerInputRef = useRef<HTMLInputElement | null>(null);
@@ -176,22 +272,24 @@ export default function POSSaleForm({
     }, 3500);
   }, []);
 
-  const loadBatchOptions = useCallback(async (productId: number) => {
+  const loadBatchOptions = useCallback(async (productId: number, variantId?: number | null) => {
     if (!capabilities.batch_tracking) {
       return;
     }
 
-    setBatchLoadingByProductId((previous) => ({ ...previous, [productId]: true }));
-    setBatchErrorByProductId((previous) => ({ ...previous, [productId]: null }));
+    const cacheKey = getBatchCacheKey(productId, variantId);
+
+    setBatchLoadingByKey((previous) => ({ ...previous, [cacheKey]: true }));
+    setBatchErrorByKey((previous) => ({ ...previous, [cacheKey]: null }));
 
     try {
-      const options = await fetchSaleBatchOptions(productId);
-      setBatchOptionsByProductId((previous) => ({ ...previous, [productId]: options }));
+      const options = await fetchSaleBatchOptions(productId, variantId);
+      setBatchOptionsByKey((previous) => ({ ...previous, [cacheKey]: options }));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load live batches";
-      setBatchErrorByProductId((previous) => ({ ...previous, [productId]: message }));
+      setBatchErrorByKey((previous) => ({ ...previous, [cacheKey]: message }));
     } finally {
-      setBatchLoadingByProductId((previous) => ({ ...previous, [productId]: false }));
+      setBatchLoadingByKey((previous) => ({ ...previous, [cacheKey]: false }));
     }
   }, [capabilities.batch_tracking]);
 
@@ -261,7 +359,9 @@ export default function POSSaleForm({
       lines: cart.map((item) => ({
         product_id: item.product.id,
         quantity: item.quantity,
-        sellingUnit: item.sellingUnit,
+        sale_unit_type: item.saleUnitType,
+        selected_conversion_id: item.selectedConversionId ?? null,
+        variant_id: item.selectedVariantId ?? null,
         preferred_batch_number: item.preferredBatchNumber ?? null,
       })),
       customerName,
@@ -291,10 +391,23 @@ export default function POSSaleForm({
         if (!product) {
           return null;
         }
+        const saleUnitType = normalizeSaleUnitType(line.sale_unit_type);
+        const selectedConversionId = line.selected_conversion_id ?? null;
+        const isKnownCustomUnit = saleUnitType === "piece"
+          || saleUnitType === "pack"
+          || (product.unit_conversions ?? []).some((entry) => entry.id === selectedConversionId);
+        if (!isKnownCustomUnit) {
+          return null;
+        }
         return {
+          id: createCartLineId(),
           product,
-          quantity: Math.max(0.01, Number(line.quantity) || 0),
-          sellingUnit: line.sellingUnit,
+          quantity: saleUnitType === "piece"
+            ? Math.max(0.01, Number(line.quantity) || 0)
+            : Math.max(1, Math.round(Number(line.quantity) || 0)),
+          saleUnitType,
+          selectedConversionId,
+          selectedVariantId: line.variant_id ?? null,
           preferredBatchNumber: line.preferred_batch_number ?? null,
         } as CartItem;
       })
@@ -340,26 +453,36 @@ export default function POSSaleForm({
   });
 
   // Add product to cart
-  const addToCart = (product: Product, unit: 'piece' | 'pack' = 'piece') => {
+  const addToCart = (product: Product, saleUnitType: string = "piece", selectedConversionId: number | null = null) => {
     const availablePieces = Math.max(0, Number(product.current_stock ?? 0));
     if (availablePieces <= 0) {
       showMessage("Out of stock");
       return;
     }
 
-    const existingItem = cart.find(item => item.product.id === product.id && item.sellingUnit === unit);
+    const normalizedSaleUnitType = normalizeSaleUnitType(saleUnitType);
+    const defaultVariant = getProductVariantOptions(product).length === 1 ? getProductVariantOptions(product)[0] : null;
+    const quantityIncrement = normalizedSaleUnitType === "piece" ? getPieceQuantityStep(product, fractionalSalesEnabled) : 1;
+    const addedBaseQuantity = getCartItemBaseQuantity({
+      product,
+      quantity: quantityIncrement,
+      saleUnitType: normalizedSaleUnitType,
+      selectedConversionId,
+    });
+
+    const existingItem = cart.find((item) => (
+      item.product.id === product.id
+      && normalizeSaleUnitType(item.saleUnitType) === normalizedSaleUnitType
+      && (item.selectedConversionId ?? null) === (selectedConversionId ?? null)
+      && (item.selectedVariantId ?? null) === (defaultVariant?.id ?? null)
+    ));
 
     const cartPiecesForProduct = cart.reduce((sum, item) => {
       if (item.product.id !== product.id) return sum;
-      const pieceQty = item.sellingUnit === 'pack'
-        ? item.quantity * (item.product.pack_size || 1)
-        : item.quantity;
-      return sum + pieceQty;
+      return sum + getCartItemBaseQuantity(item);
     }, 0);
 
-    const pieceQuantityStep = unit === 'pack' ? 1 : getPieceQuantityStep(product, fractionalSalesEnabled);
-    const addPieceQty = unit === 'pack' ? (product.pack_size || 1) : pieceQuantityStep;
-    if (cartPiecesForProduct + addPieceQty > availablePieces) {
+    if (cartPiecesForProduct + addedBaseQuantity > availablePieces) {
       showMessage(`Not enough stock. Available: ${availablePieces}`);
       return;
     }
@@ -367,62 +490,70 @@ export default function POSSaleForm({
     if (existingItem) {
       // Increase quantity if already in cart
       setCart(cart.map(item => 
-        item.product.id === product.id && item.sellingUnit === unit
-          ? { ...item, quantity: item.quantity + pieceQuantityStep }
+        item.id === existingItem.id
+          ? { ...item, quantity: item.quantity + quantityIncrement }
           : item
       ));
     } else {
       // Add new item
-      setCart([...cart, { product, quantity: unit === 'pack' ? 1 : pieceQuantityStep, sellingUnit: unit, preferredBatchNumber: null }]);
+      setCart([
+        ...cart,
+        {
+          id: createCartLineId(),
+          product,
+          quantity: quantityIncrement,
+          saleUnitType: normalizedSaleUnitType,
+          selectedConversionId,
+          selectedVariantId: defaultVariant?.id ?? null,
+          preferredBatchNumber: null,
+        },
+      ]);
     }
   };
 
-  const updatePreferredBatch = (productId: number, unit: 'piece' | 'pack', preferredBatchNumber: string | null) => {
+  const updatePreferredBatch = (lineId: string, preferredBatchNumber: string | null) => {
     setCart((previousCart) => previousCart.map((item) =>
-      item.product.id === productId && item.sellingUnit === unit
+      item.id === lineId
         ? { ...item, preferredBatchNumber }
         : item
     ));
   };
 
   // Update quantity
-  const updateQuantity = (productId: number, unit: 'piece' | 'pack', newQuantity: number) => {
-    const product = products.find((p) => p.id === productId);
-    if (!product) return;
+  const updateQuantity = (lineId: string, newQuantity: number) => {
+    const line = cart.find((item) => item.id === lineId);
+    if (!line) return;
 
     const normalizedQuantity =
-      unit === "pack"
-        ? Math.floor(newQuantity)
-        : roundToStep(newQuantity, getPieceQuantityStep(product, fractionalSalesEnabled));
+      normalizeSaleUnitType(line.saleUnitType) === "piece"
+        ? roundToStep(newQuantity, getPieceQuantityStep(line.product, fractionalSalesEnabled))
+        : Math.floor(newQuantity);
 
     if (!Number.isFinite(normalizedQuantity)) return;
 
-    if (unit === "pack") {
+    if (normalizeSaleUnitType(line.saleUnitType) !== "piece") {
       if (normalizedQuantity < 1) {
-        removeFromCart(productId, unit);
+        removeFromCart(lineId);
         return;
       }
     } else {
       if (normalizedQuantity <= 0) {
-        removeFromCart(productId, unit);
+        removeFromCart(lineId);
         return;
       }
     }
 
-    const availablePieces = Math.max(0, Number(product?.current_stock ?? 0));
+    const availablePieces = Math.max(0, Number(line.product.current_stock ?? 0));
     if (availablePieces <= 0) {
       showMessage("Out of stock");
-      removeFromCart(productId, unit);
+      removeFromCart(lineId);
       return;
     }
 
     const nextPiecesForProduct = cart.reduce((sum, item) => {
-      if (item.product.id !== productId) return sum;
-      const qty = item.sellingUnit === unit ? normalizedQuantity : item.quantity;
-      const pieceQty = item.sellingUnit === 'pack'
-        ? qty * (item.product.pack_size || 1)
-        : qty;
-      return sum + pieceQty;
+      if (item.product.id !== line.product.id) return sum;
+      const quantity = item.id === lineId ? normalizedQuantity : item.quantity;
+      return sum + getCartItemBaseQuantity({ ...item, quantity });
     }, 0);
 
     if (nextPiecesForProduct > availablePieces) {
@@ -430,15 +561,44 @@ export default function POSSaleForm({
       return;
     }
     setCart(cart.map(item => 
-      item.product.id === productId && item.sellingUnit === unit
+      item.id === lineId
         ? { ...item, quantity: normalizedQuantity }
         : item
     ));
   };
 
+  const updateSelectedVariant = (lineId: string, variantId: number | null) => {
+    setCart((previousCart) => previousCart.map((item) => (
+      item.id === lineId
+        ? { ...item, selectedVariantId: variantId, preferredBatchNumber: null }
+        : item
+    )));
+  };
+
+  const updateSaleUnit = (lineId: string, nextSaleUnitType: string, nextConversionId: number | null) => {
+    setCart((previousCart) => previousCart.map((item) => {
+      if (item.id !== lineId) {
+        return item;
+      }
+
+      const normalizedSaleUnitType = normalizeSaleUnitType(nextSaleUnitType);
+      const nextQuantity = normalizedSaleUnitType === "piece"
+        ? Math.max(getPieceQuantityStep(item.product, fractionalSalesEnabled), item.quantity)
+        : Math.max(1, Math.round(item.quantity));
+
+      return {
+        ...item,
+        saleUnitType: normalizedSaleUnitType,
+        selectedConversionId: normalizedSaleUnitType === "piece" || normalizedSaleUnitType === "pack" ? null : nextConversionId,
+        quantity: nextQuantity,
+        preferredBatchNumber: null,
+      };
+    }));
+  };
+
   // Remove item from cart
-  const removeFromCart = (productId: number, unit: 'piece' | 'pack') => {
-    setCart(cart.filter(item => !(item.product.id === productId && item.sellingUnit === unit)));
+  const removeFromCart = (lineId: string) => {
+    setCart(cart.filter(item => item.id !== lineId));
   };
 
   // Clear cart
@@ -457,10 +617,7 @@ export default function POSSaleForm({
 
   // Calculate totals
   const cartTotal = cart.reduce((sum, item) => {
-    const price = item.sellingUnit === 'pack' 
-      ? Number(item.product.pack_selling_price || 0)
-      : Number(item.product.selling_price || 0);
-    return sum + (price * item.quantity);
+    return sum + (getCartItemUnitPrice(item) * item.quantity);
   }, 0);
 
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -498,12 +655,17 @@ export default function POSSaleForm({
       if (Number(item.product.active_batch_count ?? 0) <= 0) {
         continue;
       }
-      if (batchOptionsByProductId[item.product.id] !== undefined || batchLoadingByProductId[item.product.id]) {
+      if ((item.product.variants ?? []).length > 0 && item.selectedVariantId == null) {
         continue;
       }
-      void loadBatchOptions(item.product.id);
+
+      const cacheKey = getBatchCacheKey(item.product.id, item.selectedVariantId);
+      if (batchOptionsByKey[cacheKey] !== undefined || batchLoadingByKey[cacheKey]) {
+        continue;
+      }
+      void loadBatchOptions(item.product.id, item.selectedVariantId);
     }
-  }, [batchLoadingByProductId, batchOptionsByProductId, capabilities.batch_tracking, cart, loadBatchOptions]);
+  }, [batchLoadingByKey, batchOptionsByKey, capabilities.batch_tracking, cart, loadBatchOptions]);
 
   useEffect(() => {
     if (!cameraOpen) {
@@ -546,16 +708,34 @@ export default function POSSaleForm({
         const product = products.find((entry) => entry.id === line.product_id);
         if (!product) return null;
 
-        const sellingUnit = line.sale_unit_type === "pack" ? "pack" : "piece";
-        const fallbackPackQty = sellingUnit === "pack"
-          ? Math.max(1, Math.round((Number(line.quantity) || 0) / Math.max(1, Number(product.pack_size || 1))))
-          : 0;
-        const quantity = sellingUnit === "pack"
-          ? Number(line.pack_quantity ?? fallbackPackQty)
-          : Number(line.quantity || 0);
+        const saleUnitType = normalizeSaleUnitType(line.sale_unit_type);
+        const selectedConversion = (product.unit_conversions ?? []).find((entry) => entry.unit_name.toLowerCase() === saleUnitType.toLowerCase()) ?? null;
+        if (saleUnitType !== "piece" && saleUnitType !== "pack" && !selectedConversion) {
+          return null;
+        }
+
+        const baseQuantityPerUnit = saleUnitType === "piece"
+          ? 1
+          : saleUnitType === "pack"
+            ? Math.max(1, Number(product.pack_size || 1))
+            : Math.max(1, Number(selectedConversion?.base_quantity || 1));
+        const fallbackPackQty = saleUnitType === "piece"
+          ? 0
+          : Math.max(1, Math.round((Number(line.quantity) || 0) / baseQuantityPerUnit));
+        const quantity = saleUnitType === "piece"
+          ? Number(line.quantity || 0)
+          : Number(line.pack_quantity ?? fallbackPackQty);
 
         if (!Number.isFinite(quantity) || quantity <= 0) return null;
-        return { product, quantity, sellingUnit, preferredBatchNumber: line.preferred_batch_number ?? null } as CartItem;
+        return {
+          id: createCartLineId(),
+          product,
+          quantity,
+          saleUnitType,
+          selectedConversionId: selectedConversion?.id ?? null,
+          selectedVariantId: line.variant_id ?? null,
+          preferredBatchNumber: line.preferred_batch_number ?? null,
+        } as CartItem;
       })
       .filter((entry): entry is CartItem => entry !== null);
 
@@ -659,10 +839,13 @@ export default function POSSaleForm({
     // Validate stock before checkout
     const byProduct = new Map<number, { requiredPieces: number; availablePieces: number }>();
     for (const item of cart) {
+      if (getProductVariantOptions(item.product).length > 0 && item.selectedVariantId == null) {
+        showMessage(`Select a variant for ${item.product.name}`);
+        return;
+      }
+
       const availablePieces = Math.max(0, Number(item.product.current_stock ?? 0));
-      const pieceQuantity = item.sellingUnit === 'pack'
-        ? item.quantity * (item.product.pack_size || 1)
-        : item.quantity;
+      const pieceQuantity = getCartItemBaseQuantity(item);
       const prev = byProduct.get(item.product.id) || { requiredPieces: 0, availablePieces };
       byProduct.set(item.product.id, {
         requiredPieces: prev.requiredPieces + pieceQuantity,
@@ -707,12 +890,8 @@ export default function POSSaleForm({
     let remainingInitialPayment = paymentMethod === "credit" ? Number(initialPayment || 0) : 0;
 
     for (const item of cart) {
-      const unitPrice = item.sellingUnit === 'pack'
-        ? Number(item.product.pack_selling_price || 0)
-        : Number(item.product.selling_price || 0);
-      const pieceQuantity = item.sellingUnit === 'pack'
-        ? item.quantity * (item.product.pack_size || 1)
-        : item.quantity;
+      const unitPrice = getCartItemUnitPrice(item);
+      const pieceQuantity = getCartItemBaseQuantity(item);
 
       // For credit sales, add phone to notes (backend extracts it for creditor record).
       let saleNotes = notes || null;
@@ -730,9 +909,10 @@ export default function POSSaleForm({
 
       sales.push({
         product_id: item.product.id,
+        variant_id: item.selectedVariantId ?? undefined,
         quantity: pieceQuantity, // Always store in pieces for inventory
-        sale_unit_type: item.sellingUnit,
-        pack_quantity: item.sellingUnit === 'pack' ? item.quantity : undefined,
+        sale_unit_type: item.saleUnitType,
+        pack_quantity: normalizeSaleUnitType(item.saleUnitType) !== 'piece' ? item.quantity : undefined,
         preferred_batch_number: item.preferredBatchNumber || undefined,
         unit_price: unitPrice,
         total_price: lineTotal,
@@ -1074,33 +1254,41 @@ export default function POSSaleForm({
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
               {cart.map(item => {
-                const unitPrice = item.sellingUnit === 'pack'
-                  ? Number(item.product.pack_selling_price || 0)
-                  : Number(item.product.selling_price || 0);
+                const normalizedSaleUnitType = normalizeSaleUnitType(item.saleUnitType);
+                const unitPrice = getCartItemUnitPrice(item);
                 const pieceQuantity = getCartItemPieceQuantity(item);
-                const quantityStep = item.sellingUnit === 'pack'
-                  ? 1
-                  : getPieceQuantityStep(item.product, fractionalSalesEnabled);
+                const quantityStep = normalizedSaleUnitType === 'piece'
+                  ? getPieceQuantityStep(item.product, fractionalSalesEnabled)
+                  : 1;
                 const showsFractionalQuantityControls =
-                  item.sellingUnit === 'piece' && fractionalSalesEnabled && Boolean(item.product.allows_fractional_sales) && quantityStep < 1;
+                  normalizedSaleUnitType === 'piece' && fractionalSalesEnabled && Boolean(item.product.allows_fractional_sales) && quantityStep < 1;
                 const variantSummary = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes
                   ? getProductVariantSummary(item.product)
                   : null;
+                const variantOptions = getProductVariantOptions(item.product);
+                const selectedVariant = variantOptions.find((variant) => variant.id === item.selectedVariantId) ?? null;
+                const saleUnitOptions = getProductSaleUnitOptions(item.product);
+                const selectedSaleUnit = saleUnitOptions.find((option) => (
+                  option.value === normalizedSaleUnitType && (option.conversionId ?? null) === (item.selectedConversionId ?? null)
+                )) ?? null;
                 const batchSummary = capabilities.batch_tracking
                   ? getProductBatchSummary(item.product, { includeNextExpiry: capabilities.expiry_tracking })
                   : null;
-                const batchOptions = batchOptionsByProductId[item.product.id] ?? [];
-                const batchLoading = Boolean(batchLoadingByProductId[item.product.id]);
-                const batchError = batchErrorByProductId[item.product.id];
+                const batchCacheKey = getBatchCacheKey(item.product.id, item.selectedVariantId);
+                const batchOptions = batchOptionsByKey[batchCacheKey] ?? [];
+                const batchLoading = Boolean(batchLoadingByKey[batchCacheKey]);
+                const batchError = batchErrorByKey[batchCacheKey];
                 const selectedBatch = batchOptions.find((option) => option.batch_number === item.preferredBatchNumber) ?? null;
                 const selectedBatchAvailable = Math.max(0, Number(selectedBatch?.available_quantity ?? 0));
                 const selectedBatchCoverage = selectedBatch ? Math.min(pieceQuantity, selectedBatchAvailable) : 0;
                 const remainingAfterSelectedBatch = selectedBatch ? Math.max(pieceQuantity - selectedBatchCoverage, 0) : 0;
-                const showBatchPicker = capabilities.batch_tracking && Number(item.product.active_batch_count ?? 0) > 0;
+                const showBatchPicker = capabilities.batch_tracking
+                  && Number(item.product.active_batch_count ?? 0) > 0
+                  && (variantOptions.length === 0 || item.selectedVariantId != null);
                 
                 return (
                 <div
-                  key={`${item.product.id}-${item.sellingUnit}`}
+                  key={item.id}
                   style={{
                     padding: "10px 0",
                     borderBottom: "1px solid #f3f4f6",
@@ -1111,8 +1299,13 @@ export default function POSSaleForm({
                       <div style={{ fontWeight: 600, fontSize: 13, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {item.product.name}
                       </div>
-                      {variantSummary ? (
+                      {selectedVariant ? (
+                        <div style={{ fontSize: 11, color: "#475569", marginTop: 3 }}>Variant: {selectedVariant.label}</div>
+                      ) : variantSummary ? (
                         <div style={{ fontSize: 11, color: "#475569", marginTop: 3 }}>{variantSummary}</div>
+                      ) : null}
+                      {selectedSaleUnit ? (
+                        <div style={{ fontSize: 11, color: "#0f766e", marginTop: 3 }}>{selectedSaleUnit.label}</div>
                       ) : null}
                       {batchSummary ? (
                         <div style={{ fontSize: 11, color: "#1d4ed8", marginTop: 3 }}>{batchSummary}</div>
@@ -1120,7 +1313,7 @@ export default function POSSaleForm({
                     </div>
                     <button
                       type="button"
-                      onClick={() => removeFromCart(item.product.id, item.sellingUnit)}
+                      onClick={() => removeFromCart(item.id)}
                       style={{
                         width: 24,
                         height: 24,
@@ -1139,12 +1332,70 @@ export default function POSSaleForm({
                       X
                     </button>
                   </div>
+
+                  {(variantOptions.length > 0 || saleUnitOptions.length > 1) ? (
+                    <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
+                      {variantOptions.length > 0 ? (
+                        <label style={{ display: "grid", gap: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#475569" }}>Variant</span>
+                          <select
+                            value={item.selectedVariantId ?? ""}
+                            onChange={(event) => updateSelectedVariant(item.id, event.target.value ? Number(event.target.value) : null)}
+                            style={{
+                              width: "100%",
+                              padding: "8px 10px",
+                              borderRadius: 6,
+                              border: item.selectedVariantId == null ? "1px solid #f59e0b" : "1px solid #d1d5db",
+                              background: "white",
+                              fontSize: 12,
+                              color: "#0f172a",
+                            }}
+                          >
+                            <option value="">Select a variant</option>
+                            {variantOptions.map((variant) => (
+                              <option key={variant.id} value={variant.id}>{variant.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+                      {saleUnitOptions.length > 1 ? (
+                        <label style={{ display: "grid", gap: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#475569" }}>Sale Unit</span>
+                          <select
+                            value={`${normalizedSaleUnitType}:${item.selectedConversionId ?? "base"}`}
+                            onChange={(event) => {
+                              const nextOption = saleUnitOptions.find((option) => `${option.value}:${option.conversionId ?? "base"}` === event.target.value);
+                              if (!nextOption) {
+                                return;
+                              }
+                              updateSaleUnit(item.id, nextOption.value, nextOption.conversionId ?? null);
+                            }}
+                            style={{
+                              width: "100%",
+                              padding: "8px 10px",
+                              borderRadius: 6,
+                              border: "1px solid #d1d5db",
+                              background: "white",
+                              fontSize: 12,
+                              color: "#0f172a",
+                            }}
+                          >
+                            {saleUnitOptions.map((option) => (
+                              <option key={`${option.value}-${option.conversionId ?? "base"}`} value={`${option.value}:${option.conversionId ?? "base"}`}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : null}
                   
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <button
                         type="button"
-                        onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity - quantityStep)}
+                        onClick={() => updateQuantity(item.id, item.quantity - quantityStep)}
                         style={{
                           width: 28,
                           height: 28,
@@ -1164,7 +1415,7 @@ export default function POSSaleForm({
                       {showsFractionalQuantityControls ? (
                         <button
                           type="button"
-                          onClick={() => updateQuantity(item.product.id, item.sellingUnit, quantityStep)}
+                          onClick={() => updateQuantity(item.id, quantityStep)}
                           style={{
                             height: 28,
                             padding: "0 10px",
@@ -1194,7 +1445,7 @@ export default function POSSaleForm({
                           if (!raw) return;
                           const parsed = Number(raw);
                           if (!Number.isFinite(parsed)) return;
-                          updateQuantity(item.product.id, item.sellingUnit, parsed);
+                          updateQuantity(item.id, parsed);
                         }}
                         aria-label={`Quantity for ${item.product.name}`}
                         style={{
@@ -1210,7 +1461,7 @@ export default function POSSaleForm({
                       />
                       <button
                         type="button"
-                        onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity + quantityStep)}
+                        onClick={() => updateQuantity(item.id, item.quantity + quantityStep)}
                         style={{
                           width: 28,
                           height: 28,
@@ -1249,7 +1500,7 @@ export default function POSSaleForm({
                         <span style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8" }}>Batch allocation</span>
                         <button
                           type="button"
-                          onClick={() => void loadBatchOptions(item.product.id)}
+                          onClick={() => void loadBatchOptions(item.product.id, item.selectedVariantId)}
                           style={{
                             padding: 0,
                             border: "none",
@@ -1266,7 +1517,7 @@ export default function POSSaleForm({
 
                       <select
                         value={item.preferredBatchNumber ?? ""}
-                        onChange={(event) => updatePreferredBatch(item.product.id, item.sellingUnit, event.target.value || null)}
+                        onChange={(event) => updatePreferredBatch(item.id, event.target.value || null)}
                         disabled={batchLoading || batchOptions.length === 0}
                         style={{
                           width: "100%",
@@ -1297,7 +1548,7 @@ export default function POSSaleForm({
                       {selectedBatch ? (
                         <div style={{ fontSize: 11, color: "#334155" }}>
                           {remainingAfterSelectedBatch > 0
-                            ? `This sale starts with ${selectedBatch.batch_number} for ${formatQuantityValue(selectedBatchCoverage)} unit(s); the remaining ${formatQuantityValue(remainingAfterSelectedBatch)} unit(s) follow FEFO.`
+                            ? `This sale starts with ${selectedBatch.batch_number} for ${formatQuantityValue(selectedBatchCoverage)} ${item.product.unit}; the remaining ${formatQuantityValue(remainingAfterSelectedBatch)} ${item.product.unit} follow FEFO.`
                             : `This sale will use ${selectedBatch.batch_number} first as long as availability holds.`}
                         </div>
                       ) : batchOptions.length > 0 ? (

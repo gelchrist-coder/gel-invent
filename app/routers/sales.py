@@ -3,7 +3,7 @@ from decimal import Decimal
 from html import escape
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -68,6 +68,7 @@ def _get_available_sale_batches(
     tenant_user_ids: list[int],
     branch_id: int,
     product_id: int,
+    variant_id: int | None = None,
 ):
     today = date.today()
     available_batches = [
@@ -77,6 +78,7 @@ def _get_available_sale_batches(
             tenant_user_ids=tenant_user_ids,
             branch_id=branch_id,
             product_id=product_id,
+            variant_id=variant_id,
             include_null_expiry=True,
         )
         if batch.balance > 0 and (batch.expiry_date is None or batch.expiry_date >= today)
@@ -98,6 +100,7 @@ def _load_unit_cost_by_batch(
     tenant_user_ids: list[int],
     branch_id: int,
     product_id: int,
+    variant_id: int | None = None,
     batch_numbers: list[str],
 ) -> dict[str, Decimal | None]:
     if not batch_numbers:
@@ -126,6 +129,32 @@ def _load_unit_cost_by_batch(
             continue
         unit_cost_by_batch[normalized_batch_number] = unit_cost
     return unit_cost_by_batch
+
+
+def _resolve_sale_variant(
+    *,
+    db: Session,
+    tenant_user_ids: list[int],
+    branch_id: int,
+    product_id: int,
+    variant_id: int | None,
+) -> models.ProductVariant | None:
+    if variant_id is None:
+        return None
+
+    variant = db.scalar(
+        select(models.ProductVariant)
+        .join(models.Product)
+        .where(
+            models.ProductVariant.id == variant_id,
+            models.ProductVariant.product_id == product_id,
+            models.Product.branch_id == branch_id,
+            models.Product.user_id.in_(tenant_user_ids),
+        )
+    )
+    if not variant:
+        raise HTTPException(status_code=404, detail="Product variant not found")
+    return variant
 
 
 def _attach_deducted_batches(
@@ -288,13 +317,27 @@ def create_sale(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    available_stock = db.scalar(
-        select(func.coalesce(func.sum(models.StockMovement.change), 0)).where(
-            models.StockMovement.product_id == payload.product_id,
-            models.StockMovement.branch_id == active_branch_id,
-            models.StockMovement.user_id.in_(tenant_user_ids),
-        )
+    variant = _resolve_sale_variant(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=payload.product_id,
+        variant_id=payload.variant_id,
     )
+
+    available_stock_query = select(func.coalesce(func.sum(models.StockMovement.change), 0)).where(
+        models.StockMovement.product_id == payload.product_id,
+        models.StockMovement.branch_id == active_branch_id,
+        models.StockMovement.user_id.in_(tenant_user_ids),
+    )
+    if variant is not None:
+        available_stock_query = available_stock_query.where(
+            or_(
+                models.StockMovement.variant_id == variant.id,
+                models.StockMovement.variant_id.is_(None),
+            )
+        )
+    available_stock = db.scalar(available_stock_query)
     if available_stock is None:
         available_stock = Decimal(0)
     if payload.quantity > available_stock:
@@ -313,6 +356,7 @@ def create_sale(
         user_id=current_user.id,
         branch_id=active_branch_id,
         product_id=payload.product_id,
+        variant_id=variant.id if variant is not None else None,
         quantity=payload.quantity,
         sale_unit_type=(payload.sale_unit_type or "piece"),
         pack_quantity=payload.pack_quantity,
@@ -347,6 +391,7 @@ def create_sale(
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=payload.product_id,
+        variant_id=variant.id if variant is not None else None,
     )
     preferred_batch_number = _normalize_batch_number(payload.preferred_batch_number)
     if preferred_batch_number:
@@ -362,6 +407,7 @@ def create_sale(
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=payload.product_id,
+        variant_id=variant.id if variant is not None else None,
         batch_numbers=sorted({_normalize_batch_number(batch.batch_number) for batch in available_batches if batch.batch_number}),
     )
 
@@ -380,6 +426,7 @@ def create_sale(
                 user_id=current_user.id,
                 branch_id=active_branch_id,
                 product_id=payload.product_id,
+                variant_id=variant.id if variant is not None else None,
                 sale_id=sale.id,
                 change=-take,
                 reason="Sale",
@@ -406,6 +453,7 @@ def create_sale(
                 user_id=current_user.id,
                 branch_id=active_branch_id,
                 product_id=payload.product_id,
+                variant_id=variant.id if variant is not None else None,
                 sale_id=sale.id,
                 change=-remaining,
                 reason="Sale",
@@ -533,6 +581,7 @@ def create_sales_bulk(
 @router.get("/products/{product_id}/batch-options", response_model=list[SaleBatchOptionRead])
 def list_sale_batch_options(
     product_id: int,
+    variant_id: int | None = Query(default=None, gt=0),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
@@ -551,12 +600,21 @@ def list_sale_batch_options(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    variant = _resolve_sale_variant(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=product_id,
+        variant_id=variant_id,
+    )
+
     writeoff_expired_batches(
         db=db,
         actor_user_id=current_user.id,
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=product_id,
+        variant_id=variant.id if variant is not None else None,
     )
     db.flush()
 

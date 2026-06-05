@@ -459,6 +459,56 @@ type JsonObject = Record<string, unknown>;
 type JsonArray = Record<string, unknown>[];
 
 type StockMovementResponse = Omit<StockMovement, "change"> & { change: string | number };
+type ProductResponse = Omit<
+  Product,
+  | "quantity_step"
+  | "cost_price"
+  | "pack_cost_price"
+  | "selling_price"
+  | "pack_selling_price"
+  | "current_stock"
+  | "variants"
+  | "unit_conversions"
+> & {
+  quantity_step?: string | number | null;
+  cost_price?: string | number | null;
+  pack_cost_price?: string | number | null;
+  selling_price?: string | number | null;
+  pack_selling_price?: string | number | null;
+  current_stock?: string | number | null;
+  variants?: Product["variants"];
+  unit_conversions?: Array<
+    Omit<NonNullable<Product["unit_conversions"]>[number], "base_quantity"> & {
+      base_quantity: string | number;
+    }
+  >;
+};
+
+function toOptionalNumber(value: string | number | null | undefined): number | null | undefined {
+  if (value == null || value === "") return value ?? undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normalizeProduct(product: ProductResponse): Product {
+  return {
+    ...product,
+    quantity_step: toOptionalNumber(product.quantity_step),
+    cost_price: toOptionalNumber(product.cost_price),
+    pack_cost_price: toOptionalNumber(product.pack_cost_price),
+    selling_price: toOptionalNumber(product.selling_price),
+    pack_selling_price: toOptionalNumber(product.pack_selling_price),
+    current_stock: toOptionalNumber(product.current_stock),
+    variants: (product.variants ?? []).map((variant) => ({
+      ...variant,
+      attributes_json: variant.attributes_json ?? {},
+    })),
+    unit_conversions: (product.unit_conversions ?? []).map((conversion) => ({
+      ...conversion,
+      base_quantity: Number(conversion.base_quantity ?? 0),
+    })),
+  };
+}
 
 export function buildAuthHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = localStorage.getItem("token");
@@ -896,9 +946,10 @@ export async function fetchProducts(): Promise<Product[]> {
     return cached;
   }
   
-  const data = await jsonRequest<Product[]>("/products");
-  setCache("products", data);
-  return data;
+  const data = await jsonRequest<ProductResponse[]>("/products");
+  const normalized = data.map(normalizeProduct);
+  setCache("products", normalized);
+  return normalized;
 }
 
 // Fetch products with background refresh - returns cached immediately, refreshes in background
@@ -908,17 +959,19 @@ export async function fetchProductsCached(onUpdate?: (products: Product[]) => vo
   // If we have cached data, return it immediately and refresh in background
   if (cached) {
     // Refresh in background
-    jsonRequest<Product[]>("/products").then(fresh => {
-      setCache("products", fresh);
-      if (onUpdate) onUpdate(fresh);
+    jsonRequest<ProductResponse[]>("/products").then((fresh) => {
+      const normalized = fresh.map(normalizeProduct);
+      setCache("products", normalized);
+      if (onUpdate) onUpdate(normalized);
     }).catch(() => { /* ignore background refresh errors */ });
     return cached;
   }
   
   // No cache, fetch fresh
-  const data = await jsonRequest<Product[]>("/products");
-  setCache("products", data);
-  return data;
+  const data = await jsonRequest<ProductResponse[]>("/products");
+  const normalized = data.map(normalizeProduct);
+  setCache("products", normalized);
+  return normalized;
 }
 
 export async function fetchMovements(productId: number): Promise<StockMovement[]> {
@@ -931,14 +984,14 @@ export async function createProduct(payload: NewProduct, branchIdOverride?: numb
   if (branchIdOverride != null) {
     headers["X-Branch-Id"] = String(branchIdOverride);
   }
-  const result = await jsonRequest<Product>("/products", {
+  const result = await jsonRequest<ProductResponse>("/products", {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
   });
   // Invalidate products cache
   dataCache.delete(getCacheKey("products"));
-  return result;
+  return normalizeProduct(result);
 }
 
 export async function createMovement(
@@ -956,13 +1009,13 @@ export async function createMovement(
 }
 
 export async function updateProduct(id: number, updates: Partial<Product>): Promise<Product> {
-  const result = await jsonRequest<Product>(`/products/${id}`, {
+  const result = await jsonRequest<ProductResponse>(`/products/${id}`, {
     method: "PATCH",
     body: JSON.stringify(updates),
   });
   // Invalidate products cache since data changed
   dataCache.delete(getCacheKey("products"));
-  return result;
+  return normalizeProduct(result);
 }
 
 export async function deleteProduct(productId: number): Promise<void> {
@@ -1027,8 +1080,16 @@ export async function createSalesBulk(payloads: NewSale[]): Promise<Sale[]> {
   return result;
 }
 
-export async function fetchSaleBatchOptions(productId: number): Promise<SaleBatchOption[]> {
-  return jsonRequest<SaleBatchOption[]>(`/sales/products/${productId}/batch-options`);
+export async function fetchSaleBatchOptions(
+  productId: number,
+  variantId?: number | null,
+): Promise<SaleBatchOption[]> {
+  const params = new URLSearchParams();
+  if (variantId != null) {
+    params.set("variant_id", String(variantId));
+  }
+  const query = params.toString();
+  return jsonRequest<SaleBatchOption[]>(`/sales/products/${productId}/batch-options${query ? `?${query}` : ""}`);
 }
 
 export async function assignSaleCustomer(

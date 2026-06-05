@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,9 +30,50 @@ class ProductBase(BaseModel):
     pack_selling_price: Decimal | None = Field(default=None, decimal_places=2)
 
 
+class ProductVariantBase(BaseModel):
+    label: str = Field(..., min_length=1, max_length=120)
+    attributes_json: dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+    sort_order: int = Field(default=0, ge=0)
+
+
+class ProductVariantCreate(ProductVariantBase):
+    pass
+
+
+class ProductVariantRead(ProductVariantBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductUnitConversionBase(BaseModel):
+    unit_name: str = Field(..., min_length=1, max_length=64)
+    base_quantity: Decimal = Field(..., gt=0, decimal_places=2)
+    is_sale_unit: bool = True
+    is_purchase_unit: bool = False
+    sort_order: int = Field(default=0, ge=0)
+
+
+class ProductUnitConversionCreate(ProductUnitConversionBase):
+    pass
+
+
+class ProductUnitConversionRead(ProductUnitConversionBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ProductCreate(ProductBase):
     initial_stock: Decimal | None = Field(default=None)
     initial_location: str | None = Field(default="Main Store", max_length=100)
+    variants: list[ProductVariantCreate] = Field(default_factory=list)
+    unit_conversions: list[ProductUnitConversionCreate] = Field(default_factory=list)
 
 
 class ProductRead(ProductBase):
@@ -43,6 +84,8 @@ class ProductRead(ProductBase):
     current_stock: Decimal = Decimal(0)
     active_batch_count: int = 0
     next_batch_expiry_date: date | None = None
+    variants: list[ProductVariantRead] = Field(default_factory=list)
+    unit_conversions: list[ProductUnitConversionRead] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -99,6 +142,7 @@ class PurchaseReturnCreate(BaseModel):
 
 class PurchaseOrderItemCreate(BaseModel):
     product_id: int = Field(..., gt=0)
+    variant_id: int | None = Field(default=None, gt=0)
     quantity: Decimal = Field(..., gt=0, decimal_places=2)
     unit_cost_price: Decimal = Field(..., ge=0, decimal_places=2)
     unit_selling_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
@@ -107,6 +151,7 @@ class PurchaseOrderItemCreate(BaseModel):
 
 class PurchaseCreate(BaseModel):
     product_id: int = Field(..., gt=0)
+    variant_id: int | None = Field(default=None, gt=0)
     supplier_id: int | None = Field(default=None, gt=0)
     supplier_name: str | None = Field(default=None, max_length=255)
     invoice_number: str | None = Field(default=None, max_length=100)
@@ -139,6 +184,7 @@ class PurchaseRead(BaseModel):
     supplier_id: int | None = None
     supplier_name: str
     product_id: int | None = None
+    variant_id: int | None = None
     product_name: str
     product_sku: str
     stock_movement_id: int | None = None
@@ -230,6 +276,7 @@ class PurchaseReturnRead(BaseModel):
 class StockMovementBase(BaseModel):
     change: Decimal = Field(..., decimal_places=2)
     reason: str = Field(default="adjustment", max_length=255)
+    variant_id: int | None = Field(default=None, gt=0)
     batch_number: str | None = Field(default=None, max_length=100)
     expiry_date: date | None = Field(default=None)
     unit_cost_price: Decimal | None = Field(default=None, decimal_places=2)
@@ -251,8 +298,9 @@ class StockMovementRead(StockMovementBase):
 
 class SaleBase(BaseModel):
     product_id: int = Field(..., gt=0)
+    variant_id: int | None = Field(default=None, gt=0)
     quantity: Decimal = Field(..., gt=0, decimal_places=2)
-    sale_unit_type: str = Field(default="piece", max_length=10)
+    sale_unit_type: str = Field(default="piece", max_length=64)
     pack_quantity: int | None = Field(default=None, ge=1)
     unit_price: Decimal = Field(..., ge=0, decimal_places=2)
     total_price: Decimal = Field(..., ge=0, decimal_places=2)

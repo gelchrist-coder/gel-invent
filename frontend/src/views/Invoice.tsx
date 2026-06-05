@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchProductsCached } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import { cacheProducts, loadCachedProducts } from "../offline/storage";
+import { formatSaleQuantityLabel } from "../sales-transactions";
 import { NewSale, Product } from "../types";
 import { readStoredUser } from "../user-storage";
 
@@ -107,16 +108,13 @@ export default function Invoice() {
       .map((line) => {
         const product = productById.get(line.product_id);
         const name = product?.name || `Product #${line.product_id}`;
-        const isPack = line.sale_unit_type === "pack" && typeof line.pack_quantity === "number";
-        const qtyDisplay = isPack ? line.pack_quantity : Number(line.quantity) || 0;
-        const qtyLabel = isPack ? " pack" : "";
         const unitPrice = Number(line.unit_price) || 0;
         const lineTotal = Number(line.total_price) || 0;
 
         return `
           <tr>
             <td>${name}</td>
-            <td style="text-align:right">${qtyDisplay}${qtyLabel}</td>
+            <td style="text-align:right">${formatSaleQuantityLabel(line)}</td>
             <td style="text-align:right">GHS ${unitPrice.toFixed(2)}</td>
             <td style="text-align:right">GHS ${lineTotal.toFixed(2)}</td>
           </tr>
@@ -349,9 +347,6 @@ export default function Invoice() {
                 {pendingInvoice.map((line, index) => {
                   const product = productById.get(line.product_id);
                   const name = product?.name || `Product #${line.product_id}`;
-                  const isPack = line.sale_unit_type === "pack" && typeof line.pack_quantity === "number";
-                  const qtyDisplay = isPack ? line.pack_quantity : Number(line.quantity) || 0;
-                  const qtyLabel = isPack ? " pack" : "";
                   const unitPrice = Number(line.unit_price) || 0;
                   const lineTotal = Number(line.total_price) || 0;
 
@@ -360,8 +355,7 @@ export default function Invoice() {
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{name}</div>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#475569" }}>
                         <span>
-                          {qtyDisplay}
-                          {qtyLabel} × GHS {unitPrice.toFixed(2)}
+                          {formatSaleQuantityLabel(line)} × GHS {unitPrice.toFixed(2)}
                         </span>
                         <span>GHS {lineTotal.toFixed(2)}</span>
                       </div>

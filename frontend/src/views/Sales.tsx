@@ -4,7 +4,7 @@ import { assignSaleCustomer, fetchSalesCached, createSalesBulk, deleteSale, fetc
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
-import { SaleTransaction, groupSalesIntoTransactions } from "../sales-transactions";
+import { SaleTransaction, formatSaleQuantityLabel, groupSalesIntoTransactions } from "../sales-transactions";
 import {
   applyLocalSaleToCachedProducts,
   cacheProducts,
@@ -349,16 +349,12 @@ export default function Sales() {
         const product = productById.get(sale.product_id);
         if (!product) return "";
 
-        const isPack = sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number";
-        const qtyDisplay = isPack ? sale.pack_quantity : Number(sale.quantity) || 0;
-        const qtyLabel = isPack ? " pack" : "";
-
         const unitPrice = Number(sale.unit_price) || 0;
         const lineTotal = Number(sale.total_price) || 0;
 
         return `
           <div class="item-row"><div><strong>${product.name}</strong></div></div>
-          <div class="item-row"><div>${qtyDisplay}${qtyLabel} × GHS ${unitPrice.toFixed(2)}</div><div>GHS ${lineTotal.toFixed(2)}</div></div>
+          <div class="item-row"><div>${formatSaleQuantityLabel(sale)} × GHS ${unitPrice.toFixed(2)}</div><div>GHS ${lineTotal.toFixed(2)}</div></div>
         `;
       })
       .join("");
@@ -479,13 +475,10 @@ export default function Sales() {
       .map((sale) => {
         const product = productById.get(sale.product_id);
         const productName = product?.name || `Product #${sale.product_id}`;
-        const qtyDisplay = sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number"
-          ? `${sale.pack_quantity} pack`
-          : `${sale.quantity} units`;
 
         return `
           <div class="item-row"><div><strong>${productName}</strong></div></div>
-          <div class="item-row"><div>${qtyDisplay} × GHS ${Number(sale.unit_price).toFixed(2)}</div><div>GHS ${Number(sale.total_price).toFixed(2)}</div></div>
+          <div class="item-row"><div>${formatSaleQuantityLabel(sale)} × GHS ${Number(sale.unit_price).toFixed(2)}</div><div>GHS ${Number(sale.total_price).toFixed(2)}</div></div>
         `;
       })
       .join("");
@@ -1428,9 +1421,7 @@ export default function Sales() {
                           {(product?.name || "ITEM").toUpperCase()}
                         </div>
                         <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
-                          {sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number"
-                            ? `${sale.pack_quantity} pack`
-                            : sale.quantity} units @ {Number(sale.unit_price).toFixed(2)}
+                          {formatSaleQuantityLabel(sale)} @ {Number(sale.unit_price).toFixed(2)}
                         </div>
                       </div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", whiteSpace: "nowrap" }}>

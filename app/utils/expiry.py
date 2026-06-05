@@ -24,6 +24,7 @@ def get_batch_balances(
     tenant_user_ids: list[int],
     branch_id: int,
     product_id: int,
+    variant_id: int | None = None,
     include_null_expiry: bool = True,
 ) -> list[BatchBalance]:
     """Return per-batch balances for a product.
@@ -42,9 +43,12 @@ def get_batch_balances(
 
     if not include_null_expiry:
         where.append(models.StockMovement.expiry_date.is_not(None))
+    if variant_id is not None:
+        where.append(models.StockMovement.variant_id == variant_id)
 
     rows = db.execute(
         select(
+            models.StockMovement.variant_id,
             models.StockMovement.batch_number,
             models.StockMovement.expiry_date,
             models.StockMovement.location,
@@ -53,6 +57,7 @@ def get_batch_balances(
         )
         .where(and_(*where))
         .group_by(
+            models.StockMovement.variant_id,
             models.StockMovement.batch_number,
             models.StockMovement.expiry_date,
             models.StockMovement.location,
@@ -60,7 +65,7 @@ def get_batch_balances(
     ).all()
 
     balances: list[BatchBalance] = []
-    for batch_number, expiry_dt, location, balance, first_seen in rows:
+    for _variant_id, batch_number, expiry_dt, location, balance, first_seen in rows:
         bal = balance if isinstance(balance, Decimal) else Decimal(str(balance or 0))
         if not batch_number:
             continue
@@ -104,6 +109,7 @@ def writeoff_expired_batches(
     rows = db.execute(
         select(
             models.StockMovement.product_id,
+            models.StockMovement.variant_id,
             models.StockMovement.batch_number,
             models.StockMovement.expiry_date,
             models.StockMovement.location,
@@ -112,6 +118,7 @@ def writeoff_expired_batches(
         .where(and_(*where))
         .group_by(
             models.StockMovement.product_id,
+            models.StockMovement.variant_id,
             models.StockMovement.batch_number,
             models.StockMovement.expiry_date,
             models.StockMovement.location,
@@ -120,13 +127,14 @@ def writeoff_expired_batches(
     ).all()
 
     product_ids = sorted({int(pid) for pid, *_ in rows})
-    batch_numbers = sorted({str(batch_number) for _pid, batch_number, *_rest in rows if batch_number})
+    batch_numbers = sorted({str(batch_number) for _pid, _variant_id, batch_number, *_rest in rows if batch_number})
 
-    latest_unit_cost_by_key: dict[tuple[int, str], Decimal | None] = {}
+    latest_unit_cost_by_key: dict[tuple[int, int | None, str], Decimal | None] = {}
     if product_ids and batch_numbers:
         unit_cost_rows = db.execute(
             select(
                 models.StockMovement.product_id,
+                models.StockMovement.variant_id,
                 models.StockMovement.batch_number,
                 models.StockMovement.unit_cost_price,
                 models.StockMovement.created_at,
@@ -140,30 +148,33 @@ def writeoff_expired_batches(
             )
             .order_by(
                 models.StockMovement.product_id.asc(),
+                models.StockMovement.variant_id.asc().nullsfirst(),
                 models.StockMovement.batch_number.asc(),
                 models.StockMovement.created_at.desc(),
             )
         ).all()
 
-        for pid, batch_number, unit_cost, _created_at in unit_cost_rows:
+        for pid, variant_id, batch_number, unit_cost, _created_at in unit_cost_rows:
             if not batch_number:
                 continue
-            key = (int(pid), str(batch_number))
+            key = (int(pid), int(variant_id) if variant_id is not None else None, str(batch_number))
             if key not in latest_unit_cost_by_key:
                 latest_unit_cost_by_key[key] = unit_cost
 
     created = 0
-    for pid, batch_number, expiry_dt, location, balance in rows:
+    for pid, variant_id, batch_number, expiry_dt, location, balance in rows:
         bal = balance if isinstance(balance, Decimal) else Decimal(str(balance or 0))
         if bal <= 0:
             continue
 
-        unit_cost_price = latest_unit_cost_by_key.get((int(pid), str(batch_number)))
+        normalized_variant_id = int(variant_id) if variant_id is not None else None
+        unit_cost_price = latest_unit_cost_by_key.get((int(pid), normalized_variant_id, str(batch_number)))
         db.add(
             models.StockMovement(
                 user_id=actor_user_id,
                 branch_id=branch_id,
                 product_id=int(pid),
+                variant_id=normalized_variant_id,
                 change=-bal,
                 reason="Expired",
                 batch_number=str(batch_number),

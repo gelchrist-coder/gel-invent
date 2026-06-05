@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import schemas
-from ..models import Product, StockMovement, Sale, User, SystemSettings, Branch, Supplier, Purchase, SupplierPayment, PurchaseReturn
+from ..models import Product, ProductVariant, StockMovement, Sale, User, SystemSettings, Branch, Supplier, Purchase, SupplierPayment, PurchaseReturn
 from ..auth import get_current_active_user
 from app.permissions import ensure_permission, is_admin
 from app.utils.tenant import get_tenant_user_ids
@@ -188,10 +188,25 @@ def _create_purchase_records(
     if missing_product_ids:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    variant_ids = sorted({int(item.variant_id) for item in items if item.variant_id is not None})
+    variant_by_id: dict[int, ProductVariant] = {}
+    if variant_ids:
+        variants = db.scalars(
+            select(ProductVariant).where(
+                ProductVariant.id.in_(variant_ids),
+                ProductVariant.product_id.in_(product_ids),
+            )
+        ).all()
+        variant_by_id = {variant.id: variant for variant in variants}
+
     prepared_items: list[tuple[int, Product, schemas.PurchaseOrderItemCreate, Decimal, Decimal]] = []
     order_total = MONEY_ZERO
     for index, item in enumerate(items, start=1):
         product = product_by_id[item.product_id]
+        if item.variant_id is not None:
+            variant = variant_by_id.get(int(item.variant_id))
+            if not variant or variant.product_id != product.id:
+                raise HTTPException(status_code=400, detail=f"Selected variant is invalid for {product.name}")
         if product.expiry_date is not None and item.expiry_date is None:
             raise HTTPException(
                 status_code=400,
@@ -235,6 +250,7 @@ def _create_purchase_records(
         batch_number = f"{order_number}-{index:02d}"
         movement = StockMovement(
             product_id=product.id,
+            variant_id=item.variant_id,
             user_id=current_user.id,
             branch_id=active_branch_id,
             change=quantity,
@@ -259,6 +275,7 @@ def _create_purchase_records(
             branch_id=active_branch_id,
             supplier_id=supplier.id,
             product_id=product.id,
+            variant_id=item.variant_id,
             stock_movement_id=movement.id,
             order_number=order_number,
             supplier_name=resolved_supplier_name,
@@ -950,6 +967,7 @@ def create_purchase(
         items=[
             schemas.PurchaseOrderItemCreate(
                 product_id=payload.product_id,
+                variant_id=payload.variant_id,
                 quantity=payload.quantity,
                 unit_cost_price=payload.unit_cost_price,
                 unit_selling_price=payload.unit_selling_price,

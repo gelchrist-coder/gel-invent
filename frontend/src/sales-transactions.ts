@@ -102,8 +102,20 @@ function formatDisplayNumber(value: number): string {
   return value.toFixed(2);
 }
 
+export function getSaleDisplayUnitLabel(sale: Pick<Sale, "sale_unit_type" | "pack_quantity" | "quantity">): string {
+  const saleUnitType = String(sale.sale_unit_type || "piece").trim().toLowerCase();
+  const quantityValue = getSaleQuantityValue(sale);
+  if (!saleUnitType || saleUnitType === "piece") {
+    return quantityValue === 1 ? "unit" : "units";
+  }
+  if (saleUnitType === "pack") {
+    return quantityValue === 1 ? "pack" : "packs";
+  }
+  return saleUnitType;
+}
+
 function getSaleQuantityValue(sale: Pick<Sale, "sale_unit_type" | "pack_quantity" | "quantity">): number {
-  if (sale.sale_unit_type === "pack" && sale.pack_quantity != null) {
+  if (sale.sale_unit_type && sale.sale_unit_type !== "piece" && sale.pack_quantity != null) {
     return toFiniteNumber(sale.pack_quantity);
   }
   return toFiniteNumber(sale.quantity);
@@ -127,17 +139,12 @@ export function getSaleReceiptNumber(sale: Pick<Sale, "client_sale_id" | "id">):
 
 export function formatSaleQuantityLabel(sale: Pick<Sale, "sale_unit_type" | "pack_quantity" | "quantity">): string {
   const quantityValue = getSaleQuantityValue(sale);
-  const isPack = sale.sale_unit_type === "pack" && sale.pack_quantity != null;
-  const unitLabel = isPack
-    ? quantityValue === 1 ? "pack" : "packs"
-    : quantityValue === 1 ? "unit" : "units";
-  return `${formatDisplayNumber(quantityValue)} ${unitLabel}`;
+  return `${formatDisplayNumber(quantityValue)} ${getSaleDisplayUnitLabel(sale)}`;
 }
 
 function formatSaleSummaryLabel(productName: string, sale: Pick<Sale, "sale_unit_type" | "pack_quantity" | "quantity">): string {
   const quantityValue = getSaleQuantityValue(sale);
-  const isPack = sale.sale_unit_type === "pack" && sale.pack_quantity != null;
-  return `${productName} x${formatDisplayNumber(quantityValue)}${isPack ? " pack" : ""}`;
+  return `${productName} x${formatDisplayNumber(quantityValue)} ${getSaleDisplayUnitLabel(sale)}`;
 }
 
 export function groupSalesIntoTransactions(
