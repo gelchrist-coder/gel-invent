@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { Branch, NewProduct, Supplier } from "../types";
 import { useAppCategories } from "../categories";
@@ -36,8 +36,14 @@ export default function ProductForm({
   const [isPerishable, setIsPerishable] = useState(false);
   const [supplierSearchTerm, setSupplierSearchTerm] = useState("");
   const [locallyCreatedSupplierNames, setLocallyCreatedSupplierNames] = useState<string[]>([]);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
 
   const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
+  const barcodeInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const cameraFrameRef = useRef<number | null>(null);
 
   const [form, setForm] = useState<NewProduct & {
     category?: string; 
@@ -157,6 +163,113 @@ export default function ProductForm({
     const random = Math.random().toString(36).substring(2, 8).toUpperCase();
     setForm({ ...form, sku: `${prefix}-${random}` });
   };
+
+  const stopCameraScanner = () => {
+    if (cameraFrameRef.current != null) {
+      window.cancelAnimationFrame(cameraFrameRef.current);
+      cameraFrameRef.current = null;
+    }
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!cameraOpen) {
+      stopCameraScanner();
+      return;
+    }
+
+    let cancelled = false;
+
+    const startCamera = async () => {
+      setCameraError(null);
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setCameraError("Camera scanning is not supported on this browser.");
+          return;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+        });
+
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        cameraStreamRef.current = stream;
+        const video = cameraVideoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          await video.play().catch(() => {
+            // Ignore autoplay errors and continue.
+          });
+        }
+
+        const BarcodeDetectorApi = (window as typeof window & {
+          BarcodeDetector?: new (config?: { formats?: string[] }) => {
+            detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>>;
+          };
+        }).BarcodeDetector;
+
+        if (!BarcodeDetectorApi) {
+          setCameraError("BarcodeDetector is not available. Use a scanner device or type the code.");
+          return;
+        }
+
+        const detector = new BarcodeDetectorApi({
+          formats: ["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e", "qr_code"],
+        });
+
+        const detectFrame = async () => {
+          if (cancelled) return;
+
+          const activeVideo = cameraVideoRef.current;
+          if (!activeVideo || activeVideo.readyState < 2) {
+            cameraFrameRef.current = window.requestAnimationFrame(() => {
+              void detectFrame();
+            });
+            return;
+          }
+
+          try {
+            const results = await detector.detect(activeVideo);
+            const rawValue = String(results[0]?.rawValue || "").trim();
+            if (rawValue) {
+              setForm((previousForm) => ({ ...previousForm, barcode: rawValue }));
+              setCameraOpen(false);
+              window.setTimeout(() => {
+                barcodeInputRef.current?.focus();
+                barcodeInputRef.current?.select();
+              }, 0);
+              return;
+            }
+          } catch {
+            // Keep scanning even if a frame fails.
+          }
+
+          cameraFrameRef.current = window.requestAnimationFrame(() => {
+            void detectFrame();
+          });
+        };
+
+        void detectFrame();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unable to access camera.";
+        setCameraError(message);
+      }
+    };
+
+    void startCamera();
+
+    return () => {
+      cancelled = true;
+      stopCameraScanner();
+    };
+  }, [cameraOpen]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -416,12 +529,37 @@ export default function ProductForm({
               </label>
               <label>
                 Barcode
-                <input
-                  className="input"
-                  value={form.barcode}
-                  onChange={(e) => setForm({ ...form, barcode: e.target.value })}
-                  placeholder="Scan or enter barcode"
-                />
+                <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                  <input
+                    ref={barcodeInputRef}
+                    className="input"
+                    value={form.barcode}
+                    onChange={(e) => setForm({ ...form, barcode: e.target.value })}
+                    placeholder="Scan or enter barcode"
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => {
+                      setCameraError(null);
+                      setCameraOpen(true);
+                    }}
+                    style={{
+                      padding: isModalLayout ? "0 14px" : "0 16px",
+                      minWidth: 78,
+                      background: "#1d4ed8",
+                      borderRadius: 10,
+                      fontSize: 13,
+                      fontWeight: 700,
+                    }}
+                  >
+                    Scan
+                  </button>
+                </div>
+                <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
+                  Use a barcode scanner while this field is focused, or tap Scan to use the camera.
+                </small>
               </label>
             </div>
             <label>
@@ -768,6 +906,70 @@ export default function ProductForm({
           </button>
         </div>
       </form>
+
+      {cameraOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(15, 23, 42, 0.78)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1050,
+            padding: 16,
+          }}
+          onClick={() => setCameraOpen(false)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              background: "#020617",
+              borderRadius: 12,
+              border: "1px solid #1e293b",
+              padding: 14,
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <h3 style={{ margin: 0, fontSize: 16, color: "#e2e8f0" }}>Scan Product Barcode</h3>
+              <button
+                type="button"
+                onClick={() => setCameraOpen(false)}
+                style={{
+                  border: "1px solid #334155",
+                  borderRadius: 6,
+                  background: "#0f172a",
+                  color: "#e2e8f0",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  padding: "6px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <video
+              ref={cameraVideoRef}
+              autoPlay
+              muted
+              playsInline
+              style={{ width: "100%", borderRadius: 10, background: "#0b1220", minHeight: 280, objectFit: "cover" }}
+            />
+            <p style={{ margin: "10px 0 0", fontSize: 12, color: "#94a3b8" }}>
+              Align the product barcode inside the frame. The code will fill the barcode field automatically.
+            </p>
+            {cameraError ? (
+              <p style={{ margin: "8px 0 0", fontSize: 12, color: "#fca5a5" }}>{cameraError}</p>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
