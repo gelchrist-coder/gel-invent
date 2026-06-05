@@ -36,7 +36,11 @@ def _ensure_critical_auth_schema_sync() -> None:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_types TEXT"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS product_categories TEXT"))
+        conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS capability_overrides TEXT"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS measurement_type VARCHAR(32) DEFAULT 'count'"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS allows_fractional_sales BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS quantity_step NUMERIC(10,2) DEFAULT 1"))
         conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS birthday DATE"))
         conn.execute(
             text(
@@ -101,17 +105,24 @@ def _run_startup_migrations_sync() -> None:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_types TEXT"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS product_categories TEXT"))
+        conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS capability_overrides TEXT"))
         conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
 
         # Product columns added over time
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_size INTEGER"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS measurement_type VARCHAR(32) DEFAULT 'count'"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS allows_fractional_sales BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS quantity_step NUMERIC(10,2) DEFAULT 1"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(100)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS expiry_date DATE"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_cost_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS selling_price NUMERIC(10,2)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS pack_selling_price NUMERIC(10,2)"))
+        conn.execute(text("UPDATE products SET measurement_type = 'count' WHERE measurement_type IS NULL OR length(trim(measurement_type)) = 0"))
+        conn.execute(text("UPDATE products SET allows_fractional_sales = FALSE WHERE allows_fractional_sales IS NULL"))
+        conn.execute(text("UPDATE products SET quantity_step = 1 WHERE quantity_step IS NULL OR quantity_step <= 0"))
 
         # Batch/expiry tracking + sale linkage on movements
         conn.execute(text("ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS batch_number VARCHAR(100)"))

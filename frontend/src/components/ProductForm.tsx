@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-import { Branch, NewProduct, Supplier } from "../types";
+import { Branch, MeasurementType, NewProduct, Supplier } from "../types";
 import { useAppCategories } from "../categories";
 import { createSupplier, updateMyCategories } from "../api";
 import { startCameraBarcodeScan } from "../barcode-scanner";
+import { useCapabilities } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type Props = {
@@ -31,6 +32,26 @@ export default function ProductForm({
   layoutMode = "card",
 }: Props) {
   const categoryOptions = useAppCategories();
+  const capabilities = useCapabilities();
+  const canConfigureMeasurement = capabilities.fractional_sales || capabilities.length_based_sales || capabilities.unit_conversions;
+  const measurementTypeOptions = useMemo<Array<{ value: MeasurementType; label: string }>>(() => {
+    const options: Array<{ value: MeasurementType; label: string }> = [
+      { value: "count", label: "Count / Pieces" },
+    ];
+
+    if (capabilities.fractional_sales || capabilities.unit_conversions) {
+      options.push(
+        { value: "weight", label: "Weight" },
+        { value: "volume", label: "Volume" },
+      );
+    }
+
+    if (capabilities.length_based_sales) {
+      options.push({ value: "length", label: "Length" });
+    }
+
+    return options;
+  }, [capabilities.fractional_sales, capabilities.length_based_sales, capabilities.unit_conversions]);
 
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -49,6 +70,7 @@ export default function ProductForm({
   const [form, setForm] = useState<NewProduct & {
     category?: string; 
     barcode?: string;
+    quantityStep?: string;
     costPrice?: string;
     packCostPrice?: string;
     sellingPrice?: string;
@@ -62,10 +84,13 @@ export default function ProductForm({
     name: "", 
     description: "", 
     unit: "pcs",
+    measurement_type: "count",
+    allows_fractional_sales: false,
     pack_size: null,
     expiry_date: null,
     category: categoryOptions[0] ?? "",
     barcode: "",
+    quantityStep: "1",
     costPrice: "",
     packCostPrice: "",
     sellingPrice: "",
@@ -213,6 +238,49 @@ export default function ProductForm({
     };
   }, [cameraOpen]);
 
+  useEffect(() => {
+    if (capabilities.expiry_tracking) {
+      return;
+    }
+
+    setIsPerishable(false);
+    setForm((previousForm) => {
+      if (!previousForm.expiry_date) {
+        return previousForm;
+      }
+      return { ...previousForm, expiry_date: null };
+    });
+  }, [capabilities.expiry_tracking]);
+
+  useEffect(() => {
+    setForm((previousForm) => {
+      const nextMeasurementType = measurementTypeOptions.some((option) => option.value === previousForm.measurement_type)
+        ? (previousForm.measurement_type ?? "count")
+        : "count";
+
+      let nextForm = previousForm;
+      let changed = false;
+
+      if (previousForm.measurement_type !== nextMeasurementType) {
+        nextForm = { ...nextForm, measurement_type: nextMeasurementType };
+        changed = true;
+      }
+
+      if (!capabilities.fractional_sales) {
+        if (nextForm.allows_fractional_sales) {
+          nextForm = { ...nextForm, allows_fractional_sales: false };
+          changed = true;
+        }
+        if ((nextForm.quantityStep ?? "1") !== "1") {
+          nextForm = { ...nextForm, quantityStep: "1" };
+          changed = true;
+        }
+      }
+
+      return changed ? nextForm : previousForm;
+    });
+  }, [capabilities.fractional_sales, measurementTypeOptions]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -220,7 +288,16 @@ export default function ProductForm({
     const submitter = nativeEvent.submitter as HTMLButtonElement | null;
     const mode = (submitter?.dataset.saveMode as "save" | "saveAndNew" | undefined) ?? "save";
 
-    if (isPerishable && !form.expiry_date) {
+    const allowsFractionalSales = capabilities.fractional_sales && Boolean(form.allows_fractional_sales);
+    const parsedQuantityStep = Number.parseFloat(form.quantityStep ?? "1");
+    const quantityStep = allowsFractionalSales && Number.isFinite(parsedQuantityStep) && parsedQuantityStep > 0
+      ? parsedQuantityStep
+      : 1;
+    const measurementType = measurementTypeOptions.some((option) => option.value === form.measurement_type)
+      ? (form.measurement_type ?? "count")
+      : "count";
+
+    if (capabilities.expiry_tracking && isPerishable && !form.expiry_date) {
       setError("Expiry date is required for perishable goods");
       return;
     }
@@ -293,10 +370,13 @@ export default function ProductForm({
         name: form.name,
         description: form.description || undefined,
         unit: form.unit || "pcs",
+        measurement_type: measurementType,
+        allows_fractional_sales: allowsFractionalSales,
+        quantity_step: quantityStep,
         pack_size: form.packSize ? parseInt(form.packSize) : undefined,
         category: form.category || undefined,
         supplier: normalizedSupplierName,
-        expiry_date: isPerishable ? (form.expiry_date || undefined) : undefined,
+        expiry_date: capabilities.expiry_tracking && isPerishable ? (form.expiry_date || undefined) : undefined,
         cost_price: form.costPrice ? parseFloat(form.costPrice) : undefined,
         pack_cost_price: form.packCostPrice ? parseFloat(form.packCostPrice) : undefined,
         selling_price: form.sellingPrice ? parseFloat(form.sellingPrice) : undefined,
@@ -311,10 +391,13 @@ export default function ProductForm({
           name: "", 
           description: "", 
           unit: form.unit,
+          measurement_type: measurementType,
+          allows_fractional_sales: allowsFractionalSales,
           pack_size: null,
           expiry_date: null,
           category: form.category,
           barcode: "",
+          quantityStep: String(quantityStep),
           costPrice: "",
           packCostPrice: "",
           sellingPrice: "",
@@ -516,51 +599,53 @@ export default function ProductForm({
               />
             </label>
 
-            <div style={{ marginTop: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "block" }}>Product Type</span>
-              <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    name="perishableType"
-                    checked={!isPerishable}
-                    onChange={() => {
-                      setIsPerishable(false);
-                      setForm({ ...form, expiry_date: null });
-                    }}
-                    style={{ width: 18, height: 18, accentColor: "#3b82f6" }}
-                  />
-                  <span style={{ fontSize: 14 }}>Non-Perishable</span>
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    name="perishableType"
-                    checked={isPerishable}
-                    onChange={() => setIsPerishable(true)}
-                    style={{ width: 18, height: 18, accentColor: "#3b82f6" }}
-                  />
-                  <span style={{ fontSize: 14 }}>Perishable</span>
-                </label>
-              </div>
+            {capabilities.expiry_tracking ? (
+              <div style={{ marginTop: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "block" }}>Product Type</span>
+                <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="perishableType"
+                      checked={!isPerishable}
+                      onChange={() => {
+                        setIsPerishable(false);
+                        setForm({ ...form, expiry_date: null });
+                      }}
+                      style={{ width: 18, height: 18, accentColor: "#3b82f6" }}
+                    />
+                    <span style={{ fontSize: 14 }}>Non-Perishable</span>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                    <input
+                      type="radio"
+                      name="perishableType"
+                      checked={isPerishable}
+                      onChange={() => setIsPerishable(true)}
+                      style={{ width: 18, height: 18, accentColor: "#3b82f6" }}
+                    />
+                    <span style={{ fontSize: 14 }}>Perishable</span>
+                  </label>
+                </div>
 
-              {isPerishable && (
-                <label>
-                  Expiry Date *
-                  <input
-                    className="input"
-                    type="date"
-                    value={form.expiry_date ?? ""}
-                    onChange={(e) => setForm({ ...form, expiry_date: e.target.value || null })}
-                    min={new Date().toISOString().split("T")[0]}
-                    required
-                  />
-                  <small style={{ color: "#ef4444", fontSize: 12, marginTop: 4, display: "block" }}>
-                    Required for perishable goods
-                  </small>
-                </label>
-              )}
-            </div>
+                {isPerishable ? (
+                  <label>
+                    Expiry Date *
+                    <input
+                      className="input"
+                      type="date"
+                      value={form.expiry_date ?? ""}
+                      onChange={(e) => setForm({ ...form, expiry_date: e.target.value || null })}
+                      min={new Date().toISOString().split("T")[0]}
+                      required
+                    />
+                    <small style={{ color: "#ef4444", fontSize: 12, marginTop: 4, display: "block" }}>
+                      Required for perishable goods
+                    </small>
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -668,16 +753,92 @@ export default function ProductForm({
                 </label>
               )}
             </div>
+            {canConfigureMeasurement ? (
+              <>
+                <div className="form-row">
+                  <label>
+                    Measurement Type
+                    <select
+                      className="input"
+                      value={form.measurement_type ?? "count"}
+                      onChange={(e) => setForm({ ...form, measurement_type: e.target.value as MeasurementType })}
+                    >
+                      {measurementTypeOptions.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                    <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
+                      Choose how this product's quantity is measured at sale time.
+                    </small>
+                  </label>
+                  {capabilities.fractional_sales ? (
+                    <label>
+                      Fractional Sales
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          minHeight: 42,
+                          padding: "0 12px",
+                          border: "1px solid #d1d5db",
+                          borderRadius: 8,
+                          background: "#fff",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={Boolean(form.allows_fractional_sales)}
+                          onChange={(e) => setForm({
+                            ...form,
+                            allows_fractional_sales: e.target.checked,
+                            quantityStep: e.target.checked ? (form.quantityStep || "0.25") : "1",
+                          })}
+                        />
+                        <span style={{ fontSize: 14, color: "#111827" }}>Allow fractional sales for this product</span>
+                      </div>
+                      <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
+                        Use this for measured products sold in steps like 0.25 or 0.50.
+                      </small>
+                    </label>
+                  ) : null}
+                </div>
+                {capabilities.fractional_sales ? (
+                  <div className="form-row">
+                    <label>
+                      Quantity Step
+                      <input
+                        className="input"
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={form.quantityStep ?? "1"}
+                        onChange={(e) => setForm({ ...form, quantityStep: e.target.value })}
+                        disabled={!form.allows_fractional_sales}
+                        placeholder="1.00"
+                      />
+                      <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
+                        {form.allows_fractional_sales
+                          ? "Customers must buy in multiples of this quantity."
+                          : "Whole-number quantities only while fractional sales are disabled."}
+                      </small>
+                    </label>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
             <div className="form-row">
               <label>
                 Initial Stock
                 <input
                   className="input"
                   type="number"
+                  inputMode="decimal"
                   min="0"
+                  step={capabilities.fractional_sales && form.allows_fractional_sales ? (form.quantityStep || "0.01") : "1"}
                   value={form.initialStock}
                   onChange={(e) => setForm({ ...form, initialStock: e.target.value })}
-                  placeholder="0"
+                  placeholder={capabilities.fractional_sales && form.allows_fractional_sales ? "0.00" : "0"}
                 />
                 <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
                   {form.unit !== "pcs" && form.unit !== "unit" && form.packSize 

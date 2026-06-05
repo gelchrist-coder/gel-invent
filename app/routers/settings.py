@@ -10,6 +10,7 @@ from ..auth import get_current_active_user
 from ..database import get_db
 from ..models import CreditTransaction, Creditor, Product, Sale, SaleReturn, StockMovement, SystemSettings, User
 from app.permissions import ensure_permission, is_admin
+from app.utils.capabilities import normalize_capability_overrides, resolve_effective_capabilities, serialize_capability_overrides
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -45,6 +46,8 @@ class SystemSettingsRead(BaseModel):
     low_stock_threshold: int
     expiry_warning_days: int
     uses_expiry_tracking: bool
+    capability_overrides: dict[str, bool]
+    effective_capabilities: dict[str, bool]
     currency_code: str
     auto_backup: bool
     email_notifications: bool
@@ -54,6 +57,7 @@ class SystemSettingsUpdate(BaseModel):
     low_stock_threshold: int = Field(ge=0, le=1_000_000)
     expiry_warning_days: int = Field(ge=0, le=10_000)
     uses_expiry_tracking: bool
+    capability_overrides: dict[str, bool] | None = None
     currency_code: str = Field(min_length=3, max_length=3)
     auto_backup: bool
     email_notifications: bool
@@ -138,6 +142,35 @@ def _tenant_user_ids(db: Session, owner_user_id: int) -> list[int]:
     return [int(row[0]) for row in rows]
 
 
+def _serialize_settings(settings: SystemSettings, owner: User | None) -> SystemSettingsRead:
+    capability_overrides = normalize_capability_overrides(getattr(settings, "capability_overrides", None))
+    business_types: list[str] | None = None
+    if owner and getattr(owner, "business_types", None):
+        try:
+            parsed = json.loads(owner.business_types)
+            if isinstance(parsed, list):
+                business_types = [str(value).strip() for value in parsed if str(value).strip()]
+        except Exception:
+            business_types = None
+
+    effective_capabilities = resolve_effective_capabilities(
+        business_types=business_types,
+        capability_overrides=capability_overrides,
+        uses_expiry_tracking=settings.uses_expiry_tracking,
+    )
+
+    return SystemSettingsRead(
+        low_stock_threshold=settings.low_stock_threshold,
+        expiry_warning_days=settings.expiry_warning_days,
+        uses_expiry_tracking=settings.uses_expiry_tracking,
+        capability_overrides=capability_overrides,
+        effective_capabilities=effective_capabilities,
+        currency_code=_normalize_currency(getattr(settings, "currency_code", "GHS") or "GHS"),
+        auto_backup=settings.auto_backup,
+        email_notifications=settings.email_notifications,
+    )
+
+
 @router.get("/system", response_model=SystemSettingsRead)
 def get_system_settings(
     db: Session = Depends(get_db),
@@ -145,14 +178,8 @@ def get_system_settings(
 ):
     owner_user_id = _get_tenant_owner_id(current_user)
     settings = _get_or_create_settings(db, owner_user_id)
-    return SystemSettingsRead(
-        low_stock_threshold=settings.low_stock_threshold,
-        expiry_warning_days=settings.expiry_warning_days,
-        uses_expiry_tracking=settings.uses_expiry_tracking,
-        currency_code=_normalize_currency(getattr(settings, "currency_code", "GHS") or "GHS"),
-        auto_backup=settings.auto_backup,
-        email_notifications=settings.email_notifications,
-    )
+    owner = db.query(User).filter(User.id == owner_user_id).first()
+    return _serialize_settings(settings, owner)
 
 
 @router.put("/system", response_model=SystemSettingsRead)
@@ -168,6 +195,8 @@ def update_system_settings(
     settings.low_stock_threshold = payload.low_stock_threshold
     settings.expiry_warning_days = payload.expiry_warning_days
     settings.uses_expiry_tracking = payload.uses_expiry_tracking
+    if payload.capability_overrides is not None:
+        settings.capability_overrides = serialize_capability_overrides(payload.capability_overrides)
     settings.currency_code = currency_code
     settings.auto_backup = payload.auto_backup
     settings.email_notifications = payload.email_notifications
@@ -176,14 +205,7 @@ def update_system_settings(
     db.commit()
     db.refresh(settings)
 
-    return SystemSettingsRead(
-        low_stock_threshold=settings.low_stock_threshold,
-        expiry_warning_days=settings.expiry_warning_days,
-        uses_expiry_tracking=settings.uses_expiry_tracking,
-        currency_code=_normalize_currency(settings.currency_code or "GHS"),
-        auto_backup=settings.auto_backup,
-        email_notifications=settings.email_notifications,
-    )
+    return _serialize_settings(settings, current_user)
 
 
 @router.post("/system/currency/convert", response_model=CurrencyConvertResponse)

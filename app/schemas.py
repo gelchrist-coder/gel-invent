@@ -11,6 +11,9 @@ class ProductBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=1024)
     unit: str = Field(default="unit", min_length=1, max_length=32)
+    measurement_type: Literal["count", "weight", "volume", "length"] = "count"
+    allows_fractional_sales: bool = False
+    quantity_step: Decimal = Field(default=Decimal("1"), gt=0, decimal_places=2)
     pack_size: int | None = Field(default=None)
     category: str | None = Field(default=None, max_length=100)
     supplier: str | None = Field(default=None, max_length=255)

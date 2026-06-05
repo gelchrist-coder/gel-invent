@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NewSale, Product } from "../types";
 import { useAppCategories } from "../categories";
 import { startCameraBarcodeScan } from "../barcode-scanner";
+import { useCapabilities } from "../settings";
 
 type RepeatDraft = {
   token: string;
@@ -44,6 +45,31 @@ type SuspendedCart = {
   amountReceived: string;
 };
 
+const normalizeQuantityStep = (value: number | null | undefined): number => {
+  const parsed = Number(value ?? 1);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 1;
+  }
+  return Number(parsed.toFixed(2));
+};
+
+const roundToStep = (value: number, step: number): number => {
+  const normalizedStep = normalizeQuantityStep(step);
+  return Number((Math.round(value / normalizedStep) * normalizedStep).toFixed(2));
+};
+
+const formatQuantityValue = (value: number): string => {
+  const rounded = Number(value.toFixed(2));
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.?0+$/, "");
+};
+
+const getPieceQuantityStep = (product: Product, fractionalSalesEnabled: boolean): number => {
+  if (!fractionalSalesEnabled || !product.allows_fractional_sales) {
+    return 1;
+  }
+  return normalizeQuantityStep(product.quantity_step ?? 1);
+};
+
 export default function POSSaleForm({
   products,
   onSubmit,
@@ -78,6 +104,8 @@ export default function POSSaleForm({
   const restoreSuspendedCartRef = useRef<(cartId: string) => void>(() => {});
 
   const userCategories = useAppCategories();
+  const capabilities = useCapabilities();
+  const fractionalSalesEnabled = capabilities.fractional_sales;
   const [amountReceived, setAmountReceived] = useState("");
   
   // Credit sale states
@@ -274,7 +302,8 @@ export default function POSSaleForm({
       return sum + pieceQty;
     }, 0);
 
-    const addPieceQty = unit === 'pack' ? (product.pack_size || 1) : 1;
+    const pieceQuantityStep = unit === 'pack' ? 1 : getPieceQuantityStep(product, fractionalSalesEnabled);
+    const addPieceQty = unit === 'pack' ? (product.pack_size || 1) : pieceQuantityStep;
     if (cartPiecesForProduct + addPieceQty > availablePieces) {
       showMessage(`Not enough stock. Available: ${availablePieces}`);
       return;
@@ -284,19 +313,24 @@ export default function POSSaleForm({
       // Increase quantity if already in cart
       setCart(cart.map(item => 
         item.product.id === product.id && item.sellingUnit === unit
-          ? { ...item, quantity: item.quantity + 1 }
+          ? { ...item, quantity: item.quantity + pieceQuantityStep }
           : item
       ));
     } else {
       // Add new item
-      setCart([...cart, { product, quantity: 1, sellingUnit: unit }]);
+      setCart([...cart, { product, quantity: unit === 'pack' ? 1 : pieceQuantityStep, sellingUnit: unit }]);
     }
   };
 
   // Update quantity
   const updateQuantity = (productId: number, unit: 'piece' | 'pack', newQuantity: number) => {
+    const product = products.find((p) => p.id === productId);
+    if (!product) return;
+
     const normalizedQuantity =
-      unit === "pack" ? Math.floor(newQuantity) : newQuantity;
+      unit === "pack"
+        ? Math.floor(newQuantity)
+        : roundToStep(newQuantity, getPieceQuantityStep(product, fractionalSalesEnabled));
 
     if (!Number.isFinite(normalizedQuantity)) return;
 
@@ -312,7 +346,6 @@ export default function POSSaleForm({
       }
     }
 
-    const product = products.find((p) => p.id === productId);
     const availablePieces = Math.max(0, Number(product?.current_stock ?? 0));
     if (availablePieces <= 0) {
       showMessage("Out of stock");
@@ -949,6 +982,11 @@ export default function POSSaleForm({
                 const unitPrice = item.sellingUnit === 'pack'
                   ? Number(item.product.pack_selling_price || 0)
                   : Number(item.product.selling_price || 0);
+                const quantityStep = item.sellingUnit === 'pack'
+                  ? 1
+                  : getPieceQuantityStep(item.product, fractionalSalesEnabled);
+                const showsFractionalQuantityControls =
+                  item.sellingUnit === 'piece' && fractionalSalesEnabled && Boolean(item.product.allows_fractional_sales) && quantityStep < 1;
                 
                 return (
                 <div
@@ -988,7 +1026,7 @@ export default function POSSaleForm({
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <button
                         type="button"
-                        onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity - 1)}
+                        onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity - quantityStep)}
                         style={{
                           width: 28,
                           height: 28,
@@ -1005,10 +1043,10 @@ export default function POSSaleForm({
                       >
                         −
                       </button>
-                      {item.sellingUnit === "piece" ? (
+                      {showsFractionalQuantityControls ? (
                         <button
                           type="button"
-                          onClick={() => updateQuantity(item.product.id, item.sellingUnit, 0.5)}
+                          onClick={() => updateQuantity(item.product.id, item.sellingUnit, quantityStep)}
                           style={{
                             height: 28,
                             padding: "0 10px",
@@ -1024,14 +1062,14 @@ export default function POSSaleForm({
                             color: "#6b7280",
                           }}
                         >
-                          Half
+                          Min {formatQuantityValue(quantityStep)}
                         </button>
                       ) : null}
                       <input
                         type="number"
                         inputMode="decimal"
-                        step={item.sellingUnit === "pack" ? 1 : 0.01}
-                        min={item.sellingUnit === "pack" ? 1 : 0.01}
+                        step={quantityStep}
+                        min={quantityStep}
                         value={Number.isFinite(item.quantity) ? String(item.quantity) : ""}
                         onChange={(e) => {
                           const raw = e.target.value;
@@ -1054,7 +1092,7 @@ export default function POSSaleForm({
                       />
                       <button
                         type="button"
-                        onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity + 1)}
+                        onClick={() => updateQuantity(item.product.id, item.sellingUnit, item.quantity + quantityStep)}
                         style={{
                           width: 28,
                           height: 28,

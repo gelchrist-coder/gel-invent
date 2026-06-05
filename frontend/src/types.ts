@@ -1,3 +1,5 @@
+export type MeasurementType = "count" | "weight" | "volume" | "length";
+
 export type Product = {
   id: number;
   sku: string;
@@ -5,6 +7,9 @@ export type Product = {
   name: string;
   description?: string | null;
   unit: string;
+  measurement_type?: MeasurementType | null;
+  allows_fractional_sales?: boolean | null;
+  quantity_step?: number | null;
   pack_size?: number | null;
   category?: string | null;
   supplier?: string | null;
@@ -37,6 +42,9 @@ export type NewProduct = {
   name: string;
   description?: string | null;
   unit?: string;
+  measurement_type?: MeasurementType | null;
+  allows_fractional_sales?: boolean | null;
+  quantity_step?: number | null;
   pack_size?: number | null;
   category?: string | null;
   supplier?: string | null;

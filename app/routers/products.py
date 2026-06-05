@@ -18,6 +18,35 @@ from app.utils.expiry import writeoff_expired_batches
 
 router = APIRouter(prefix="/products", tags=["products"])
 
+MEASUREMENT_TYPES = {"count", "weight", "volume", "length"}
+
+
+def _normalize_measurement_type(value: Optional[str]) -> str:
+    normalized = (value or "count").strip().lower()
+    if normalized not in MEASUREMENT_TYPES:
+        return "count"
+    return normalized
+
+
+def _normalize_quantity_step(value: Optional[Decimal], *, allows_fractional_sales: bool) -> Decimal:
+    if not allows_fractional_sales:
+        return Decimal("1")
+    if value is None or value <= 0:
+        return Decimal("1")
+    return value.quantize(Decimal("0.01"))
+
+
+def _apply_product_capability_defaults(product_data: dict) -> dict:
+    normalized = dict(product_data)
+    allows_fractional_sales = bool(normalized.get("allows_fractional_sales"))
+    normalized["measurement_type"] = _normalize_measurement_type(normalized.get("measurement_type"))
+    normalized["allows_fractional_sales"] = allows_fractional_sales
+    normalized["quantity_step"] = _normalize_quantity_step(
+        normalized.get("quantity_step"),
+        allows_fractional_sales=allows_fractional_sales,
+    )
+    return normalized
+
 
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
@@ -25,6 +54,9 @@ class ProductUpdate(BaseModel):
     barcode: Optional[str] = None
     description: Optional[str] = None
     unit: Optional[str] = None
+    measurement_type: Optional[str] = None
+    allows_fractional_sales: Optional[bool] = None
+    quantity_step: Optional[Decimal] = None
     category: Optional[str] = None
     supplier: Optional[str] = None
     expiry_date: Optional[date] = None
@@ -88,6 +120,7 @@ def create_product(
     product_data['barcode'] = normalized_barcode
     product_data['user_id'] = current_user.id
     product_data['branch_id'] = active_branch_id
+    product_data = _apply_product_capability_defaults(product_data)
     
     product = models.Product(**product_data)
     db.add(product)
@@ -395,6 +428,13 @@ def update_product(
     update_data = payload.model_dump(exclude_unset=True)
     if "barcode" in update_data:
         update_data["barcode"] = normalized_barcode
+    if any(key in update_data for key in {"measurement_type", "allows_fractional_sales", "quantity_step"}):
+        update_data = _apply_product_capability_defaults({
+            "measurement_type": update_data.get("measurement_type", product.measurement_type),
+            "allows_fractional_sales": update_data.get("allows_fractional_sales", product.allows_fractional_sales),
+            "quantity_step": update_data.get("quantity_step", product.quantity_step),
+            **update_data,
+        })
     for key, value in update_data.items():
         setattr(product, key, value)
     

@@ -6,13 +6,31 @@ import StockAlerts from "../components/StockAlerts";
 import MovementHistory from "../components/MovementHistory";
 import PurchasingPanel from "../components/PurchasingPanel";
 import ProductSearchSelect from "../components/ProductSearchSelect";
-import { useExpiryTracking } from "../settings";
+import { useCapabilities, useExpiryTracking } from "../settings";
 import type { Branch, Product } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
 type InventoryTab = "overview" | "alerts" | "actions" | "purchasing" | "returns" | "history";
+
+const normalizeQuantityStep = (value: number | null | undefined): number => {
+  const parsed = Number(value ?? 1);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 1;
+  }
+  return Number(parsed.toFixed(2));
+};
+
+const formatQuantityValue = (value: number): string => {
+  const rounded = Number(value.toFixed(2));
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.?0+$/, "");
+};
+
+const isStepAligned = (value: number, step: number): boolean => {
+  const rounded = Number((Math.round(value / step) * step).toFixed(2));
+  return Math.abs(value - rounded) < 0.0001;
+};
 
 export default function Inventory() {
   const currentUser = readStoredUser();
@@ -21,6 +39,7 @@ export default function Inventory() {
   const canTransferBetweenBranches = hasUserPermission("transfer_stock_between_branches", currentUser);
   const canViewProcurement = hasUserPermission("view_procurement", currentUser);
   const canUseActionTab = canManageInventory || canManageCatalog || canTransferBetweenBranches;
+  const capabilities = useCapabilities();
   const usesExpiryTracking = useExpiryTracking();
 
   const [analytics, setAnalytics] = useState<InventoryAnalytics | null>(null);
@@ -135,6 +154,10 @@ export default function Inventory() {
   const isDamageAction = actionType === "damage";
   const isTransferAction = actionType === "transfer";
   const isDeleteAction = actionType === "delete";
+  const selectedProductAllowsFractional = Boolean(capabilities.fractional_sales && selectedProduct?.allows_fractional_sales);
+  const selectedProductQuantityStep = selectedProductAllowsFractional
+    ? normalizeQuantityStep(Number(selectedProduct?.quantity_step ?? 1))
+    : 1;
   const isPerishableProduct = usesExpiryTracking && !!selectedProduct?.expiry_date;
 
   const resetActionForm = () => {
@@ -184,6 +207,16 @@ export default function Inventory() {
     const qty = Number(quantity);
     if (!Number.isFinite(qty) || qty <= 0) {
       alert("Enter a valid quantity");
+      return;
+    }
+
+    if (!selectedProductAllowsFractional && !Number.isInteger(qty)) {
+      alert("This product only supports whole-number quantities");
+      return;
+    }
+
+    if (selectedProductAllowsFractional && !isStepAligned(qty, selectedProductQuantityStep)) {
+      alert(`Quantity must follow the configured step of ${formatQuantityValue(selectedProductQuantityStep)}`);
       return;
     }
 
@@ -643,14 +676,19 @@ export default function Inventory() {
               </span>
               <input
                 type="number"
-                min="1"
-                step="1"
+                min={selectedProductAllowsFractional ? String(selectedProductQuantityStep) : "1"}
+                step={selectedProductAllowsFractional ? String(selectedProductQuantityStep) : "1"}
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 placeholder={isTransferAction ? "Enter quantity to transfer" : isNewStockAction ? "Enter quantity to add" : "Enter quantity damaged"}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
                 disabled={submittingAction}
               />
+              {selectedProductAllowsFractional ? (
+                <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
+                  This product accepts fractional quantities in steps of {formatQuantityValue(selectedProductQuantityStep)}.
+                </small>
+              ) : null}
               {isDamageAction || isTransferAction ? (
                 <small style={{ color: "#6b7280", fontSize: 12 }}>Available stock: {selectedProductStock}</small>
               ) : null}

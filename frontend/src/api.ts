@@ -410,9 +410,45 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
 }
 
 export type SystemSettings = {
+  capability_overrides: CapabilityOverrides;
+  effective_capabilities: CapabilityMap;
   low_stock_threshold: number;
   expiry_warning_days: number;
   uses_expiry_tracking: boolean;
+  currency_code: string;
+  auto_backup: boolean;
+  email_notifications: boolean;
+};
+
+export type CapabilityKey =
+  | "expiry_tracking"
+  | "batch_tracking"
+  | "variants"
+  | "size_color_variants"
+  | "brand_shade_attributes"
+  | "unit_conversions"
+  | "fractional_sales"
+  | "length_based_sales";
+
+export type CapabilityMap = Record<CapabilityKey, boolean>;
+export type CapabilityOverrides = Partial<CapabilityMap>;
+
+export const DEFAULT_EFFECTIVE_CAPABILITIES: CapabilityMap = {
+  expiry_tracking: true,
+  batch_tracking: false,
+  variants: false,
+  size_color_variants: false,
+  brand_shade_attributes: false,
+  unit_conversions: false,
+  fractional_sales: false,
+  length_based_sales: false,
+};
+
+export type SystemSettingsUpdate = {
+  low_stock_threshold: number;
+  expiry_warning_days: number;
+  uses_expiry_tracking: boolean;
+  capability_overrides?: CapabilityOverrides;
   currency_code: string;
   auto_backup: boolean;
   email_notifications: boolean;
@@ -1340,7 +1376,7 @@ export async function fetchSystemSettingsCached(onUpdate?: (settings: SystemSett
   return data;
 }
 
-export async function updateSystemSettings(payload: SystemSettings): Promise<SystemSettings> {
+export async function updateSystemSettings(payload: SystemSettingsUpdate): Promise<SystemSettings> {
   const updated = await jsonRequest<SystemSettings>("/settings/system", {
     method: "PUT",
     body: JSON.stringify(payload),
