@@ -39,6 +39,7 @@ export default function ProductForm({
   const [locallyCreatedSupplierNames, setLocallyCreatedSupplierNames] = useState<string[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraStatus, setCameraStatus] = useState<string | null>(null);
 
   const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement | null>(null);
@@ -168,20 +169,24 @@ export default function ProductForm({
     if (!cameraOpen) {
       stopCameraScannerRef.current?.();
       stopCameraScannerRef.current = null;
+      setCameraStatus(null);
       return;
     }
 
     const startCamera = async () => {
       setCameraError(null);
+      setCameraStatus("Starting camera...");
       const videoElement = cameraVideoRef.current;
       if (!videoElement) {
         setCameraError("Camera preview is not available.");
+        setCameraStatus(null);
         return;
       }
 
       stopCameraScannerRef.current = await startCameraBarcodeScan({
         videoElement,
         onDetected: (rawValue) => {
+          setCameraStatus("Barcode detected.");
           setForm((previousForm) => ({ ...previousForm, barcode: rawValue }));
           setCameraOpen(false);
           window.setTimeout(() => {
@@ -189,8 +194,15 @@ export default function ProductForm({
             barcodeInputRef.current?.select();
           }, 0);
         },
-        onError: setCameraError,
+        onError: (message) => {
+          setCameraError(message);
+          setCameraStatus(null);
+        },
       });
+
+      if (!cameraError) {
+        setCameraStatus("Live scan active. Hold the barcode inside the guide.");
+      }
     };
 
     void startCamera();
@@ -473,6 +485,7 @@ export default function ProductForm({
                     className="button"
                     onClick={() => {
                       setCameraError(null);
+                      setCameraStatus("Starting camera...");
                       setCameraOpen(true);
                     }}
                     style={{
@@ -884,15 +897,76 @@ export default function ProductForm({
                 Close
               </button>
             </div>
-            <video
-              ref={cameraVideoRef}
-              autoPlay
-              muted
-              playsInline
-              style={{ width: "100%", borderRadius: 10, background: "#0b1220", minHeight: 280, objectFit: "cover" }}
-            />
+            <div style={{ position: "relative", borderRadius: 10, overflow: "hidden", background: "#0b1220" }}>
+              <video
+                ref={cameraVideoRef}
+                autoPlay
+                muted
+                playsInline
+                style={{ width: "100%", background: "#0b1220", minHeight: 280, objectFit: "cover", display: "block" }}
+              />
+              <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 12,
+                    left: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: "rgba(15, 23, 42, 0.84)",
+                    color: "#e2e8f0",
+                    border: "1px solid rgba(51, 65, 85, 0.9)",
+                    borderRadius: 999,
+                    padding: "7px 12px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    maxWidth: "calc(100% - 24px)",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 9,
+                      height: 9,
+                      borderRadius: "50%",
+                      background: cameraError ? "#f87171" : "#22c55e",
+                      boxShadow: cameraError ? "0 0 12px rgba(248, 113, 113, 0.55)" : "0 0 12px rgba(34, 197, 94, 0.7)",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {cameraError ? "Scan unavailable" : (cameraStatus || "Live scan active")}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    position: "absolute",
+                    left: "50%",
+                    top: "50%",
+                    width: "70%",
+                    height: "34%",
+                    transform: "translate(-50%, -50%)",
+                    borderRadius: 18,
+                    border: "2px solid rgba(34, 197, 94, 0.88)",
+                    boxShadow: "0 0 0 9999px rgba(2, 6, 23, 0.16)",
+                  }}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    left: "20%",
+                    right: "20%",
+                    top: "50%",
+                    height: 2,
+                    transform: "translateY(-50%)",
+                    background: "linear-gradient(90deg, transparent, rgba(34, 197, 94, 0.95), transparent)",
+                    boxShadow: "0 0 18px rgba(34, 197, 94, 0.55)",
+                  }}
+                />
+              </div>
+            </div>
             <p style={{ margin: "10px 0 0", fontSize: 12, color: "#94a3b8" }}>
-              Align the product barcode inside the frame. The code will fill the barcode field automatically.
+              Align the product barcode inside the guide. Move closer until the barcode fills most of the box.
             </p>
             {cameraError ? (
               <p style={{ margin: "8px 0 0", fontSize: 12, color: "#fca5a5" }}>{cameraError}</p>
