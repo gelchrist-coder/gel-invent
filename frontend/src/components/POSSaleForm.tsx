@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NewSale, Product } from "../types";
 import { useAppCategories } from "../categories";
 import { startCameraBarcodeScan } from "../barcode-scanner";
+import { getProductBatchSummary, getProductSearchText, getProductVariantSummary } from "../product-display";
 import { useCapabilities } from "../settings";
 
 type RepeatDraft = {
@@ -279,8 +280,8 @@ export default function POSSaleForm({
   // Filter products by category and search
   const filteredProducts = products.filter(p => {
     const matchesCategory = selectedCategory === "all" || p.category === selectedCategory;
-    const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          p.sku.toLowerCase().includes(searchTerm.toLowerCase());
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    const matchesSearch = !normalizedSearch || getProductSearchText(p).includes(normalizedSearch);
     return matchesCategory && matchesSearch;
   });
 
@@ -798,53 +799,68 @@ export default function POSSaleForm({
           gap: 8,
           padding: 0,
         }}>
-          {filteredProducts.map(product => (
-            <button
-              key={product.id}
-              type="button"
-              onClick={() => addToCart(product, 'piece')}
-              disabled={Number(product.current_stock ?? 0) <= 0}
-              style={{
-                padding: 0,
-                border: "1px solid #e5e7eb",
-                borderRadius: 6,
-                background: "white",
-                display: "flex",
-                flexDirection: "column",
-                cursor: Number(product.current_stock ?? 0) <= 0 ? "not-allowed" : "pointer",
-                opacity: Number(product.current_stock ?? 0) <= 0 ? 0.5 : 1,
-                overflow: "hidden",
-                textAlign: "left",
-              }}
-            >
-              <div style={{ padding: "10px 10px 8px" }}>
-                <div style={{ 
-                  fontWeight: 600, 
-                  fontSize: 12, 
-                  color: "#111827",
+          {filteredProducts.map((product) => {
+            const variantSummary = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes
+              ? getProductVariantSummary(product)
+              : null;
+            const batchSummary = capabilities.batch_tracking
+              ? getProductBatchSummary(product, { includeNextExpiry: capabilities.expiry_tracking })
+              : null;
+
+            return (
+              <button
+                key={product.id}
+                type="button"
+                onClick={() => addToCart(product, 'piece')}
+                disabled={Number(product.current_stock ?? 0) <= 0}
+                style={{
+                  padding: 0,
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 6,
+                  background: "white",
+                  display: "flex",
+                  flexDirection: "column",
+                  cursor: Number(product.current_stock ?? 0) <= 0 ? "not-allowed" : "pointer",
+                  opacity: Number(product.current_stock ?? 0) <= 0 ? 0.5 : 1,
                   overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  marginBottom: 2,
+                  textAlign: "left",
+                }}
+              >
+                <div style={{ padding: "10px 10px 8px" }}>
+                  <div style={{
+                    fontWeight: 600,
+                    fontSize: 12,
+                    color: "#111827",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    marginBottom: 2,
+                  }}>
+                    {product.name}
+                  </div>
+                  {variantSummary ? (
+                    <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>{variantSummary}</div>
+                  ) : null}
+                  <div style={{ fontSize: 10, color: Number(product.current_stock ?? 0) <= 0 ? "#dc2626" : "#9ca3af" }}>
+                    {Number(product.current_stock ?? 0) <= 0 ? "Out of stock" : `${Math.max(0, Number(product.current_stock ?? 0))} in stock`}
+                  </div>
+                  {batchSummary ? (
+                    <div style={{ fontSize: 10, color: "#1d4ed8", marginTop: 4 }}>{batchSummary}</div>
+                  ) : null}
+                </div>
+                <div style={{ 
+                  padding: "8px 10px",
+                  background: "#f9fafb",
+                  borderTop: "1px solid #f3f4f6",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "#111827",
                 }}>
-                  {product.name}
+                  GHS {Number(product.selling_price || 0).toFixed(2)}
                 </div>
-                <div style={{ fontSize: 10, color: Number(product.current_stock ?? 0) <= 0 ? "#dc2626" : "#9ca3af" }}>
-                  {Number(product.current_stock ?? 0) <= 0 ? "Out of stock" : `${Math.max(0, Number(product.current_stock ?? 0))} in stock`}
-                </div>
-              </div>
-              <div style={{ 
-                padding: "8px 10px",
-                background: "#f9fafb",
-                borderTop: "1px solid #f3f4f6",
-                fontSize: 14,
-                fontWeight: 700,
-                color: "#111827",
-              }}>
-                GHS {Number(product.selling_price || 0).toFixed(2)}
-              </div>
-            </button>
-          ))}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -987,6 +1003,12 @@ export default function POSSaleForm({
                   : getPieceQuantityStep(item.product, fractionalSalesEnabled);
                 const showsFractionalQuantityControls =
                   item.sellingUnit === 'piece' && fractionalSalesEnabled && Boolean(item.product.allows_fractional_sales) && quantityStep < 1;
+                const variantSummary = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes
+                  ? getProductVariantSummary(item.product)
+                  : null;
+                const batchSummary = capabilities.batch_tracking
+                  ? getProductBatchSummary(item.product, { includeNextExpiry: capabilities.expiry_tracking })
+                  : null;
                 
                 return (
                 <div
@@ -997,8 +1019,16 @@ export default function POSSaleForm({
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: "#111827", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {item.product.name}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.product.name}
+                      </div>
+                      {variantSummary ? (
+                        <div style={{ fontSize: 11, color: "#475569", marginTop: 3 }}>{variantSummary}</div>
+                      ) : null}
+                      {batchSummary ? (
+                        <div style={{ fontSize: 11, color: "#1d4ed8", marginTop: 3 }}>{batchSummary}</div>
+                      ) : null}
                     </div>
                     <button
                       type="button"

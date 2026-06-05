@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Product } from "../types";
 import { updateMyCategories } from "../api";
 import { useAppCategories } from "../categories";
-import { useExpiryTracking, useSystemSettings } from "../settings";
+import { getProductBatchSummary, getProductSearchText, getProductVariantSummary } from "../product-display";
+import { useCapabilities, useExpiryTracking, useSystemSettings } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type Props = {
@@ -37,8 +38,11 @@ export default function ProductList({
   const accessUser = readStoredUser() ?? { role: userRole };
   const canManageCatalog = hasUserPermission("manage_catalog", accessUser);
   const categoryOptions = useAppCategories();
+  const capabilities = useCapabilities();
   const usesExpiryTracking = useExpiryTracking();
   const systemSettings = useSystemSettings();
+  const showVariantMetadata = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes;
+  const showBatchMetadata = capabilities.batch_tracking;
   const expiryWarningDays = Number(systemSettings.expiry_warning_days) || 45;
   const expiryWindowMs = expiryWarningDays * 24 * 60 * 60 * 1000;
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
@@ -49,6 +53,7 @@ export default function ProductList({
   const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
   const [isCompactLayout, setIsCompactLayout] = useState(() => window.innerWidth < 980);
+  const editingProduct = products.find((product) => product.id === editingId) ?? null;
 
   useEffect(() => {
     const onResize = () => setIsCompactLayout(window.innerWidth < 980);
@@ -84,6 +89,12 @@ export default function ProductList({
       sku: product.sku,
       description: product.description,
       unit: product.unit,
+      variant_group: product.variant_group,
+      variant_label: product.variant_label,
+      brand: product.brand,
+      size: product.size,
+      color: product.color,
+      shade: product.shade,
       category: product.category,
       supplier: product.supplier,
       expiry_date: product.expiry_date,
@@ -179,11 +190,7 @@ export default function ProductList({
   const filteredProducts = products.filter((p) => {
     // Search filter
     const searchLower = searchTerm.toLowerCase();
-    const matchesSearch = !searchTerm || 
-      p.name.toLowerCase().includes(searchLower) ||
-      p.sku.toLowerCase().includes(searchLower) ||
-      (p.supplier && p.supplier.toLowerCase().includes(searchLower)) ||
-      (p.description && p.description.toLowerCase().includes(searchLower));
+    const matchesSearch = !searchTerm || getProductSearchText(p).includes(searchLower);
 
     // Category filter
     const matchesCategory = filterCategory === "all" || p.category === filterCategory;
@@ -279,8 +286,24 @@ export default function ProductList({
             onClick={(e) => e.stopPropagation()}
           >
             <h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>
-              Edit Product - {products.find(p => p.id === editingId)?.name}
+              Edit Product - {editingProduct?.name}
             </h3>
+            {showBatchMetadata && editingProduct ? (
+              <div
+                style={{
+                  marginBottom: 16,
+                  padding: 12,
+                  borderRadius: 10,
+                  border: "1px solid #dbeafe",
+                  background: "#eff6ff",
+                  color: "#1e3a8a",
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                {getProductBatchSummary(editingProduct, { includeNextExpiry: usesExpiryTracking }) || "No active tracked batches yet."}
+              </div>
+            ) : null}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <label>
                 <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
@@ -354,6 +377,100 @@ export default function ProductList({
                   style={{ fontSize: 14, padding: 10, resize: "vertical" }}
                 />
               </label>
+              {showVariantMetadata ? (
+                <>
+                  {capabilities.variants ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <label>
+                        <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                          Product Family / Model
+                        </span>
+                        <input
+                          className="input"
+                          type="text"
+                          value={editForm.variant_group || ""}
+                          onChange={(e) => setEditForm({ ...editForm, variant_group: e.target.value || null })}
+                          placeholder="e.g. Air Max, Series 5"
+                          style={{ fontSize: 14, padding: 10 }}
+                        />
+                      </label>
+                      <label>
+                        <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                          Variant Name
+                        </span>
+                        <input
+                          className="input"
+                          type="text"
+                          value={editForm.variant_label || ""}
+                          onChange={(e) => setEditForm({ ...editForm, variant_label: e.target.value || null })}
+                          placeholder="e.g. Blue / Medium, 64GB"
+                          style={{ fontSize: 14, padding: 10 }}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                  {capabilities.brand_shade_attributes ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <label>
+                        <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                          Brand
+                        </span>
+                        <input
+                          className="input"
+                          type="text"
+                          value={editForm.brand || ""}
+                          onChange={(e) => setEditForm({ ...editForm, brand: e.target.value || null })}
+                          placeholder="e.g. Nike, Samsung"
+                          style={{ fontSize: 14, padding: 10 }}
+                        />
+                      </label>
+                      <label>
+                        <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                          Shade / Finish
+                        </span>
+                        <input
+                          className="input"
+                          type="text"
+                          value={editForm.shade || ""}
+                          onChange={(e) => setEditForm({ ...editForm, shade: e.target.value || null })}
+                          placeholder="e.g. Rose Gold, Matte Nude"
+                          style={{ fontSize: 14, padding: 10 }}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                  {capabilities.size_color_variants ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <label>
+                        <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                          Size
+                        </span>
+                        <input
+                          className="input"
+                          type="text"
+                          value={editForm.size || ""}
+                          onChange={(e) => setEditForm({ ...editForm, size: e.target.value || null })}
+                          placeholder="e.g. Medium, 42"
+                          style={{ fontSize: 14, padding: 10 }}
+                        />
+                      </label>
+                      <label>
+                        <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                          Color
+                        </span>
+                        <input
+                          className="input"
+                          type="text"
+                          value={editForm.color || ""}
+                          onChange={(e) => setEditForm({ ...editForm, color: e.target.value || null })}
+                          placeholder="e.g. Black, Blue"
+                          style={{ fontSize: 14, padding: 10 }}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <label>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
@@ -513,6 +630,8 @@ export default function ProductList({
             const stock = stockData[p.id];
             const stockLoaded = stock !== undefined;
             const profitMargin = calculateProfitMargin(p.cost_price, p.selling_price);
+            const variantSummary = showVariantMetadata ? getProductVariantSummary(p) : null;
+            const batchSummary = showBatchMetadata ? getProductBatchSummary(p, { includeNextExpiry: usesExpiryTracking }) : null;
 
             return (
               <div
@@ -529,8 +648,14 @@ export default function ProductList({
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 2 }}>{p.name}</div>
                     <div style={{ fontSize: 12, color: "#6b7280" }}>SKU: {p.sku}</div>
+                    {variantSummary ? (
+                      <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{variantSummary}</div>
+                    ) : null}
                     {p.supplier ? (
                       <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>Supplier: {p.supplier}</div>
+                    ) : null}
+                    {batchSummary ? (
+                      <div style={{ fontSize: 12, color: "#1d4ed8", marginTop: 4 }}>{batchSummary}</div>
                     ) : null}
                   </div>
                   <span
@@ -662,6 +787,8 @@ export default function ProductList({
                 const stock = stockData[p.id];
                 const stockLoaded = stock !== undefined;
                 const profitMargin = calculateProfitMargin(p.cost_price, p.selling_price);
+                const variantSummary = showVariantMetadata ? getProductVariantSummary(p) : null;
+                const batchSummary = showBatchMetadata ? getProductBatchSummary(p, { includeNextExpiry: usesExpiryTracking }) : null;
 
                 return (
                   <tr key={p.id} style={{ 
@@ -673,10 +800,16 @@ export default function ProductList({
                   >
                     <td style={{ padding: "12px", fontWeight: 500, color: "#111827" }}>
                       <div>{p.name}</div>
+                      {variantSummary ? (
+                        <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{variantSummary}</div>
+                      ) : null}
                       {p.supplier ? (
                         <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
                           Supplier: {p.supplier}
                         </div>
+                      ) : null}
+                      {batchSummary ? (
+                        <div style={{ fontSize: 12, color: "#1d4ed8", marginTop: 4 }}>{batchSummary}</div>
                       ) : null}
                     </td>
                     <td style={{ padding: "12px", color: "#6b7280", fontFamily: "monospace", fontSize: 13 }}>

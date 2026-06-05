@@ -10,6 +10,12 @@ export type Product = {
   measurement_type?: MeasurementType | null;
   allows_fractional_sales?: boolean | null;
   quantity_step?: number | null;
+  variant_group?: string | null;
+  variant_label?: string | null;
+  brand?: string | null;
+  size?: string | null;
+  color?: string | null;
+  shade?: string | null;
   pack_size?: number | null;
   category?: string | null;
   supplier?: string | null;
@@ -22,6 +28,8 @@ export type Product = {
   updated_at: string;
   created_by_name?: string | null;
   current_stock?: number | null;
+  active_batch_count?: number | null;
+  next_batch_expiry_date?: string | null;
 };
 
 export type StockMovement = {
@@ -45,6 +53,12 @@ export type NewProduct = {
   measurement_type?: MeasurementType | null;
   allows_fractional_sales?: boolean | null;
   quantity_step?: number | null;
+  variant_group?: string | null;
+  variant_label?: string | null;
+  brand?: string | null;
+  size?: string | null;
+  color?: string | null;
+  shade?: string | null;
   pack_size?: number | null;
   category?: string | null;
   supplier?: string | null;

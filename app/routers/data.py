@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 try:
@@ -192,9 +192,19 @@ def export_data(
                 "id": p.id,
                 "branch_id": p.branch_id,
                 "sku": p.sku,
+                "barcode": p.barcode,
                 "name": p.name,
                 "description": p.description,
                 "unit": p.unit,
+                "measurement_type": getattr(p, "measurement_type", "count"),
+                "allows_fractional_sales": getattr(p, "allows_fractional_sales", False),
+                "quantity_step": _serialize_decimal(getattr(p, "quantity_step", None)),
+                "variant_group": getattr(p, "variant_group", None),
+                "variant_label": getattr(p, "variant_label", None),
+                "brand": getattr(p, "brand", None),
+                "size": getattr(p, "size", None),
+                "color": getattr(p, "color", None),
+                "shade": getattr(p, "shade", None),
                 "pack_size": p.pack_size,
                 "category": p.category,
                 "expiry_date": _serialize_dt(p.expiry_date),
@@ -360,9 +370,19 @@ def export_data_xlsx(
         "Product ID",
         "Branch",
         "SKU",
+        "Barcode",
         "Name",
         "Category",
         "Unit",
+        "Measurement Type",
+        "Allows Fractional Sales",
+        "Quantity Step",
+        "Product Family",
+        "Variant",
+        "Brand",
+        "Size",
+        "Color",
+        "Shade",
         "Pack Size",
         "Cost Price",
         "Selling Price",
@@ -380,9 +400,19 @@ def export_data_xlsx(
                 p.id,
                 branch_name_by_id.get(p.branch_id) if p.branch_id else None,
                 p.sku,
+                p.barcode,
                 p.name,
                 p.category,
                 p.unit,
+                getattr(p, "measurement_type", "count"),
+                getattr(p, "allows_fractional_sales", False),
+                _serialize_num(getattr(p, "quantity_step", None)),
+                getattr(p, "variant_group", None),
+                getattr(p, "variant_label", None),
+                getattr(p, "brand", None),
+                getattr(p, "size", None),
+                getattr(p, "color", None),
+                getattr(p, "shade", None),
                 p.pack_size,
                 _serialize_num(p.cost_price),
                 _serialize_num(p.selling_price),
@@ -496,6 +526,26 @@ def export_data_xlsx(
 
 def _as_decimal(value: Any) -> Decimal:
     return Decimal(str(value))
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float, Decimal)):
+        return bool(value)
+    normalized = str(value or "").strip().lower()
+    return normalized in {"1", "true", "yes", "on"}
+
+
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text_value = str(value).strip()
+    return text_value or None
+
+
+def _normalized_product_signature_text(value: Any) -> str:
+    return (_clean_text(value) or "").lower()
 
 
 def _as_date(value: Any) -> date | None:
@@ -640,7 +690,15 @@ def import_data(
         q = db.query(models.Product).filter(models.Product.user_id == current_user.id)
         if new_branch_id is not None:
             q = q.filter(models.Product.branch_id == new_branch_id)
-        existing = q.filter(models.Product.name.ilike(name)).first()
+        existing = q.filter(
+            func.lower(func.trim(models.Product.name)) == _normalized_product_signature_text(name),
+            func.lower(func.trim(func.coalesce(models.Product.variant_group, ""))) == _normalized_product_signature_text(p.get("variant_group")),
+            func.lower(func.trim(func.coalesce(models.Product.variant_label, ""))) == _normalized_product_signature_text(p.get("variant_label")),
+            func.lower(func.trim(func.coalesce(models.Product.brand, ""))) == _normalized_product_signature_text(p.get("brand")),
+            func.lower(func.trim(func.coalesce(models.Product.size, ""))) == _normalized_product_signature_text(p.get("size")),
+            func.lower(func.trim(func.coalesce(models.Product.color, ""))) == _normalized_product_signature_text(p.get("color")),
+            func.lower(func.trim(func.coalesce(models.Product.shade, ""))) == _normalized_product_signature_text(p.get("shade")),
+        ).first()
         if existing:
             product_id_map[legacy_id] = existing.id
             continue
@@ -649,12 +707,22 @@ def import_data(
             user_id=current_user.id,
             branch_id=new_branch_id,
             sku=sku,
+            barcode=_clean_text(p.get("barcode")),
             name=name,
-            description=p.get("description"),
+            description=_clean_text(p.get("description")),
             unit=str(p.get("unit") or "unit"),
+            measurement_type=str(p.get("measurement_type") or "count"),
+            allows_fractional_sales=_as_bool(p.get("allows_fractional_sales")),
+            quantity_step=_as_decimal(p.get("quantity_step")) if p.get("quantity_step") is not None else None,
+            variant_group=_clean_text(p.get("variant_group")),
+            variant_label=_clean_text(p.get("variant_label")),
+            brand=_clean_text(p.get("brand")),
+            size=_clean_text(p.get("size")),
+            color=_clean_text(p.get("color")),
+            shade=_clean_text(p.get("shade")),
             pack_size=p.get("pack_size"),
-            category=p.get("category"),
-            expiry_date=p.get("expiry_date"),
+            category=_clean_text(p.get("category")),
+            expiry_date=_as_date(p.get("expiry_date")),
             cost_price=_as_decimal(p.get("cost_price")) if p.get("cost_price") is not None else None,
             pack_cost_price=_as_decimal(p.get("pack_cost_price")) if p.get("pack_cost_price") is not None else None,
             selling_price=_as_decimal(p.get("selling_price")) if p.get("selling_price") is not None else None,

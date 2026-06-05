@@ -14,6 +14,12 @@ class ProductBase(BaseModel):
     measurement_type: Literal["count", "weight", "volume", "length"] = "count"
     allows_fractional_sales: bool = False
     quantity_step: Decimal = Field(default=Decimal("1"), gt=0, decimal_places=2)
+    variant_group: str | None = Field(default=None, max_length=120)
+    variant_label: str | None = Field(default=None, max_length=120)
+    brand: str | None = Field(default=None, max_length=100)
+    size: str | None = Field(default=None, max_length=64)
+    color: str | None = Field(default=None, max_length=64)
+    shade: str | None = Field(default=None, max_length=64)
     pack_size: int | None = Field(default=None)
     category: str | None = Field(default=None, max_length=100)
     supplier: str | None = Field(default=None, max_length=255)
@@ -35,6 +41,8 @@ class ProductRead(ProductBase):
     updated_at: datetime
     created_by_name: str | None = None
     current_stock: Decimal = Decimal(0)
+    active_batch_count: int = 0
+    next_batch_expiry_date: date | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

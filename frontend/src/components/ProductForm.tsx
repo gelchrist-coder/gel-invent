@@ -21,6 +21,11 @@ type Props = {
 const UNITS = ["pcs", "box", "pack", "dozen", "carton", "bundle", "unit"];
 const MAX_VISIBLE_SUPPLIER_OPTIONS = 100;
 
+const cleanOptionalText = (value: string | null | undefined): string | undefined => {
+  const normalized = (value ?? "").trim();
+  return normalized || undefined;
+};
+
 export default function ProductForm({
   onCreate,
   onCancel,
@@ -34,6 +39,7 @@ export default function ProductForm({
   const categoryOptions = useAppCategories();
   const capabilities = useCapabilities();
   const canConfigureMeasurement = capabilities.fractional_sales || capabilities.length_based_sales || capabilities.unit_conversions;
+  const canConfigureVariants = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes;
   const measurementTypeOptions = useMemo<Array<{ value: MeasurementType; label: string }>>(() => {
     const options: Array<{ value: MeasurementType; label: string }> = [
       { value: "count", label: "Count / Pieces" },
@@ -86,6 +92,12 @@ export default function ProductForm({
     unit: "pcs",
     measurement_type: "count",
     allows_fractional_sales: false,
+    variant_group: "",
+    variant_label: "",
+    brand: "",
+    size: "",
+    color: "",
+    shade: "",
     pack_size: null,
     expiry_date: null,
     category: categoryOptions[0] ?? "",
@@ -373,6 +385,12 @@ export default function ProductForm({
         measurement_type: measurementType,
         allows_fractional_sales: allowsFractionalSales,
         quantity_step: quantityStep,
+        variant_group: cleanOptionalText(form.variant_group),
+        variant_label: cleanOptionalText(form.variant_label),
+        brand: cleanOptionalText(form.brand),
+        size: cleanOptionalText(form.size),
+        color: cleanOptionalText(form.color),
+        shade: cleanOptionalText(form.shade),
         pack_size: form.packSize ? parseInt(form.packSize) : undefined,
         category: form.category || undefined,
         supplier: normalizedSupplierName,
@@ -393,6 +411,12 @@ export default function ProductForm({
           unit: form.unit,
           measurement_type: measurementType,
           allows_fractional_sales: allowsFractionalSales,
+          variant_group: "",
+          variant_label: "",
+          brand: "",
+          size: "",
+          color: "",
+          shade: "",
           pack_size: null,
           expiry_date: null,
           category: form.category,
@@ -644,6 +668,88 @@ export default function ProductForm({
                     </small>
                   </label>
                 ) : null}
+              </div>
+            ) : null}
+
+            {canConfigureVariants ? (
+              <div style={{ marginTop: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: "block" }}>Variant Details</span>
+                <div className="grid" style={{ gap: 12 }}>
+                  {capabilities.variants ? (
+                    <div className="form-row">
+                      <label>
+                        Product Family / Model
+                        <input
+                          className="input"
+                          type="text"
+                          value={form.variant_group ?? ""}
+                          onChange={(e) => setForm({ ...form, variant_group: e.target.value })}
+                          placeholder="e.g. Air Max, Series 5"
+                        />
+                      </label>
+                      <label>
+                        Variant Name
+                        <input
+                          className="input"
+                          type="text"
+                          value={form.variant_label ?? ""}
+                          onChange={(e) => setForm({ ...form, variant_label: e.target.value })}
+                          placeholder="e.g. Blue / Medium, 64GB"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {capabilities.brand_shade_attributes ? (
+                    <div className="form-row">
+                      <label>
+                        Brand
+                        <input
+                          className="input"
+                          type="text"
+                          value={form.brand ?? ""}
+                          onChange={(e) => setForm({ ...form, brand: e.target.value })}
+                          placeholder="e.g. Nike, Samsung"
+                        />
+                      </label>
+                      <label>
+                        Shade / Finish
+                        <input
+                          className="input"
+                          type="text"
+                          value={form.shade ?? ""}
+                          onChange={(e) => setForm({ ...form, shade: e.target.value })}
+                          placeholder="e.g. Rose Gold, Matte Nude"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {capabilities.size_color_variants ? (
+                    <div className="form-row">
+                      <label>
+                        Size
+                        <input
+                          className="input"
+                          type="text"
+                          value={form.size ?? ""}
+                          onChange={(e) => setForm({ ...form, size: e.target.value })}
+                          placeholder="e.g. Medium, 42"
+                        />
+                      </label>
+                      <label>
+                        Color
+                        <input
+                          className="input"
+                          type="text"
+                          value={form.color ?? ""}
+                          onChange={(e) => setForm({ ...form, color: e.target.value })}
+                          placeholder="e.g. Black, Blue"
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : null}
           </div>

@@ -6,6 +6,7 @@ import StockAlerts from "../components/StockAlerts";
 import MovementHistory from "../components/MovementHistory";
 import PurchasingPanel from "../components/PurchasingPanel";
 import ProductSearchSelect from "../components/ProductSearchSelect";
+import { getProductBatchSummary, getProductVariantSummary } from "../product-display";
 import { useCapabilities, useExpiryTracking } from "../settings";
 import type { Branch, Product } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
@@ -158,6 +159,12 @@ export default function Inventory() {
   const selectedProductQuantityStep = selectedProductAllowsFractional
     ? normalizeQuantityStep(Number(selectedProduct?.quantity_step ?? 1))
     : 1;
+  const selectedProductVariantSummary = selectedProduct && (capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes)
+    ? getProductVariantSummary(selectedProduct)
+    : null;
+  const selectedProductBatchSummary = selectedProduct && capabilities.batch_tracking
+    ? getProductBatchSummary(selectedProduct, { includeNextExpiry: usesExpiryTracking })
+    : null;
   const isPerishableProduct = usesExpiryTracking && !!selectedProduct?.expiry_date;
 
   const resetActionForm = () => {
@@ -559,6 +566,9 @@ export default function Inventory() {
             <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
               {selectedProduct ? `${selectedProduct.name} (${selectedProduct.sku})` : "No product selected"}
             </div>
+            {selectedProductVariantSummary ? (
+              <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{selectedProductVariantSummary}</div>
+            ) : null}
           </div>
           <div>
             <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current stock</div>
@@ -566,6 +576,14 @@ export default function Inventory() {
               {selectedProductStock}
             </div>
           </div>
+          {capabilities.batch_tracking ? (
+            <div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Batch tracking</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: selectedProductBatchSummary ? "#1d4ed8" : "#334155" }}>
+                {selectedProductBatchSummary || "No active tracked batches"}
+              </div>
+            </div>
+          ) : null}
           <div>
             <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Perishability</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: isPerishableProduct ? "#b45309" : "#334155" }}>
@@ -759,6 +777,11 @@ export default function Inventory() {
               <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 6 }}>
                 Use Purchasing instead when this stock came from a supplier delivery.
               </small>
+              {capabilities.batch_tracking ? (
+                <small style={{ color: "#1d4ed8", fontSize: 12, display: "block", marginTop: 6 }}>
+                  Each stock-in creates a tracked batch automatically.
+                </small>
+              ) : null}
             </div>
           ) : null}
 

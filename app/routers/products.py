@@ -19,6 +19,123 @@ from app.utils.expiry import writeoff_expired_batches
 router = APIRouter(prefix="/products", tags=["products"])
 
 MEASUREMENT_TYPES = {"count", "weight", "volume", "length"}
+VARIANT_TEXT_FIELDS = ("variant_group", "variant_label", "brand", "size", "color", "shade")
+PRODUCT_METADATA_FIELDS = {"measurement_type", "allows_fractional_sales", "quantity_step", *VARIANT_TEXT_FIELDS}
+
+
+def _normalize_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _normalized_signature_value(value: Optional[str]) -> str:
+    return (_normalize_optional_text(value) or "").lower()
+
+
+def _signature_column(column):
+    return func.lower(func.trim(func.coalesce(column, "")))
+
+
+def _build_product_signature(source: dict | models.Product) -> dict[str, str]:
+    if isinstance(source, dict):
+        read = lambda field: source.get(field)
+    else:
+        read = lambda field: getattr(source, field, None)
+
+    signature = {"name": _normalized_signature_value(read("name"))}
+    for field in VARIANT_TEXT_FIELDS:
+        signature[field] = _normalized_signature_value(read(field))
+    return signature
+
+
+def _find_conflicting_product(
+    db: Session,
+    *,
+    signature: dict[str, str],
+    tenant_user_ids: list[int],
+    active_branch_id: int,
+    exclude_product_id: int | None = None,
+) -> models.Product | None:
+    query = db.query(models.Product).filter(
+        models.Product.branch_id == active_branch_id,
+        models.Product.user_id.in_(tenant_user_ids),
+        _signature_column(models.Product.name) == signature["name"],
+        _signature_column(models.Product.variant_group) == signature["variant_group"],
+        _signature_column(models.Product.variant_label) == signature["variant_label"],
+        _signature_column(models.Product.brand) == signature["brand"],
+        _signature_column(models.Product.size) == signature["size"],
+        _signature_column(models.Product.color) == signature["color"],
+        _signature_column(models.Product.shade) == signature["shade"],
+    )
+    if exclude_product_id is not None:
+        query = query.filter(models.Product.id != exclude_product_id)
+    return query.first()
+
+
+def _load_batch_metadata(
+    db: Session,
+    *,
+    product_ids: list[int],
+    tenant_user_ids: list[int],
+    active_branch_id: int,
+) -> dict[int, dict[str, int | date | None]]:
+    if not product_ids:
+        return {}
+
+    rows = (
+        db.query(
+            models.StockMovement.product_id,
+            models.StockMovement.batch_number,
+            models.StockMovement.expiry_date,
+            func.coalesce(func.sum(models.StockMovement.change), 0).label("balance"),
+        )
+        .filter(
+            models.StockMovement.product_id.in_(product_ids),
+            models.StockMovement.user_id.in_(tenant_user_ids),
+            models.StockMovement.branch_id == active_branch_id,
+            models.StockMovement.batch_number.isnot(None),
+        )
+        .group_by(
+            models.StockMovement.product_id,
+            models.StockMovement.batch_number,
+            models.StockMovement.expiry_date,
+        )
+        .all()
+    )
+
+    metadata: dict[int, dict[str, int | date | None]] = {}
+    for product_id, _batch_number, expiry_date, balance in rows:
+        normalized_balance = balance if isinstance(balance, Decimal) else Decimal(str(balance or 0))
+        if normalized_balance <= 0:
+            continue
+
+        product_key = int(product_id)
+        entry = metadata.setdefault(
+            product_key,
+            {"active_batch_count": 0, "next_batch_expiry_date": None},
+        )
+        entry["active_batch_count"] = int(entry["active_batch_count"] or 0) + 1
+
+        if expiry_date is None:
+            continue
+
+        current_next_expiry = entry.get("next_batch_expiry_date")
+        if current_next_expiry is None or expiry_date < current_next_expiry:
+            entry["next_batch_expiry_date"] = expiry_date
+
+    return metadata
+
+
+def _apply_batch_metadata(
+    products: list[models.Product],
+    metadata_by_product_id: dict[int, dict[str, int | date | None]],
+) -> None:
+    for product in products:
+        metadata = metadata_by_product_id.get(product.id, {})
+        product.active_batch_count = int(metadata.get("active_batch_count") or 0)
+        product.next_batch_expiry_date = metadata.get("next_batch_expiry_date")
 
 
 def _normalize_measurement_type(value: Optional[str]) -> str:
@@ -36,7 +153,7 @@ def _normalize_quantity_step(value: Optional[Decimal], *, allows_fractional_sale
     return value.quantize(Decimal("0.01"))
 
 
-def _apply_product_capability_defaults(product_data: dict) -> dict:
+def _apply_product_defaults(product_data: dict) -> dict:
     normalized = dict(product_data)
     allows_fractional_sales = bool(normalized.get("allows_fractional_sales"))
     normalized["measurement_type"] = _normalize_measurement_type(normalized.get("measurement_type"))
@@ -45,6 +162,8 @@ def _apply_product_capability_defaults(product_data: dict) -> dict:
         normalized.get("quantity_step"),
         allows_fractional_sales=allows_fractional_sales,
     )
+    for field in VARIANT_TEXT_FIELDS:
+        normalized[field] = _normalize_optional_text(normalized.get(field))
     return normalized
 
 
@@ -57,6 +176,12 @@ class ProductUpdate(BaseModel):
     measurement_type: Optional[str] = None
     allows_fractional_sales: Optional[bool] = None
     quantity_step: Optional[Decimal] = None
+    variant_group: Optional[str] = None
+    variant_label: Optional[str] = None
+    brand: Optional[str] = None
+    size: Optional[str] = None
+    color: Optional[str] = None
+    shade: Optional[str] = None
     category: Optional[str] = None
     supplier: Optional[str] = None
     expiry_date: Optional[date] = None
@@ -88,19 +213,6 @@ def create_product(
             status_code=status.HTTP_400_BAD_REQUEST, detail="SKU already exists"
         )
 
-    # Check for duplicate name within the branch (case-insensitive)
-    normalized_name = payload.name.strip().lower()
-    existing_name = db.query(models.Product).filter(
-        func.lower(func.trim(models.Product.name)) == normalized_name,
-        models.Product.branch_id == active_branch_id,
-        models.Product.user_id.in_(tenant_user_ids),
-    ).first()
-    if existing_name:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Product name already exists in this branch",
-        )
-
     # Check for duplicate barcode within the branch (if provided).
     if normalized_barcode:
         existing_barcode = db.query(models.Product).filter(
@@ -120,7 +232,18 @@ def create_product(
     product_data['barcode'] = normalized_barcode
     product_data['user_id'] = current_user.id
     product_data['branch_id'] = active_branch_id
-    product_data = _apply_product_capability_defaults(product_data)
+    product_data = _apply_product_defaults(product_data)
+
+    if _find_conflicting_product(
+        db,
+        signature=_build_product_signature(product_data),
+        tenant_user_ids=tenant_user_ids,
+        active_branch_id=active_branch_id,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A product with the same name and variant details already exists in this branch",
+        )
     
     product = models.Product(**product_data)
     db.add(product)
@@ -148,6 +271,15 @@ def create_product(
 
     # Populate computed fields expected by the frontend.
     product.created_by_name = current_user.name
+    _apply_batch_metadata(
+        [product],
+        _load_batch_metadata(
+            db,
+            product_ids=[product.id],
+            tenant_user_ids=tenant_user_ids,
+            active_branch_id=active_branch_id,
+        ),
+    )
     return product
 
 
@@ -202,11 +334,18 @@ def list_products(
         else []
     )
     creator_name_by_id = {int(uid): name for uid, name in creators}
+    batch_metadata_by_product_id = _load_batch_metadata(
+        db,
+        product_ids=product_ids,
+        tenant_user_ids=tenant_user_ids,
+        active_branch_id=active_branch_id,
+    )
 
     for product in products:
         product.created_by_name = creator_name_by_id.get(product.user_id)
         raw_stock = stocks.get(product.id, Decimal(0))
         product.current_stock = raw_stock if raw_stock > 0 else Decimal(0)
+    _apply_batch_metadata(products, batch_metadata_by_product_id)
     
     return products
 
@@ -249,6 +388,15 @@ def get_product(
     ).scalar()
     raw_stock = stock_total if isinstance(stock_total, Decimal) else Decimal(str(stock_total or 0))
     product.current_stock = raw_stock if raw_stock > 0 else Decimal(0)
+    _apply_batch_metadata(
+        [product],
+        _load_batch_metadata(
+            db,
+            product_ids=[product.id],
+            tenant_user_ids=tenant_user_ids,
+            active_branch_id=active_branch_id,
+        ),
+    )
     
     return product
 
@@ -409,32 +557,36 @@ def update_product(
                     detail="Barcode already exists in this branch",
                 )
 
-    # Check name uniqueness if it's being updated (case-insensitive)
-    if payload.name and payload.name.strip() and payload.name.strip() != (product.name or ""):
-        normalized_name = payload.name.strip().lower()
-        existing_name = db.query(models.Product).filter(
-            models.Product.id != product.id,
-            func.lower(func.trim(models.Product.name)) == normalized_name,
-            models.Product.user_id.in_(tenant_user_ids),
-            models.Product.branch_id == active_branch_id,
-        ).first()
-        if existing_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Product name already exists in this branch",
-            )
-    
     # Update only provided fields
     update_data = payload.model_dump(exclude_unset=True)
     if "barcode" in update_data:
         update_data["barcode"] = normalized_barcode
-    if any(key in update_data for key in {"measurement_type", "allows_fractional_sales", "quantity_step"}):
-        update_data = _apply_product_capability_defaults({
+    if any(key in update_data for key in PRODUCT_METADATA_FIELDS):
+        update_data = _apply_product_defaults({
             "measurement_type": update_data.get("measurement_type", product.measurement_type),
             "allows_fractional_sales": update_data.get("allows_fractional_sales", product.allows_fractional_sales),
             "quantity_step": update_data.get("quantity_step", product.quantity_step),
+            **{field: update_data.get(field, getattr(product, field)) for field in VARIANT_TEXT_FIELDS},
             **update_data,
         })
+
+    candidate_signature = _build_product_signature({
+        "name": update_data.get("name", product.name),
+        **{field: update_data.get(field, getattr(product, field)) for field in VARIANT_TEXT_FIELDS},
+    })
+    if candidate_signature != _build_product_signature(product):
+        existing_variant = _find_conflicting_product(
+            db,
+            signature=candidate_signature,
+            tenant_user_ids=tenant_user_ids,
+            active_branch_id=active_branch_id,
+            exclude_product_id=product.id,
+        )
+        if existing_variant:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A product with the same name and variant details already exists in this branch",
+            )
     for key, value in update_data.items():
         setattr(product, key, value)
     
@@ -448,6 +600,15 @@ def update_product(
         models.StockMovement.branch_id == active_branch_id,
     ).scalar()
     product.current_stock = stock_total if isinstance(stock_total, Decimal) else Decimal(str(stock_total or 0))
+    _apply_batch_metadata(
+        [product],
+        _load_batch_metadata(
+            db,
+            product_ids=[product.id],
+            tenant_user_ids=tenant_user_ids,
+            active_branch_id=active_branch_id,
+        ),
+    )
     return product
 
 

@@ -20,6 +20,28 @@ _startup_migrations_done: bool = False
 _startup_migrations_error: str | None = None
 
 
+def _ensure_product_variant_unique_index(conn) -> None:
+    try:
+        conn.execute(text("DROP INDEX IF EXISTS idx_products_branch_lower_name_unique"))
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_branch_variant_signature_unique "
+                "ON products ("
+                "branch_id, "
+                "lower(trim(name)), "
+                "lower(trim(coalesce(variant_group, ''))), "
+                "lower(trim(coalesce(variant_label, ''))), "
+                "lower(trim(coalesce(brand, ''))), "
+                "lower(trim(coalesce(size, ''))), "
+                "lower(trim(coalesce(color, ''))), "
+                "lower(trim(coalesce(shade, '')))"
+                ")"
+            )
+        )
+    except Exception as e:
+        print(f"⚠️  Could not create unique index for product variants: {e}")
+
+
 def _ensure_critical_auth_schema_sync() -> None:
     """Apply tiny, idempotent auth schema changes required for request safety.
 
@@ -41,6 +63,12 @@ def _ensure_critical_auth_schema_sync() -> None:
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS measurement_type VARCHAR(32) DEFAULT 'count'"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS allows_fractional_sales BOOLEAN DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS quantity_step NUMERIC(10,2) DEFAULT 1"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_group VARCHAR(120)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_label VARCHAR(120)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS brand VARCHAR(100)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS size VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS shade VARCHAR(64)"))
         conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS birthday DATE"))
         conn.execute(
             text(
@@ -54,6 +82,7 @@ def _ensure_critical_auth_schema_sync() -> None:
                 "ON users (phone) WHERE phone IS NOT NULL"
             )
         )
+        _ensure_product_variant_unique_index(conn)
 
 
 def _should_run_startup_migrations() -> bool:
@@ -114,6 +143,12 @@ def _run_startup_migrations_sync() -> None:
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS measurement_type VARCHAR(32) DEFAULT 'count'"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS allows_fractional_sales BOOLEAN DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS quantity_step NUMERIC(10,2) DEFAULT 1"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_group VARCHAR(120)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS variant_label VARCHAR(120)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS brand VARCHAR(100)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS size VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS color VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS shade VARCHAR(64)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(100)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS expiry_date DATE"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price NUMERIC(10,2)"))
@@ -123,6 +158,12 @@ def _run_startup_migrations_sync() -> None:
         conn.execute(text("UPDATE products SET measurement_type = 'count' WHERE measurement_type IS NULL OR length(trim(measurement_type)) = 0"))
         conn.execute(text("UPDATE products SET allows_fractional_sales = FALSE WHERE allows_fractional_sales IS NULL"))
         conn.execute(text("UPDATE products SET quantity_step = 1 WHERE quantity_step IS NULL OR quantity_step <= 0"))
+        conn.execute(text("UPDATE products SET variant_group = NULL WHERE variant_group IS NOT NULL AND length(trim(variant_group)) = 0"))
+        conn.execute(text("UPDATE products SET variant_label = NULL WHERE variant_label IS NOT NULL AND length(trim(variant_label)) = 0"))
+        conn.execute(text("UPDATE products SET brand = NULL WHERE brand IS NOT NULL AND length(trim(brand)) = 0"))
+        conn.execute(text("UPDATE products SET size = NULL WHERE size IS NOT NULL AND length(trim(size)) = 0"))
+        conn.execute(text("UPDATE products SET color = NULL WHERE color IS NOT NULL AND length(trim(color)) = 0"))
+        conn.execute(text("UPDATE products SET shade = NULL WHERE shade IS NOT NULL AND length(trim(shade)) = 0"))
 
         # Batch/expiry tracking + sale linkage on movements
         conn.execute(text("ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS batch_number VARCHAR(100)"))
@@ -200,18 +241,7 @@ def _run_startup_migrations_sync() -> None:
             )
         )
 
-        # Prevent duplicate product names within a branch (case-insensitive)
-        try:
-            conn.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_products_branch_lower_name_unique "
-                    "ON products (branch_id, lower(trim(name)))"
-                )
-            )
-        except Exception as e:
-            # If existing duplicates are present, creating the unique index will fail.
-            # Don't block startup; the API also enforces this rule at write-time.
-            print(f"⚠️  Could not create unique index for product names: {e}")
+        _ensure_product_variant_unique_index(conn)
 
         # Prevent duplicate barcodes within a branch (case-insensitive, ignores NULL/empty).
         try:

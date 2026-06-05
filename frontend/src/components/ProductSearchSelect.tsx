@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
+import { getProductBatchSummary, getProductSearchText, getProductVariantSummary } from "../product-display";
 import type { Product } from "../types";
 
 type Props = {
@@ -17,15 +18,21 @@ const MAX_VISIBLE_RESULTS = 60;
 function getProductMatchRank(product: Product, query: string): number {
   const name = product.name.toLowerCase();
   const sku = product.sku.toLowerCase();
+  const barcode = (product.barcode || "").toLowerCase();
   const supplier = (product.supplier || "").toLowerCase();
   const category = (product.category || "").toLowerCase();
+  const variantSummary = (getProductVariantSummary(product) || "").toLowerCase();
+  const searchText = getProductSearchText(product);
 
-  if (name === query || sku === query) return 0;
-  if (name.startsWith(query) || sku.startsWith(query)) return 1;
+  if (name === query || sku === query || barcode === query) return 0;
+  if (name.startsWith(query) || sku.startsWith(query) || barcode.startsWith(query)) return 1;
   if (name.includes(query)) return 2;
   if (sku.includes(query)) return 3;
-  if (supplier.includes(query)) return 4;
-  if (category.includes(query)) return 5;
+  if (variantSummary.startsWith(query)) return 4;
+  if (variantSummary.includes(query)) return 5;
+  if (supplier.includes(query)) return 6;
+  if (category.includes(query)) return 7;
+  if (searchText.includes(query)) return 8;
   return Number.POSITIVE_INFINITY;
 }
 
@@ -35,7 +42,7 @@ export default function ProductSearchSelect({
   selectedProductId,
   onChange,
   disabled = false,
-  searchPlaceholder = "Search by product name, SKU, supplier, or category",
+  searchPlaceholder = "Search by product name, SKU, barcode, brand, or variant",
   emptyLabel = "No matching products",
 }: Props) {
   const [searchTerm, setSearchTerm] = useState("");
@@ -275,7 +282,7 @@ export default function ProductSearchSelect({
         >
           {!normalizedSearch ? (
             <div style={{ padding: "12px 14px", borderRadius: 10, background: "#f8fafc", color: "#64748b", fontSize: 13 }}>
-              Start typing a product name, SKU, supplier, or category to narrow the list quickly.
+              Start typing a product name, SKU, barcode, brand, or variant to narrow the list quickly.
             </div>
           ) : visibleProducts.length === 0 ? (
             <div style={{ padding: "12px 14px", borderRadius: 10, background: "#f8fafc", color: "#64748b", fontSize: 13 }}>
@@ -285,6 +292,8 @@ export default function ProductSearchSelect({
             visibleProducts.map((product, index) => {
               const isActive = index === activeIndex;
               const isSelected = product.id === selectedProductId;
+              const variantSummary = getProductVariantSummary(product);
+              const batchSummary = getProductBatchSummary(product, { includeNextExpiry: true });
               return (
                 <button
                   key={product.id}
@@ -309,10 +318,14 @@ export default function ProductSearchSelect({
                     <span style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{product.name}</span>
                     <span style={{ fontSize: 12, color: "#475569", fontWeight: 700 }}>{product.sku}</span>
                   </div>
+                  {variantSummary ? (
+                    <div style={{ fontSize: 12, color: "#334155", fontWeight: 600 }}>{variantSummary}</div>
+                  ) : null}
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#64748b" }}>
                     <span>Stock {Number(product.current_stock || 0)}</span>
                     {product.supplier ? <span>Supplier {product.supplier}</span> : null}
                     {product.category ? <span>Category {product.category}</span> : null}
+                    {batchSummary ? <span>{batchSummary}</span> : null}
                   </div>
                 </button>
               );
@@ -335,15 +348,28 @@ export default function ProductSearchSelect({
         >
           {selectedProduct ? (
             <>
+              {(() => {
+                const variantSummary = getProductVariantSummary(selectedProduct);
+                const batchSummary = getProductBatchSummary(selectedProduct, { includeNextExpiry: true });
+
+                return (
+                  <>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedProduct.name}</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>{selectedProduct.sku}</div>
               </div>
+              {variantSummary ? (
+                <div style={{ fontSize: 12, color: "#334155", fontWeight: 600 }}>{variantSummary}</div>
+              ) : null}
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#64748b" }}>
                 <span>Stock {Number(selectedProduct.current_stock || 0)}</span>
                 {selectedProduct.supplier ? <span>Supplier {selectedProduct.supplier}</span> : null}
                 {selectedProduct.category ? <span>Category {selectedProduct.category}</span> : null}
+                {batchSummary ? <span>{batchSummary}</span> : null}
               </div>
+                  </>
+                );
+              })()}
             </>
           ) : (
             <div style={{ fontSize: 13, color: "#64748b" }}>No product selected yet.</div>
