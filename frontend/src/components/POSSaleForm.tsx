@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NewSale, Product } from "../types";
 import { useAppCategories } from "../categories";
+import { startCameraBarcodeScan } from "../barcode-scanner";
 
 type RepeatDraft = {
   token: string;
@@ -70,8 +71,7 @@ export default function POSSaleForm({
   const amountReceivedInputRef = useRef<HTMLInputElement | null>(null);
   const checkoutFormRef = useRef<HTMLFormElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
-  const cameraStreamRef = useRef<MediaStream | null>(null);
-  const cameraFrameRef = useRef<number | null>(null);
+  const stopCameraScannerRef = useRef<(() => void) | null>(null);
   const lastAppliedRepeatTokenRef = useRef<string | null>(null);
   const handleScannedCodeRef = useRef<(value: string, source: "scanner" | "camera") => void>(() => {});
   const suspendCurrentCartRef = useRef<() => void>(() => {});
@@ -124,14 +124,8 @@ export default function POSSaleForm({
   };
 
   const stopCameraScanner = useCallback(() => {
-    if (cameraFrameRef.current != null) {
-      window.cancelAnimationFrame(cameraFrameRef.current);
-      cameraFrameRef.current = null;
-    }
-    if (cameraStreamRef.current) {
-      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
-      cameraStreamRef.current = null;
-    }
+    stopCameraScannerRef.current?.();
+    stopCameraScannerRef.current = null;
   }, []);
 
   const findProductFromScan = (rawScanValue: string): Product | null => {
@@ -405,82 +399,27 @@ export default function POSSaleForm({
       return;
     }
 
-    let cancelled = false;
-
     const startCamera = async () => {
       setCameraError(null);
-      try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          setCameraError("Camera scanning is not supported on this browser.");
-          return;
-        }
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-        });
-
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-
-        cameraStreamRef.current = stream;
-        const video = cameraVideoRef.current;
-        if (video) {
-          video.srcObject = stream;
-          await video.play().catch(() => {
-            // Ignore autoplay errors and continue.
-          });
-        }
-
-        const BarcodeDetectorApi = (window as typeof window & { BarcodeDetector?: new (config?: { formats?: string[] }) => { detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector;
-        if (!BarcodeDetectorApi) {
-          setCameraError("BarcodeDetector is not available. Use scanner input instead.");
-          return;
-        }
-
-        const detector = new BarcodeDetectorApi({
-          formats: ["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e", "qr_code"],
-        });
-
-        const detectFrame = async () => {
-          if (cancelled || !cameraOpen) return;
-          const activeVideo = cameraVideoRef.current;
-          if (!activeVideo || activeVideo.readyState < 2) {
-            cameraFrameRef.current = window.requestAnimationFrame(() => {
-              void detectFrame();
-            });
-            return;
-          }
-
-          try {
-            const results = await detector.detect(activeVideo);
-            const rawValue = String(results[0]?.rawValue || "").trim();
-            if (rawValue) {
-              handleScannedCodeRef.current(rawValue, "camera");
-              setCameraOpen(false);
-              return;
-            }
-          } catch {
-            // Keep scanning even if a frame fails.
-          }
-
-          cameraFrameRef.current = window.requestAnimationFrame(() => {
-            void detectFrame();
-          });
-        };
-
-        void detectFrame();
-      } catch (err) {
-        const text = err instanceof Error ? err.message : "Unable to access camera.";
-        setCameraError(text);
+      const videoElement = cameraVideoRef.current;
+      if (!videoElement) {
+        setCameraError("Camera preview is not available.");
+        return;
       }
+
+      stopCameraScannerRef.current = await startCameraBarcodeScan({
+        videoElement,
+        onDetected: (rawValue) => {
+          handleScannedCodeRef.current(rawValue, "camera");
+          setCameraOpen(false);
+        },
+        onError: setCameraError,
+      });
     };
 
     void startCamera();
 
     return () => {
-      cancelled = true;
       stopCameraScanner();
     };
   }, [cameraOpen, stopCameraScanner]);
