@@ -26,8 +26,37 @@ from app.utils.tenant import get_tenant_user_ids
 router = APIRouter(prefix="/data", tags=["data"])
 
 
+TENANT_OPERATIONAL_MODELS = (
+    ("credit_transactions", models.CreditTransaction),
+    ("sale_returns", models.SaleReturn),
+    ("purchase_returns", models.PurchaseReturn),
+    ("supplier_payments", models.SupplierPayment),
+    ("purchases", models.Purchase),
+    ("sales", models.Sale),
+    ("stock_movements", models.StockMovement),
+    ("creditors", models.Creditor),
+    ("suppliers", models.Supplier),
+    ("products", models.Product),
+)
+
+
 def _require_admin(current_user: models.User) -> None:
     ensure_permission(current_user, "manage_data", "Admin access required")
+
+
+def _clear_tenant_operational_data(db: Session, tenant_user_ids: list[int]) -> dict[str, int]:
+    deleted_counts: dict[str, int] = {}
+
+    for label, model in TENANT_OPERATIONAL_MODELS:
+        deleted_counts[label] = int(
+            db.query(model).filter(model.user_id.in_(tenant_user_ids)).delete(
+                synchronize_session=False
+            )
+            or 0
+        )
+
+    db.flush()
+    return deleted_counts
 
 
 def _serialize_dt(value: Any) -> Any:
@@ -461,6 +490,26 @@ def _as_date(value: Any) -> date | None:
             return datetime.fromisoformat(text_value.replace("Z", "+00:00")).date()
         except ValueError:
             return None
+
+
+@router.post("/clear")
+def clear_data(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    """Clear tenant operational data while keeping users, branches, and settings."""
+    _require_admin(current_user)
+
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    deleted_counts = _clear_tenant_operational_data(db, tenant_user_ids)
+    total_deleted = sum(deleted_counts.values())
+
+    db.commit()
+    return {
+        "message": "All operational data cleared. Users, branches, and settings were kept.",
+        "deleted": deleted_counts,
+        "total_deleted": total_deleted,
+    }
 
 
 @router.post("/import")

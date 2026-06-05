@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings, uploadBusinessLogo } from "../api";
+import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings, uploadBusinessLogo } from "../api";
 import { Branch } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
@@ -100,6 +100,7 @@ export default function Profile() {
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const [exportingData, setExportingData] = useState(false);
   const [importingData, setImportingData] = useState(false);
+  const [clearingData, setClearingData] = useState(false);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
   const [logoError, setLogoError] = useState<string | null>(null);
@@ -348,6 +349,36 @@ export default function Profile() {
       setDataMessage(error instanceof Error ? error.message : "Export failed");
     } finally {
       setExportingData(false);
+    }
+  };
+
+  const handleClearAllData = async () => {
+    const confirmed = confirm(
+      "Clear all business data for this account? This permanently deletes products, suppliers, purchases, stock movements, sales, returns, creditors, and cached offline app data. Your login, branches, and system settings will stay intact."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const typed = prompt("Type CLEAR to confirm this data wipe:");
+    if (typed !== "CLEAR") {
+      setDataMessage("Clear data cancelled.");
+      return;
+    }
+
+    setDataMessage(null);
+    setClearingData(true);
+    try {
+      const result = await clearAllData();
+      await clearClientOperationalData();
+      const summary = result.total_deleted === 1
+        ? "1 record cleared."
+        : `${result.total_deleted} records cleared.`;
+      setDataMessage(`${result.message} ${summary}`.trim());
+    } catch (error) {
+      setDataMessage(error instanceof Error ? error.message : "Failed to clear data");
+    } finally {
+      setClearingData(false);
     }
   };
 
@@ -1289,7 +1320,7 @@ export default function Profile() {
                     fontSize: 14,
                   }}
                   onClick={handleExportData}
-                  disabled={exportingData || importingData}
+                  disabled={exportingData || importingData || clearingData}
                 >
                   {exportingData ? "⏳ Exporting..." : "📥 Export Data"}
                 </button>
@@ -1300,7 +1331,7 @@ export default function Profile() {
                     fontSize: 14,
                   }}
                   onClick={handlePickImportFile}
-                  disabled={exportingData || importingData}
+                  disabled={exportingData || importingData || clearingData}
                 >
                   {importingData ? "⏳ Importing..." : "📤 Import Data"}
                 </button>
@@ -1310,13 +1341,10 @@ export default function Profile() {
                     background: "#ef4444",
                     fontSize: 14,
                   }}
-                  onClick={() => {
-                    if (confirm("Are you sure you want to clear all data? This cannot be undone!")) {
-                      // Clear data logic here
-                    }
-                  }}
+                  onClick={handleClearAllData}
+                  disabled={exportingData || importingData || clearingData}
                 >
-                  Clear All Data
+                  {clearingData ? "⏳ Clearing..." : "Clear All Data"}
                 </button>
               </div>
             </div>

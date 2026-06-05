@@ -687,6 +687,93 @@ export async function importData(payload: unknown, force: boolean = false): Prom
   return JSON.parse(text) as { message: string };
 }
 
+export type ClearAllDataResponse = {
+  message: string;
+  deleted: Record<string, number>;
+  total_deleted: number;
+};
+
+const CLIENT_DATA_CLEAR_KEYS = [
+  "businessInfo",
+  "userInfo",
+  "enableSupplierAutoSync",
+  "offline_sales_outbox",
+  "pos_suspended_carts_v1",
+] as const;
+
+const CLIENT_DATA_CLEAR_PREFIXES = ["offline_products:"] as const;
+
+function clearLocalStoragePrefix(prefix: string): void {
+  const keys: string[] = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && key.startsWith(prefix)) {
+      keys.push(key);
+    }
+  }
+
+  for (const key of keys) {
+    localStorage.removeItem(key);
+  }
+}
+
+export async function clearAllData(): Promise<ClearAllDataResponse> {
+  const response = await resilientFetch(`${API_BASE}/data/clear`, {
+    method: "POST",
+    headers: buildAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
+      throw new Error("Not authenticated");
+    }
+    const body = await response.text();
+    let message = response.statusText || "Request failed";
+    try {
+      const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
+      const detail = parsed?.detail ?? parsed?.message;
+      if (typeof detail === "string" && detail.trim()) message = detail;
+    } catch {
+      if (body?.trim()) message = body;
+    }
+    throw new Error(`${response.status}: ${message}`);
+  }
+
+  const text = await response.text();
+  if (!text) {
+    return { message: "All operational data cleared.", deleted: {}, total_deleted: 0 };
+  }
+
+  return JSON.parse(text) as ClearAllDataResponse;
+}
+
+export async function clearClientOperationalData(): Promise<void> {
+  clearDataCache();
+
+  for (const key of CLIENT_DATA_CLEAR_KEYS) {
+    localStorage.removeItem(key);
+  }
+
+  for (const prefix of CLIENT_DATA_CLEAR_PREFIXES) {
+    clearLocalStoragePrefix(prefix);
+  }
+
+  if (typeof window !== "undefined" && "caches" in window) {
+    const cacheNames = await window.caches.keys();
+    await Promise.all(
+      cacheNames
+        .filter((name) => name.startsWith("gel-invent-"))
+        .map((name) => window.caches.delete(name)),
+    );
+  }
+
+  window.dispatchEvent(new Event("offlineOutboxChanged"));
+  window.dispatchEvent(new Event("productsUpdated"));
+}
+
 // Branches API
 
 export async function fetchBranches(): Promise<Branch[]> {
