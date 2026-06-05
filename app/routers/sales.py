@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_active_user
 from ..database import get_db
 from .. import models
-from ..schemas import SaleCreate, SaleRead
+from ..schemas import SaleBatchOptionRead, SaleCreate, SaleRead
 from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
@@ -53,6 +53,132 @@ def _extract_phone_from_notes(notes: str | None) -> str | None:
         return None
     value = phone_match.group(1).strip()
     return value or None
+
+
+def _normalize_batch_number(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(str(value).strip().split())
+    return normalized or None
+
+
+def _get_available_sale_batches(
+    *,
+    db: Session,
+    tenant_user_ids: list[int],
+    branch_id: int,
+    product_id: int,
+):
+    today = date.today()
+    available_batches = [
+        batch
+        for batch in get_batch_balances(
+            db=db,
+            tenant_user_ids=tenant_user_ids,
+            branch_id=branch_id,
+            product_id=product_id,
+            include_null_expiry=True,
+        )
+        if batch.balance > 0 and (batch.expiry_date is None or batch.expiry_date >= today)
+    ]
+    available_batches.sort(
+        key=lambda batch: (
+            1 if batch.expiry_date is None else 0,
+            batch.expiry_date or date.max,
+            batch.first_seen or date.max,
+            batch.batch_number,
+        )
+    )
+    return available_batches
+
+
+def _load_unit_cost_by_batch(
+    *,
+    db: Session,
+    tenant_user_ids: list[int],
+    branch_id: int,
+    product_id: int,
+    batch_numbers: list[str],
+) -> dict[str, Decimal | None]:
+    if not batch_numbers:
+        return {}
+
+    rows = db.execute(
+        select(
+            models.StockMovement.batch_number,
+            models.StockMovement.unit_cost_price,
+            models.StockMovement.created_at,
+        )
+        .where(
+            models.StockMovement.product_id == product_id,
+            models.StockMovement.branch_id == branch_id,
+            models.StockMovement.user_id.in_(tenant_user_ids),
+            models.StockMovement.batch_number.in_(batch_numbers),
+            models.StockMovement.change > 0,
+        )
+        .order_by(models.StockMovement.batch_number.asc(), models.StockMovement.created_at.desc())
+    ).all()
+
+    unit_cost_by_batch: dict[str, Decimal | None] = {}
+    for batch_number, unit_cost, _created_at in rows:
+        normalized_batch_number = _normalize_batch_number(batch_number)
+        if not normalized_batch_number or normalized_batch_number in unit_cost_by_batch:
+            continue
+        unit_cost_by_batch[normalized_batch_number] = unit_cost
+    return unit_cost_by_batch
+
+
+def _attach_deducted_batches(
+    *,
+    db: Session,
+    sales: list[models.Sale],
+    tenant_user_ids: list[int],
+    branch_id: int,
+) -> None:
+    sale_ids = sorted({int(sale.id) for sale in sales})
+    if not sale_ids:
+        return
+
+    rows = db.execute(
+        select(
+            models.StockMovement.sale_id,
+            models.StockMovement.batch_number,
+            models.StockMovement.expiry_date,
+            func.coalesce(func.sum(models.StockMovement.change), 0).label("total_change"),
+        )
+        .where(
+            models.StockMovement.sale_id.in_(sale_ids),
+            models.StockMovement.branch_id == branch_id,
+            models.StockMovement.user_id.in_(tenant_user_ids),
+            models.StockMovement.change < 0,
+        )
+        .group_by(
+            models.StockMovement.sale_id,
+            models.StockMovement.batch_number,
+            models.StockMovement.expiry_date,
+        )
+    ).all()
+
+    deductions_by_sale_id: dict[int, list[dict[str, object]]] = {sale_id: [] for sale_id in sale_ids}
+    for sale_id, batch_number, expiry_date, total_change in rows:
+        quantity = abs(Decimal(total_change or 0))
+        deductions_by_sale_id.setdefault(int(sale_id), []).append(
+            {
+                "batch_number": batch_number,
+                "expiry_date": expiry_date.isoformat() if expiry_date else None,
+                "quantity": float(quantity),
+            }
+        )
+
+    for sale in sales:
+        sale.deducted_batches = sorted(
+            deductions_by_sale_id.get(int(sale.id), []),
+            key=lambda item: (
+                1 if item["batch_number"] is None else 0,
+                item["expiry_date"] or "9999-12-31",
+                str(item["batch_number"] or ""),
+            ),
+        )
 
 
 def _get_or_create_creditor(
@@ -214,55 +340,30 @@ def create_sale(
             phone=customer_phone,
         )
 
-    # Deduct stock FIFO by earliest expiry date (non-expiring batches are sold last).
-    today = date.today()
-    balances = get_batch_balances(
+    # Deduct stock FEFO by earliest expiry date (non-expiring batches are sold last),
+    # with an optional preferred batch moved to the front when the cashier selects one.
+    available_batches = _get_available_sale_batches(
         db=db,
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=payload.product_id,
-        include_null_expiry=True,
     )
+    preferred_batch_number = _normalize_batch_number(payload.preferred_batch_number)
+    if preferred_batch_number:
+        preferred_batches = [batch for batch in available_batches if batch.batch_number == preferred_batch_number]
+        if not preferred_batches:
+            raise HTTPException(status_code=400, detail="Selected batch is no longer available for sale")
+        available_batches = preferred_batches + [
+            batch for batch in available_batches if batch.batch_number != preferred_batch_number
+        ]
 
-    # Only consider batches that have stock remaining and are not expired.
-    available_batches = [
-        b
-        for b in balances
-        if b.balance > 0 and (b.expiry_date is None or b.expiry_date >= today)
-    ]
-    available_batches.sort(
-        key=lambda b: (
-            1 if b.expiry_date is None else 0,
-            b.expiry_date or date.max,
-        )
+    unit_cost_by_batch = _load_unit_cost_by_batch(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=payload.product_id,
+        batch_numbers=sorted({_normalize_batch_number(batch.batch_number) for batch in available_batches if batch.batch_number}),
     )
-
-    # Build a map of batch_number -> latest known unit_cost_price for stock-in movements.
-    batch_numbers = sorted({b.batch_number for b in available_batches if b.batch_number})
-    unit_cost_by_batch: dict[str, Decimal | None] = {}
-    if batch_numbers:
-        rows = db.execute(
-            select(
-                models.StockMovement.batch_number,
-                models.StockMovement.unit_cost_price,
-                models.StockMovement.created_at,
-            )
-            .where(
-                models.StockMovement.product_id == payload.product_id,
-                models.StockMovement.branch_id == active_branch_id,
-                models.StockMovement.user_id.in_(tenant_user_ids),
-                models.StockMovement.batch_number.in_(batch_numbers),
-                models.StockMovement.change > 0,
-            )
-            .order_by(models.StockMovement.batch_number.asc(), models.StockMovement.created_at.desc())
-        ).all()
-
-        for bn, unit_cost, _created_at in rows:
-            if bn is None:
-                continue
-            bn_str = str(bn)
-            if bn_str not in unit_cost_by_batch:
-                unit_cost_by_batch[bn_str] = unit_cost
 
     remaining = payload.quantity
     deducted_batches: list[dict[str, object]] = []
@@ -284,7 +385,7 @@ def create_sale(
                 reason="Sale",
                 batch_number=b.batch_number,
                 expiry_date=b.expiry_date,
-                unit_cost_price=unit_cost_by_batch.get(b.batch_number) if b.batch_number else (product.cost_price if product.cost_price is not None else None),
+                unit_cost_price=unit_cost_by_batch.get(_normalize_batch_number(b.batch_number) or "") if b.batch_number else (product.cost_price if product.cost_price is not None else None),
                 unit_selling_price=sale.unit_price,
             )
         )
@@ -427,6 +528,53 @@ def create_sales_bulk(
             )
         )
     return created
+
+
+@router.get("/products/{product_id}/batch-options", response_model=list[SaleBatchOptionRead])
+def list_sale_batch_options(
+    product_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    """Return currently sellable tracked batches for a product in FEFO order."""
+    ensure_permission(current_user, "process_sales")
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+
+    product = db.scalar(
+        select(models.Product).where(
+            models.Product.id == product_id,
+            models.Product.user_id.in_(tenant_user_ids),
+            models.Product.branch_id == active_branch_id,
+        )
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    writeoff_expired_batches(
+        db=db,
+        actor_user_id=current_user.id,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=product_id,
+    )
+    db.flush()
+
+    available_batches = _get_available_sale_batches(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=product_id,
+    )
+    return [
+        SaleBatchOptionRead(
+            batch_number=batch.batch_number,
+            expiry_date=batch.expiry_date,
+            available_quantity=batch.balance,
+            first_seen=batch.first_seen,
+        )
+        for batch in available_batches
+    ]
 
 
 @router.post("/send-receipt", response_model=SendReceiptEmailResponse)
@@ -665,6 +813,13 @@ def list_sales(
 
     for sale in sales:
         sale.created_by_name = creator_name_by_id.get(sale.user_id)
+
+    _attach_deducted_batches(
+        db=db,
+        sales=sales,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+    )
     
     return sales
 
@@ -694,6 +849,12 @@ def get_sale(
     # Add created_by_name
     creator = db.scalar(select(models.User).where(models.User.id == sale.user_id))
     sale.created_by_name = creator.name if creator else None
+    _attach_deducted_batches(
+        db=db,
+        sales=[sale],
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+    )
     
     return sale
 

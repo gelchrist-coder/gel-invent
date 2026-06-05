@@ -261,8 +261,16 @@ class SaleBase(BaseModel):
     notes: str | None = Field(default=None)
 
 
+class SaleBatchOptionRead(BaseModel):
+    batch_number: str = Field(..., min_length=1, max_length=100)
+    expiry_date: date | None = None
+    available_quantity: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2)
+    first_seen: date | None = None
+
+
 class SaleCreate(SaleBase):
     client_sale_id: str | None = Field(default=None, max_length=80)
+    preferred_batch_number: str | None = Field(default=None, max_length=100)
     amount_paid: Decimal | None = Field(default=None, decimal_places=2)
     partial_payment_method: str | None = Field(default=None, max_length=50)
 

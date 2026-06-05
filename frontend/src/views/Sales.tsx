@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
-import { assignSaleCustomer, fetchSalesCached, createSalesBulk, deleteSale, fetchProductsCached, getCachedProducts, getCachedSales, sendSalesReceiptEmail } from "../api";
+import { assignSaleCustomer, fetchSalesCached, createSalesBulk, deleteSale, fetchProductsCached, getCachedProducts, getCachedSales, isTemporaryServerDelayError, sendSalesReceiptEmail } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
@@ -11,6 +11,7 @@ import {
   enqueueSales,
   getSalesOutboxCount,
   loadCachedProducts,
+  removeOutboxItem,
 } from "../offline/storage";
 import { syncSalesOutboxOnce } from "../offline/sync";
 import { hasUserPermission, readStoredUser } from "../user-storage";
@@ -56,6 +57,23 @@ function isWalkInCustomerName(name: string | null | undefined): boolean {
   return WALK_IN_NAMES.has(normalized);
 }
 
+function shouldQueueSaleRetry(error: unknown): boolean {
+  if (!navigator.onLine) {
+    return true;
+  }
+
+  if (isTemporaryServerDelayError(error)) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes("unable to reach the server") || message.includes("appear to be offline");
+}
+
 export default function Sales() {
   // Initialize from cache for instant display
   const cachedProducts = getCachedProducts();
@@ -68,6 +86,7 @@ export default function Sales() {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [saleConfirmed, setSaleConfirmed] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [confirmationError, setConfirmationError] = useState<string | null>(null);
   const [confirmedSales, setConfirmedSales] = useState<Sale[]>([]);
   const [receiptEmail, setReceiptEmail] = useState("");
   const [emailSending, setEmailSending] = useState(false);
@@ -197,6 +216,7 @@ export default function Sales() {
     setConfirmedSales([]);
     setEmailStatus(null);
     setReceiptEmail("");
+    setConfirmationError(null);
     setShowConfirmation(true);
     setSaleConfirmed(false); // Reset confirmed state for new sale
   };
@@ -204,13 +224,14 @@ export default function Sales() {
   const confirmSale = async () => {
     if (pendingSales.length === 0) return;
     setConfirming(true);
+    setConfirmationError(null);
     try {
       // Instant UI: mark as confirmed and sync in the background.
       setSaleConfirmed(true);
       setConfirmedSales([]);
 
       // Optimistically update local stock and queue the sale.
-      enqueueSales(pendingSales);
+      const queuedItems = enqueueSales(pendingSales);
       const updated = applyLocalSaleToCachedProducts(pendingSales);
       if (updated) setProducts(updated);
 
@@ -227,8 +248,21 @@ export default function Sales() {
           await loadData();
           setOfflineNotice(null);
           window.dispatchEvent(new CustomEvent("productsUpdated"));
-        } catch {
-          setOfflineNotice("Sale queued for sync. We'll retry automatically.");
+        } catch (error) {
+          if (shouldQueueSaleRetry(error)) {
+            setOfflineNotice("Sale queued for sync. We'll retry automatically.");
+            return;
+          }
+
+          queuedItems.forEach((item) => removeOutboxItem(item.id));
+          setSaleConfirmed(false);
+          setConfirmedSales([]);
+          setConfirmationError(error instanceof Error ? error.message : "Sale could not be completed.");
+          try {
+            await loadData();
+          } catch {
+            // Keep the validation error visible even if the reload fails.
+          }
         }
       })();
     } catch {
@@ -254,6 +288,7 @@ export default function Sales() {
     setConfirmedSales([]);
     setEmailStatus(null);
     setReceiptEmail("");
+    setConfirmationError(null);
     setSaleConfirmed(false);
     // Reset flag after state updates
     setTimeout(() => { doneRef.current = false; }, 100);
@@ -1225,6 +1260,7 @@ export default function Sales() {
             if (confirming) return;
             setShowConfirmation(false);
             setPendingSales([]);
+            setConfirmationError(null);
           }}
         >
           <div
@@ -1310,12 +1346,30 @@ export default function Sales() {
                 if (confirming) return;
                 setShowConfirmation(false);
                 setPendingSales([]);
+                setConfirmationError(null);
               }}
               >×</div>
             </div>
 
             {/* Scrollable Content */}
             <div style={{ flex: 1, overflow: "auto", padding: "14px 18px 18px" }}>
+              {confirmationError ? (
+                <div
+                  style={{
+                    marginBottom: 12,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1px solid #fecaca",
+                    background: "#fef2f2",
+                    color: "#b91c1c",
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  {confirmationError}
+                </div>
+              ) : null}
+
               <div style={{
                 borderTop: "1px dashed #cbd5e1",
                 borderBottom: "1px dashed #cbd5e1",
@@ -1433,6 +1487,7 @@ export default function Sales() {
                       if (confirming) return;
                       setShowConfirmation(false);
                       setPendingSales([]);
+                      setConfirmationError(null);
                     }}
                     disabled={confirming}
                     style={{

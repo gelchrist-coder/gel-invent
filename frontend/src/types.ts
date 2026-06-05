@@ -102,12 +102,20 @@ export type Sale = {
   }> | null;
 };
 
+export type SaleBatchOption = {
+  batch_number: string;
+  expiry_date?: string | null;
+  available_quantity: number;
+  first_seen?: string | null;
+};
+
 export type NewSale = {
   client_sale_id?: string;
   product_id: number;
   quantity: number;
   sale_unit_type?: "piece" | "pack";
   pack_quantity?: number;
+  preferred_batch_number?: string | null;
   unit_price: number;
   total_price: number;
   customer_name?: string | null;

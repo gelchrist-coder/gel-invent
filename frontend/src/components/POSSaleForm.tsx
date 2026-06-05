@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NewSale, Product } from "../types";
+import { fetchSaleBatchOptions } from "../api";
+import { NewSale, Product, SaleBatchOption } from "../types";
 import { useAppCategories } from "../categories";
 import { startCameraBarcodeScan } from "../barcode-scanner";
 import { getProductBatchSummary, getProductSearchText, getProductVariantSummary } from "../product-display";
@@ -23,6 +24,7 @@ interface CartItem {
   product: Product;
   quantity: number;
   sellingUnit: 'piece' | 'pack'; // Whether selling by piece or pack
+  preferredBatchNumber?: string | null;
 }
 
 const PAYMENT_METHODS = ["cash", "card", "mobile money", "bank transfer", "credit"];
@@ -33,6 +35,7 @@ type SuspendedCartLine = {
   product_id: number;
   quantity: number;
   sellingUnit: "piece" | "pack";
+  preferred_batch_number?: string | null;
 };
 
 type SuspendedCart = {
@@ -64,6 +67,33 @@ const formatQuantityValue = (value: number): string => {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.?0+$/, "");
 };
 
+const formatShortDate = (value?: string | null): string | null => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
+const formatBatchOptionLabel = (batch: SaleBatchOption): string => {
+  const availability = `${formatQuantityValue(Number(batch.available_quantity || 0))} left`;
+  const expiryLabel = formatShortDate(batch.expiry_date);
+  return expiryLabel
+    ? `${batch.batch_number} · ${availability} · Exp ${expiryLabel}`
+    : `${batch.batch_number} · ${availability}`;
+};
+
+const getCartItemPieceQuantity = (item: Pick<CartItem, "product" | "quantity" | "sellingUnit">): number => {
+  return item.sellingUnit === "pack"
+    ? item.quantity * (item.product.pack_size || 1)
+    : item.quantity;
+};
+
 const getPieceQuantityStep = (product: Product, fractionalSalesEnabled: boolean): number => {
   if (!fractionalSalesEnabled || !product.allows_fractional_sales) {
     return 1;
@@ -90,6 +120,9 @@ export default function POSSaleForm({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [suspendedCarts, setSuspendedCarts] = useState<SuspendedCart[]>([]);
   const [selectedSuspendedCartId, setSelectedSuspendedCartId] = useState("");
+  const [batchOptionsByProductId, setBatchOptionsByProductId] = useState<Record<number, SaleBatchOption[]>>({});
+  const [batchLoadingByProductId, setBatchLoadingByProductId] = useState<Record<number, boolean>>({});
+  const [batchErrorByProductId, setBatchErrorByProductId] = useState<Record<number, string | null>>({});
 
   const messageTimeoutRef = useRef<number | null>(null);
   const customerInputRef = useRef<HTMLInputElement | null>(null);
@@ -142,6 +175,25 @@ export default function POSSaleForm({
       messageTimeoutRef.current = null;
     }, 3500);
   }, []);
+
+  const loadBatchOptions = useCallback(async (productId: number) => {
+    if (!capabilities.batch_tracking) {
+      return;
+    }
+
+    setBatchLoadingByProductId((previous) => ({ ...previous, [productId]: true }));
+    setBatchErrorByProductId((previous) => ({ ...previous, [productId]: null }));
+
+    try {
+      const options = await fetchSaleBatchOptions(productId);
+      setBatchOptionsByProductId((previous) => ({ ...previous, [productId]: options }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load live batches";
+      setBatchErrorByProductId((previous) => ({ ...previous, [productId]: message }));
+    } finally {
+      setBatchLoadingByProductId((previous) => ({ ...previous, [productId]: false }));
+    }
+  }, [capabilities.batch_tracking]);
 
   const persistSuspendedCarts = (next: SuspendedCart[]) => {
     setSuspendedCarts(next);
@@ -210,6 +262,7 @@ export default function POSSaleForm({
         product_id: item.product.id,
         quantity: item.quantity,
         sellingUnit: item.sellingUnit,
+        preferred_batch_number: item.preferredBatchNumber ?? null,
       })),
       customerName,
       paymentMethod,
@@ -242,6 +295,7 @@ export default function POSSaleForm({
           product,
           quantity: Math.max(0.01, Number(line.quantity) || 0),
           sellingUnit: line.sellingUnit,
+          preferredBatchNumber: line.preferred_batch_number ?? null,
         } as CartItem;
       })
       .filter((line): line is CartItem => line !== null);
@@ -319,8 +373,16 @@ export default function POSSaleForm({
       ));
     } else {
       // Add new item
-      setCart([...cart, { product, quantity: unit === 'pack' ? 1 : pieceQuantityStep, sellingUnit: unit }]);
+      setCart([...cart, { product, quantity: unit === 'pack' ? 1 : pieceQuantityStep, sellingUnit: unit, preferredBatchNumber: null }]);
     }
+  };
+
+  const updatePreferredBatch = (productId: number, unit: 'piece' | 'pack', preferredBatchNumber: string | null) => {
+    setCart((previousCart) => previousCart.map((item) =>
+      item.product.id === productId && item.sellingUnit === unit
+        ? { ...item, preferredBatchNumber }
+        : item
+    ));
   };
 
   // Update quantity
@@ -428,6 +490,22 @@ export default function POSSaleForm({
   }, []);
 
   useEffect(() => {
+    if (!capabilities.batch_tracking) {
+      return;
+    }
+
+    for (const item of cart) {
+      if (Number(item.product.active_batch_count ?? 0) <= 0) {
+        continue;
+      }
+      if (batchOptionsByProductId[item.product.id] !== undefined || batchLoadingByProductId[item.product.id]) {
+        continue;
+      }
+      void loadBatchOptions(item.product.id);
+    }
+  }, [batchLoadingByProductId, batchOptionsByProductId, capabilities.batch_tracking, cart, loadBatchOptions]);
+
+  useEffect(() => {
     if (!cameraOpen) {
       stopCameraScanner();
       return;
@@ -477,7 +555,7 @@ export default function POSSaleForm({
           : Number(line.quantity || 0);
 
         if (!Number.isFinite(quantity) || quantity <= 0) return null;
-        return { product, quantity, sellingUnit } as CartItem;
+        return { product, quantity, sellingUnit, preferredBatchNumber: line.preferred_batch_number ?? null } as CartItem;
       })
       .filter((entry): entry is CartItem => entry !== null);
 
@@ -655,6 +733,7 @@ export default function POSSaleForm({
         quantity: pieceQuantity, // Always store in pieces for inventory
         sale_unit_type: item.sellingUnit,
         pack_quantity: item.sellingUnit === 'pack' ? item.quantity : undefined,
+        preferred_batch_number: item.preferredBatchNumber || undefined,
         unit_price: unitPrice,
         total_price: lineTotal,
         customer_name: paymentMethod === "credit" ? creditorName : (customerName || null),
@@ -998,6 +1077,7 @@ export default function POSSaleForm({
                 const unitPrice = item.sellingUnit === 'pack'
                   ? Number(item.product.pack_selling_price || 0)
                   : Number(item.product.selling_price || 0);
+                const pieceQuantity = getCartItemPieceQuantity(item);
                 const quantityStep = item.sellingUnit === 'pack'
                   ? 1
                   : getPieceQuantityStep(item.product, fractionalSalesEnabled);
@@ -1009,6 +1089,14 @@ export default function POSSaleForm({
                 const batchSummary = capabilities.batch_tracking
                   ? getProductBatchSummary(item.product, { includeNextExpiry: capabilities.expiry_tracking })
                   : null;
+                const batchOptions = batchOptionsByProductId[item.product.id] ?? [];
+                const batchLoading = Boolean(batchLoadingByProductId[item.product.id]);
+                const batchError = batchErrorByProductId[item.product.id];
+                const selectedBatch = batchOptions.find((option) => option.batch_number === item.preferredBatchNumber) ?? null;
+                const selectedBatchAvailable = Math.max(0, Number(selectedBatch?.available_quantity ?? 0));
+                const selectedBatchCoverage = selectedBatch ? Math.min(pieceQuantity, selectedBatchAvailable) : 0;
+                const remainingAfterSelectedBatch = selectedBatch ? Math.max(pieceQuantity - selectedBatchCoverage, 0) : 0;
+                const showBatchPicker = capabilities.batch_tracking && Number(item.product.active_batch_count ?? 0) > 0;
                 
                 return (
                 <div
@@ -1144,6 +1232,85 @@ export default function POSSaleForm({
                       GHS {(unitPrice * item.quantity).toFixed(2)}
                     </div>
                   </div>
+
+                  {showBatchPicker ? (
+                    <div
+                      style={{
+                        marginTop: 10,
+                        padding: 10,
+                        borderRadius: 8,
+                        border: "1px solid #dbeafe",
+                        background: "#f8fbff",
+                        display: "grid",
+                        gap: 6,
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8" }}>Batch allocation</span>
+                        <button
+                          type="button"
+                          onClick={() => void loadBatchOptions(item.product.id)}
+                          style={{
+                            padding: 0,
+                            border: "none",
+                            background: "transparent",
+                            color: "#1d4ed8",
+                            cursor: "pointer",
+                            fontSize: 11,
+                            fontWeight: 700,
+                          }}
+                        >
+                          Refresh
+                        </button>
+                      </div>
+
+                      <select
+                        value={item.preferredBatchNumber ?? ""}
+                        onChange={(event) => updatePreferredBatch(item.product.id, item.sellingUnit, event.target.value || null)}
+                        disabled={batchLoading || batchOptions.length === 0}
+                        style={{
+                          width: "100%",
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #bfdbfe",
+                          background: "white",
+                          fontSize: 12,
+                          color: "#0f172a",
+                        }}
+                      >
+                        <option value="">Auto allocate oldest available batch</option>
+                        {batchOptions.map((option) => (
+                          <option key={option.batch_number} value={option.batch_number}>
+                            {formatBatchOptionLabel(option)}
+                          </option>
+                        ))}
+                      </select>
+
+                      {batchLoading ? (
+                        <div style={{ fontSize: 11, color: "#64748b" }}>Loading live batch balances...</div>
+                      ) : null}
+                      {batchError ? (
+                        <div style={{ fontSize: 11, color: "#b91c1c" }}>
+                          {batchError}. Checkout can still fall back to automatic FEFO allocation.
+                        </div>
+                      ) : null}
+                      {selectedBatch ? (
+                        <div style={{ fontSize: 11, color: "#334155" }}>
+                          {remainingAfterSelectedBatch > 0
+                            ? `This sale starts with ${selectedBatch.batch_number} for ${formatQuantityValue(selectedBatchCoverage)} unit(s); the remaining ${formatQuantityValue(remainingAfterSelectedBatch)} unit(s) follow FEFO.`
+                            : `This sale will use ${selectedBatch.batch_number} first as long as availability holds.`}
+                        </div>
+                      ) : batchOptions.length > 0 ? (
+                        <div style={{ fontSize: 11, color: "#334155" }}>
+                          Auto mode sells from the oldest available batch first.
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 11, color: "#64748b" }}>
+                          No tracked batches are currently available for manual selection.
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               );
               })}

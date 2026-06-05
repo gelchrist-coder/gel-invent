@@ -12,6 +12,7 @@ import {
   PurchaseOrder,
   PurchaseReturn,
   Sale,
+  SaleBatchOption,
   StockMovement,
   Supplier,
   SupplierPayment,
@@ -1024,6 +1025,10 @@ export async function createSalesBulk(payloads: NewSale[]): Promise<Sale[]> {
   dataCache.delete(getCacheKey("products"));
   dataCache.delete(getCacheKey("salesDashboard"));
   return result;
+}
+
+export async function fetchSaleBatchOptions(productId: number): Promise<SaleBatchOption[]> {
+  return jsonRequest<SaleBatchOption[]>(`/sales/products/${productId}/batch-options`);
 }
 
 export async function assignSaleCustomer(
