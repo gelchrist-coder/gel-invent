@@ -24,6 +24,24 @@ MONEY_SCALE = Decimal("0.01")
 MONEY_ZERO = Decimal("0.00")
 
 
+def _load_variant_label_map(
+    db: Session,
+    *,
+    variant_ids: list[int],
+    product_ids: list[int],
+) -> dict[int, str]:
+    if not variant_ids or not product_ids:
+        return {}
+
+    rows = db.execute(
+        select(ProductVariant.id, ProductVariant.label).where(
+            ProductVariant.id.in_(variant_ids),
+            ProductVariant.product_id.in_(product_ids),
+        )
+    ).all()
+    return {int(row.id): row.label for row in rows}
+
+
 def _get_tenant_owner_id(user: User) -> int:
     if is_admin(user):
         return user.id
@@ -1573,6 +1591,7 @@ def get_all_movements(
     query = select(
         StockMovement.id,
         StockMovement.product_id,
+        StockMovement.variant_id,
         StockMovement.change,
         StockMovement.reason,
         StockMovement.batch_number,
@@ -1621,12 +1640,19 @@ def get_all_movements(
     query = query.order_by(StockMovement.created_at.desc())
     
     movements = db.execute(query).all()
+    variant_labels = _load_variant_label_map(
+        db,
+        variant_ids=sorted({int(movement.variant_id) for movement in movements if movement.variant_id is not None}),
+        product_ids=sorted({int(movement.product_id) for movement in movements}),
+    )
     
     result = []
     for movement in movements:
         result.append({
             "id": movement.id,
             "product_id": movement.product_id,
+                "variant_id": movement.variant_id,
+                "variant_label": variant_labels.get(int(movement.variant_id)) if movement.variant_id is not None else None,
             "product_name": movement.name,
             "product_sku": movement.sku,
             "change": float(movement.change),
@@ -1699,6 +1725,11 @@ def export_movements_pdf(
     )
     
     movements = db.scalars(query).all()
+    variant_labels = _load_variant_label_map(
+        db,
+        variant_ids=sorted({int(movement.variant_id) for movement in movements if movement.variant_id is not None}),
+        product_ids=sorted({int(movement.product_id) for movement in movements}),
+    )
     
     # Filter by movement type
     filtered_movements = []
@@ -1724,10 +1755,15 @@ def export_movements_pdf(
                 continue
             if movement_type == "sale" and classification != "sales":
                 continue
+
+        variant_label = None
+        if movement.variant_id is not None:
+            variant_label = variant_labels.get(int(movement.variant_id))
         
         filtered_movements.append({
             "date": movement.created_at.strftime("%d %b %Y %H:%M"),
             "product_name": product.name if product else "Unknown",
+            "variant_label": variant_label,
             "product_sku": product.sku if product else "N/A",
             "change": float(movement.change),
             "reason": movement.reason,
@@ -1819,9 +1855,12 @@ def export_movements_pdf(
         
         for m in filtered_movements:
             change_str = f"+{m['change']:.2f}" if m["change"] > 0 else f"{m['change']:.2f}"
+            product_label = m["product_name"]
+            if m["variant_label"]:
+                product_label = f"{product_label} ({m['variant_label']})"
             data.append([
                 m["date"],
-                m["product_name"][:25] + "..." if len(m["product_name"]) > 25 else m["product_name"],
+                product_label[:25] + "..." if len(product_label) > 25 else product_label,
                 m["product_sku"],
                 change_str,
                 m["type"],

@@ -466,6 +466,8 @@ function SupplierNameCombobox({
 type PurchaseOrderLine = {
   id: string;
   product_id: number;
+  variant_id?: number | null;
+  variant_label?: string | null;
   product_name: string;
   product_sku: string;
   current_stock: number;
@@ -600,6 +602,7 @@ export default function PurchasingPanel({
   const [purchaseReturns, setPurchaseReturns] = useState<PurchaseReturn[]>([]);
   const [purchaseReturnsSupported, setPurchaseReturnsSupported] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
+  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
   const [orderItems, setOrderItems] = useState<PurchaseOrderLine[]>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null);
   const [manualSupplierName, setManualSupplierName] = useState("");
@@ -752,12 +755,29 @@ export default function PurchasingPanel({
     () => products.find((product) => product.id === selectedProductId) ?? null,
     [products, selectedProductId],
   );
+  const selectedProductVariants = useMemo(
+    () =>
+      [...(selectedProduct?.variants ?? [])].sort((left, right) => {
+        if (left.sort_order !== right.sort_order) {
+          return left.sort_order - right.sort_order;
+        }
+        return left.label.localeCompare(right.label);
+      }),
+    [selectedProduct],
+  );
+  const selectedVariant = selectedProductVariants.find((variant) => variant.id === selectedVariantId) ?? null;
   const isPerishableProduct = usesExpiryTracking && !!selectedProduct?.expiry_date;
   const totalPurchaseValue = useMemo(() => purchases.reduce((sum, purchase) => sum + Number(purchase.total_cost || 0), 0), [purchases]);
   const totalOutstandingBalance = useMemo(
     () => suppliers.reduce((sum, supplier) => sum + Number(supplier.outstanding_balance || 0), 0),
     [suppliers],
   );
+
+  useEffect(() => {
+    setSelectedVariantId((previousValue) => (
+      selectedProductVariants.some((variant) => variant.id === previousValue) ? previousValue : null
+    ));
+  }, [selectedProductVariants]);
   const totalUnpaidInvoices = useMemo(
     () => suppliers.reduce((sum, supplier) => sum + Number(supplier.unpaid_purchases_count || 0), 0),
     [suppliers],
@@ -1242,6 +1262,8 @@ export default function PurchasingPanel({
       {
         id: createOrderLineId(selectedProduct.id),
         product_id: selectedProduct.id,
+        variant_id: selectedVariantId,
+        variant_label: selectedVariant?.label ?? null,
         product_name: selectedProduct.name,
         product_sku: selectedProduct.sku,
         current_stock: Number(selectedProduct.current_stock || 0),
@@ -1254,7 +1276,7 @@ export default function PurchasingPanel({
       },
     ]);
     setError(null);
-    setNotice(`${selectedProduct.name} added to the purchase order`);
+    setNotice(`${selectedProduct.name}${selectedVariant ? ` (${selectedVariant.label})` : ""} added to the purchase order`);
     setQuantity("1");
     setUnitCostPrice(selectedProduct.cost_price != null ? String(selectedProduct.cost_price) : "");
     setUnitSellingPrice(selectedProduct.selling_price != null ? String(selectedProduct.selling_price) : "");
@@ -1463,6 +1485,7 @@ export default function PurchasingPanel({
         notes: trimOrUndefined(notes),
         items: orderItems.map((item) => ({
           product_id: item.product_id,
+          variant_id: item.variant_id ?? undefined,
           quantity: item.quantity,
           unit_cost_price: item.unit_cost_price,
           unit_selling_price: item.unit_selling_price ?? undefined,
@@ -1889,6 +1912,9 @@ export default function PurchasingPanel({
                         <div style={{ display: "grid", gap: 2 }}>
                           <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{selectedProduct.name}</div>
                           <div style={{ fontSize: 12, color: "#64748b" }}>{selectedProduct.sku}</div>
+                          {selectedVariant ? (
+                            <div style={{ fontSize: 12, color: "#1d4ed8", fontWeight: 600 }}>Selected variant: {selectedVariant.label}</div>
+                          ) : null}
                         </div>
                         <button
                           type="button"
@@ -1956,6 +1982,28 @@ export default function PurchasingPanel({
                         </div>
                       ) : null}
                     </div>
+                  ) : null}
+
+                  {selectedProductVariants.length > 0 ? (
+                    <label style={{ maxWidth: 420 }}>
+                      <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Variant (Optional)</span>
+                      <select
+                        className="input"
+                        value={selectedVariantId ?? ""}
+                        onChange={(e) => setSelectedVariantId(e.target.value ? Number(e.target.value) : null)}
+                        disabled={submittingPurchase}
+                      >
+                        <option value="">Whole product / shared stock</option>
+                        {selectedProductVariants.map((variant) => (
+                          <option key={variant.id} value={variant.id}>
+                            {variant.label}
+                          </option>
+                        ))}
+                      </select>
+                      <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
+                        Choose a variant when this supplier delivery applies to a specific option. Leave blank for shared product stock.
+                      </small>
+                    </label>
                   ) : null}
 
                   {selectedProduct ? (
@@ -2067,6 +2115,7 @@ export default function PurchasingPanel({
                                 <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{item.product_name}</div>
                                 <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
                                   {item.product_sku}
+                                  {item.variant_label ? ` · ${item.variant_label}` : ""}
                                   {item.expiry_date ? ` · Exp ${formatDate(item.expiry_date)}` : ""}
                                 </div>
                               </div>

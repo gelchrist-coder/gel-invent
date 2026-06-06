@@ -50,6 +50,7 @@ export default function Inventory() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
+  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
   const [actionType, setActionType] = useState<"new_stock" | "damage" | "transfer" | "delete">("new_stock");
   const [quantity, setQuantity] = useState<string>("");
   const [stockReason, setStockReason] = useState<string>("New Stock");
@@ -146,6 +147,17 @@ export default function Inventory() {
   }, [loadData]);
 
   const selectedProduct = products.find((p) => p.id === selectedProductId) ?? null;
+  const selectedProductVariants = useMemo(
+    () =>
+      [...(selectedProduct?.variants ?? [])].sort((left, right) => {
+        if (left.sort_order !== right.sort_order) {
+          return left.sort_order - right.sort_order;
+        }
+        return left.label.localeCompare(right.label);
+      }),
+    [selectedProduct],
+  );
+  const selectedVariant = selectedProductVariants.find((variant) => variant.id === selectedVariantId) ?? null;
   const selectedProductStock = selectedProduct ? Math.max(0, Number(selectedProduct.current_stock ?? 0)) : 0;
   const rawActiveBranchId = localStorage.getItem("activeBranchId");
   const activeBranchId = rawActiveBranchId ? Number(rawActiveBranchId) : null;
@@ -166,6 +178,13 @@ export default function Inventory() {
     ? getProductBatchSummary(selectedProduct, { includeNextExpiry: usesExpiryTracking })
     : null;
   const isPerishableProduct = usesExpiryTracking && !!selectedProduct?.expiry_date;
+  const canSelectVariantForAction = !isTransferAction && !isDeleteAction && selectedProductVariants.length > 0;
+
+  useEffect(() => {
+    setSelectedVariantId((previous) => (
+      selectedProductVariants.some((variant) => variant.id === previous) ? previous : null
+    ));
+  }, [selectedProductVariants]);
 
   const resetActionForm = () => {
     setQuantity("");
@@ -280,6 +299,7 @@ export default function Inventory() {
       await createMovement(selectedProductId, {
         change,
         reason,
+        variant_id: canSelectVariantForAction ? selectedVariantId : null,
         expiry_date: isNewStockAction && isPerishableProduct ? (expiryDate || null) : null,
         unit_cost_price: isNewStockAction && Number.isFinite(parsedCost) ? parsedCost : null,
         unit_selling_price: isNewStockAction && Number.isFinite(parsedSelling) ? parsedSelling : null,
@@ -566,6 +586,11 @@ export default function Inventory() {
             <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
               {selectedProduct ? `${selectedProduct.name} (${selectedProduct.sku})` : "No product selected"}
             </div>
+            {selectedVariant ? (
+              <div style={{ fontSize: 12, color: "#1d4ed8", marginTop: 4, fontWeight: 600 }}>
+                Variant scope: {selectedVariant.label}
+              </div>
+            ) : null}
             {selectedProductVariantSummary ? (
               <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{selectedProductVariantSummary}</div>
             ) : null}
@@ -604,6 +629,34 @@ export default function Inventory() {
               emptyLabel="No matching products found"
             />
           </div>
+
+          {canSelectVariantForAction ? (
+            <label>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Variant (Optional)</span>
+              <select
+                value={selectedVariantId ?? ""}
+                onChange={(e) => setSelectedVariantId(e.target.value ? Number(e.target.value) : null)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
+                disabled={submittingAction}
+              >
+                <option value="">Whole product / shared stock</option>
+                {selectedProductVariants.map((variant) => (
+                  <option key={variant.id} value={variant.id}>
+                    {variant.label}
+                  </option>
+                ))}
+              </select>
+              <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
+                Choose a variant to scope this adjustment. Leave blank to adjust stock recorded at the product level.
+              </small>
+            </label>
+          ) : null}
+
+          {selectedProductVariants.length > 0 && isTransferAction ? (
+            <div style={{ padding: 10, borderRadius: 8, border: "1px solid #dbeafe", background: "#eff6ff", color: "#1d4ed8", fontSize: 13 }}>
+              Branch transfers currently move the whole product. Variant-specific transfer routing has not been enabled in this workflow.
+            </div>
+          ) : null}
 
           <div>
             <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Action</span>

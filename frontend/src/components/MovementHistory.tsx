@@ -1,8 +1,10 @@
 import { useState } from "react";
 
-type MovementHistory = {
+type MovementHistoryItem = {
   id: number;
   product_id: number;
+  variant_id?: number | null;
+  variant_label?: string | null;
   product_name: string;
   product_sku: string;
   change: number;
@@ -13,7 +15,7 @@ type MovementHistory = {
 };
 
 type Props = {
-  movements: MovementHistory[];
+  movements: MovementHistoryItem[];
 };
 
 export default function MovementHistory({ movements }: Props) {
@@ -118,8 +120,11 @@ export default function MovementHistory({ movements }: Props) {
               filteredMovements.map((movement) => (
                 <tr key={movement.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
                   <td style={{ padding: 12, fontSize: 14 }}>{formatDate(movement.created_at)}</td>
-                  <td style={{ padding: 12, fontSize: 14, fontWeight: 500 }}>
-                    {movement.product_name}
+                  <td style={{ padding: 12, fontSize: 14 }}>
+                    <div style={{ fontWeight: 500 }}>{movement.product_name}</div>
+                    {movement.variant_label ? (
+                      <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{movement.variant_label}</div>
+                    ) : null}
                   </td>
                   <td style={{ padding: 12, fontSize: 14, color: "#6b7280" }}>
                     {movement.product_sku}
