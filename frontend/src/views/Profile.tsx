@@ -1,39 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { AuthUser, changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
+import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
 import { Branch } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
-
-type BrandingImageFormMessage = {
-  type: "branding-image-upload-result";
-  ok: boolean;
-  request_id?: string | null;
-  user?: AuthUser | null;
-  error?: string | null;
-};
-
-function isBrandingImageFormMessage(value: unknown): value is BrandingImageFormMessage {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return candidate.type === "branding-image-upload-result";
-}
-
-function readBrandingImageFormPayload(frame: HTMLIFrameElement | null): BrandingImageFormMessage | null {
-  try {
-    const rawPayload = frame?.contentDocument?.getElementById("branding-upload-result")?.textContent?.trim();
-    if (!rawPayload) {
-      return null;
-    }
-
-    const parsed = JSON.parse(rawPayload) as unknown;
-    return isBrandingImageFormMessage(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
 type PasswordInputProps = {
   label: string;
@@ -98,7 +67,6 @@ export default function Profile() {
     address: "",
     taxId: "",
     currency: "GHS",
-    logo: "",
   });
 
   const [userInfo, setUserInfo] = useState({
@@ -133,15 +101,6 @@ export default function Profile() {
   const [importingData, setImportingData] = useState(false);
   const [clearingData, setClearingData] = useState(false);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
-  const [logoUploading, setLogoUploading] = useState(false);
-  const [logoError, setLogoError] = useState<string | null>(null);
-  const logoUploadFormRef = useRef<HTMLFormElement | null>(null);
-  const logoInputRef = useRef<HTMLInputElement | null>(null);
-  const logoUploadTokenRef = useRef<HTMLInputElement | null>(null);
-  const logoUploadRequestIdRef = useRef<HTMLInputElement | null>(null);
-  const logoUploadFrameRef = useRef<HTMLIFrameElement | null>(null);
-  const logoUploadPendingRequestIdRef = useRef<string | null>(null);
-  const logoUploadTimeoutRef = useRef<number | null>(null);
 
   // Branch management state
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -181,7 +140,6 @@ export default function Profile() {
           owner: String(parsedUser.name ?? prev.owner),
           phone: prev.phone || String(parsedUser.phone ?? ""),
           email: String(parsedUser.email ?? prev.email),
-          logo: String((parsedUser as Record<string, unknown>).business_logo_url ?? prev.logo ?? ""),
         }));
       }
     } catch {
@@ -483,131 +441,6 @@ export default function Profile() {
     importFileRef.current?.click();
   };
 
-  const handlePickLogoFile = () => {
-    setLogoError(null);
-    logoInputRef.current?.click();
-  };
-
-  const clearLogoUploadWait = () => {
-    if (logoUploadTimeoutRef.current != null) {
-      window.clearTimeout(logoUploadTimeoutRef.current);
-      logoUploadTimeoutRef.current = null;
-    }
-  };
-
-  const finishLogoUpload = (updated: AuthUser) => {
-    clearLogoUploadWait();
-    logoUploadPendingRequestIdRef.current = null;
-
-    const logoUrl = updated.business_logo_url || "";
-    setBusinessInfo((prev) => ({ ...prev, logo: logoUrl }));
-
-    const rawUser = localStorage.getItem("user");
-    const parsedUser = rawUser ? (JSON.parse(rawUser) as Record<string, unknown>) : {};
-    const nextUser = { ...parsedUser, ...updated, business_logo_url: logoUrl };
-    localStorage.setItem("user", JSON.stringify(nextUser));
-    window.dispatchEvent(new CustomEvent("userChanged", { detail: nextUser }));
-
-    const rawBusiness = localStorage.getItem("businessInfo");
-    const parsedBusiness = rawBusiness ? (JSON.parse(rawBusiness) as Record<string, unknown>) : {};
-    localStorage.setItem("businessInfo", JSON.stringify({ ...parsedBusiness, logo: logoUrl }));
-
-    setLogoUploading(false);
-    setLogoError(null);
-    setDataMessage("Logo updated.");
-    if (logoInputRef.current) {
-      logoInputRef.current.value = "";
-    }
-  };
-
-  const failLogoUpload = (message: string) => {
-    clearLogoUploadWait();
-    logoUploadPendingRequestIdRef.current = null;
-    setLogoUploading(false);
-    setLogoError(message);
-    if (logoInputRef.current) {
-      logoInputRef.current.value = "";
-    }
-  };
-
-  const handleLogoUploadFrameLoad = () => {
-    const pendingRequestId = logoUploadPendingRequestIdRef.current;
-    if (!pendingRequestId) {
-      return;
-    }
-
-    const payload = readBrandingImageFormPayload(logoUploadFrameRef.current);
-    if (!payload || payload.request_id !== pendingRequestId) {
-      return;
-    }
-
-    if (payload.ok && payload.user) {
-      finishLogoUpload(payload.user);
-      return;
-    }
-
-    failLogoUpload(payload.error || "Failed to update logo.");
-  };
-
-  const handleLogoSelected = (file: File | null) => {
-    if (!file) return;
-    setLogoError(null);
-    setDataMessage(null);
-
-    if (!file.type.startsWith("image/")) {
-      setLogoError("Logo must be an image file.");
-      if (logoInputRef.current) {
-        logoInputRef.current.value = "";
-      }
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      setLogoError("Logo must be under 2MB.");
-      if (logoInputRef.current) {
-        logoInputRef.current.value = "";
-      }
-      return;
-    }
-
-    const token = localStorage.getItem("token");
-    if (!token) {
-      setLogoError("Not authenticated.");
-      if (logoInputRef.current) {
-        logoInputRef.current.value = "";
-      }
-      return;
-    }
-
-    if (!logoUploadFormRef.current || !logoUploadTokenRef.current || !logoUploadRequestIdRef.current) {
-      setLogoError("Logo upload is not ready. Please refresh and try again.");
-      if (logoInputRef.current) {
-        logoInputRef.current.value = "";
-      }
-      return;
-    }
-
-    const requestId = `profile-logo-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    logoUploadPendingRequestIdRef.current = requestId;
-    logoUploadTokenRef.current.value = token;
-    logoUploadRequestIdRef.current.value = requestId;
-
-    clearLogoUploadWait();
-
-    setLogoUploading(true);
-    try {
-      logoUploadTimeoutRef.current = window.setTimeout(() => {
-        failLogoUpload("Logo upload timed out. Please try again.");
-      }, 60000);
-      logoUploadFormRef.current.submit();
-    } catch (error) {
-      failLogoUpload(error instanceof Error ? error.message : "Failed to update logo.");
-    }
-  };
-
-  useEffect(() => () => {
-    clearLogoUploadWait();
-  }, []);
-
   const handleImportFileSelected = async (file: File | null) => {
     if (!file) return;
     setDataMessage(null);
@@ -653,31 +486,6 @@ export default function Profile() {
         accept="application/json,.json"
         style={{ display: "none" }}
         onChange={(e) => handleImportFileSelected(e.target.files?.[0] ?? null)}
-      />
-      <form
-        ref={logoUploadFormRef}
-        action="/api/auth/me/branding-image-form"
-        method="POST"
-        encType="multipart/form-data"
-        target="profile-logo-upload-target"
-        style={{ display: "none" }}
-      >
-        <input ref={logoUploadTokenRef} type="hidden" name="access_token" />
-        <input ref={logoUploadRequestIdRef} type="hidden" name="request_id" />
-        <input
-          ref={logoInputRef}
-          type="file"
-          name="logo"
-          accept="image/*"
-          onChange={(e) => handleLogoSelected(e.target.files?.[0] ?? null)}
-        />
-      </form>
-      <iframe
-        ref={logoUploadFrameRef}
-        name="profile-logo-upload-target"
-        title="Profile logo upload"
-        style={{ display: "none" }}
-        onLoad={handleLogoUploadFrameLoad}
       />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
@@ -808,71 +616,6 @@ export default function Profile() {
                   style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
                 />
               </label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                  Business Logo
-                </span>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: 12,
-                    borderRadius: 10,
-                    border: "1px dashed #cbd5f5",
-                    background: "#f8fbff",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 56,
-                      height: 56,
-                      borderRadius: 12,
-                      background: "#e2e8f0",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      overflow: "hidden",
-                      color: "#475569",
-                      fontWeight: 700,
-                      fontSize: 12,
-                    }}
-                  >
-                    {businessInfo.logo ? (
-                      <img
-                        src={businessInfo.logo}
-                        alt="Business logo"
-                        style={{ width: "100%", height: "100%", objectFit: "contain", background: "#fff" }}
-                      />
-                    ) : (
-                      "LOGO"
-                    )}
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <button
-                      type="button"
-                      onClick={handlePickLogoFile}
-                      disabled={logoUploading}
-                      style={{
-                        padding: "8px 14px",
-                        borderRadius: 8,
-                        border: "1px solid #d1d5db",
-                        background: logoUploading ? "#e5e7eb" : "#ffffff",
-                        cursor: logoUploading ? "not-allowed" : "pointer",
-                        fontWeight: 600,
-                        color: "#1f2937",
-                        fontSize: 13,
-                      }}
-                    >
-                      {logoUploading ? "Uploading..." : "Change Logo"}
-                    </button>
-                    <span style={{ fontSize: 12, color: "#6b7280" }}>PNG, JPG up to 2MB</span>
-                  </div>
-                </div>
-                {logoError ? (
-                  <span style={{ fontSize: 12, color: "#b91c1c", fontWeight: 600 }}>{logoError}</span>
-                ) : null}
-              </div>
               <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
                   Owner Name

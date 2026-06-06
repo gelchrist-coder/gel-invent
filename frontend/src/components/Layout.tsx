@@ -108,7 +108,6 @@ type Props = {
   children: ReactNode;
   userName?: string;
   businessName?: string;
-  businessLogoUrl?: string | null;
   userRole?: string;
   userPermissions?: FrontendPermission[];
   isOnline?: boolean;
@@ -128,7 +127,6 @@ export default function Layout({
   children,
   userName = "User",
   businessName = "Business",
-  businessLogoUrl,
   userRole = "Admin",
   userPermissions,
   isOnline = true,
@@ -411,7 +409,6 @@ export default function Layout({
           userName={userName}
           userRole={userRole}
           businessName={businessName}
-          businessLogoUrl={businessLogoUrl}
           isOnline={isOnline}
           outboxCount={outboxCount}
           isSyncingOutbox={isSyncingOutbox}

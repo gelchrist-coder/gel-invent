@@ -22,7 +22,6 @@ export default function Invoice() {
 
   const userData = readStoredUser();
   const businessName = userData?.business_name || "Your Business";
-  const businessLogoUrl = userData?.business_logo_url || "";
   const salesPerson = userData?.name || "Sales Person";
 
   const loadData = useCallback(async () => {
@@ -122,11 +121,7 @@ export default function Invoice() {
       })
       .join("");
 
-    const logoHtml = businessLogoUrl
-      ? `<div style="margin-bottom:10px"><img src="${businessLogoUrl}" alt="Logo" style="height:50px;max-width:160px;object-fit:contain" /></div>`
-      : "";
-
-    const watermarkHtml = businessLogoUrl ? "" : "<div class=\"watermark\">Gel Invent</div>";
+    const watermarkHtml = "<div class=\"watermark\">Gel Invent</div>";
 
     const html = `
       <html>
@@ -147,7 +142,6 @@ export default function Invoice() {
         <body>
           ${watermarkHtml}
           <h1>${businessName}</h1>
-          ${logoHtml}
           <div class="meta">PROFORMA INVOICE</div>
           <div class="meta">Invoice No: ${invoiceNumber}</div>
           <div class="meta">Issued: ${issueDate}</div>

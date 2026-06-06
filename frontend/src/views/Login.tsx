@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchWithSameOriginApiFallback, uploadBusinessLogo, warmBackend } from "../api";
+import { fetchWithSameOriginApiFallback, warmBackend } from "../api";
 import appLogo from "../asset/logo.png";
 import wareImage from "../asset/Ware.png";
 
@@ -47,7 +47,6 @@ type AuthResponse = {
     role?: string;
     permissions?: string[] | null;
     business_name?: string | null;
-    business_logo_url?: string | null;
     business_types?: string[] | null;
     product_categories?: string[] | null;
     categories?: string[] | null;
@@ -127,8 +126,6 @@ export default function Login({ onLogin }: LoginProps) {
     hasBranches: false,
     branches: [] as string[],
   });
-  const [logoFile, setLogoFile] = useState<File | null>(null);
-  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
   const [branchInput, setBranchInput] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -292,7 +289,6 @@ export default function Login({ onLogin }: LoginProps) {
             address: "",
             taxId: "",
             currency: "GHS",
-            logo: userData.business_logo_url || "",
           })
         );
       }
@@ -629,19 +625,6 @@ export default function Login({ onLogin }: LoginProps) {
           return;
         }
 
-        if (logoFile) {
-          if (!logoFile.type.startsWith("image/")) {
-            setError("Logo must be an image file");
-            setLoading(false);
-            return;
-          }
-          if (logoFile.size > 2 * 1024 * 1024) {
-            setError("Logo must be under 2MB");
-            setLoading(false);
-            return;
-          }
-        }
-
         // Validate branches if user said they have branches
         if (formData.hasBranches && formData.branches.length === 0) {
           setError("Please add at least one additional branch/location or uncheck 'I have multiple branches'");
@@ -687,26 +670,7 @@ export default function Login({ onLogin }: LoginProps) {
         const signupData = (await signupResponse.json().catch(() => {
           throw new Error(`Server returned non-JSON response (status ${signupResponse.status}). The backend URL may be misconfigured.`);
         })) as AuthResponse;
-        await completeAuthenticatedSession(signupData, formData.email.trim(), formData.password, {
-          beforeLogin: logoFile
-            ? async () => {
-              try {
-                const updatedUser = await uploadBusinessLogo(logoFile, { sourceInput: logoFileInputRef.current });
-                const rawBusiness = localStorage.getItem("businessInfo");
-                const parsedBusiness = rawBusiness ? (JSON.parse(rawBusiness) as Record<string, unknown>) : {};
-                localStorage.setItem(
-                  "businessInfo",
-                  JSON.stringify({
-                    ...parsedBusiness,
-                    logo: updatedUser.business_logo_url || "",
-                  }),
-                );
-              } catch (uploadError) {
-                console.error("[Signup] Logo upload failed after account creation:", uploadError);
-              }
-            }
-            : undefined,
-        });
+        await completeAuthenticatedSession(signupData, formData.email.trim(), formData.password);
       } else {
         // Sign in validation
         if (!formData.email.trim() || !formData.password.trim()) {
@@ -949,26 +913,6 @@ export default function Login({ onLogin }: LoginProps) {
                   <span style={{ fontSize: 12, color: "#6b7280" }}>
                     This becomes your first branch name.
                   </span>
-                </label>
-
-                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    Business Logo (optional)
-                  </span>
-                  <input
-                    ref={logoFileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] || null;
-                      setLogoFile(file);
-                    }}
-                    className="input"
-                    style={{ padding: 10 }}
-                  />
-                  {logoFile ? (
-                    <span style={{ fontSize: 12, color: "#64748b" }}>Selected: {logoFile.name}</span>
-                  ) : null}
                 </label>
 
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>

@@ -1,7 +1,4 @@
-import base64
-import binascii
 from datetime import timedelta, datetime, timezone
-import html
 from typing import Optional
 import json
 import secrets
@@ -10,14 +7,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Form
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Form
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, ValidationError
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
-from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.database import get_db
 from app.models import User, PasswordResetToken, Branch, SystemSettings
@@ -38,7 +32,6 @@ from app.utils.supabase_auth import (
 )
 from app.utils.email import send_email, smtp_configured
 from app.utils.phone import is_valid_phone, normalize_phone
-from app.utils.supabase_storage import is_supabase_storage_enabled, upload_public_logo
 from app.permissions import ensure_permission, get_effective_role_name, get_role_permissions, is_admin
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -72,7 +65,6 @@ class UserCreate(BaseModel):
     business_name: Optional[str] = None
     business_location: Optional[str] = None
     recaptcha_token: Optional[str] = None
-    business_logo_url: Optional[str] = None
     business_types: Optional[list[str]] = None
     product_categories: Optional[list[str]] = None
     # Legacy input kept for compatibility during migration.
@@ -88,7 +80,6 @@ class UserResponse(BaseModel):
     role: str
     permissions: list[str]
     business_name: Optional[str] = None
-    business_logo_url: Optional[str] = None
     business_types: Optional[list[str]] = None
     product_categories: Optional[list[str]] = None
     # Legacy compatibility alias for product_categories.
@@ -208,146 +199,6 @@ def _ordered_branch_names(primary_location: Optional[str], branches: Optional[li
     return ordered
 
 
-def _decode_branding_image_payload(payload: "BrandingImageUploadRequest") -> tuple[bytes, str | None, str | None]:
-    raw_data = str(payload.data_base64 or "").strip()
-    if not raw_data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is missing")
-
-    content_type = str(payload.content_type or "").strip() or None
-
-    if raw_data.startswith("data:"):
-        try:
-            header, encoded = raw_data.split(",", 1)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is invalid") from exc
-
-        if ";base64" not in header.lower():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data must be base64-encoded")
-
-        if not content_type:
-            content_type = header[5:].split(";", 1)[0].strip() or None
-
-        raw_data = encoded.strip()
-
-    try:
-        logo_bytes = base64.b64decode(raw_data, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is invalid") from exc
-
-    return logo_bytes, content_type, payload.filename
-
-
-async def _read_branding_image_request(request: Request) -> tuple[bytes, str | None, str | None]:
-    content_type_header = str(request.headers.get("content-type") or "").strip()
-    content_type = content_type_header.split(";", 1)[0].strip() or None
-
-    if (content_type or "").lower() == "application/json":
-        try:
-            payload_data = await request.json()
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is invalid") from exc
-
-        try:
-            payload = BrandingImageUploadRequest(**payload_data)
-        except ValidationError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
-
-        return _decode_branding_image_payload(payload)
-
-    if (content_type or "").lower() == "multipart/form-data":
-        form = await request.form()
-        logo_file = form.get("logo") or form.get("file") or form.get("branding_image")
-        if not isinstance(logo_file, (UploadFile, StarletteUploadFile)):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is missing")
-
-        logo_bytes = await logo_file.read()
-        return logo_bytes, logo_file.content_type, logo_file.filename
-
-    logo_bytes = await request.body()
-    if not logo_bytes:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is missing")
-
-    filename_header = str(request.headers.get("x-upload-filename") or "").strip()
-    filename = urllib.parse.unquote(filename_header) if filename_header else None
-    return logo_bytes, content_type, filename
-
-
-def _render_branding_image_form_response(
-        *,
-        ok: bool,
-        request_id: str | None,
-        user: UserResponse | None = None,
-        error: str | None = None,
-) -> HTMLResponse:
-        payload = {
-                "type": "branding-image-upload-result",
-                "ok": ok,
-                "request_id": request_id or None,
-                "user": jsonable_encoder(user) if user is not None else None,
-                "error": error or None,
-        }
-        payload_json = json.dumps(payload).replace("</", "<\\/")
-        html_body = f"""<!doctype html>
-<html lang=\"en\">
-    <head>
-        <meta charset=\"utf-8\" />
-        <title>Branding Upload</title>
-    </head>
-    <body>
-        <script id=\"branding-upload-result\" type=\"application/json\">{payload_json}</script>
-        <script>
-            (function() {{
-                var payloadNode = document.getElementById('branding-upload-result');
-                var payload = null;
-                if (payloadNode && payloadNode.textContent) {{
-                    try {{
-                        payload = JSON.parse(payloadNode.textContent);
-                    }} catch (_error) {{
-                        payload = null;
-                    }}
-                }}
-                if (window.parent && typeof window.parent.postMessage === 'function') {{
-                    window.parent.postMessage(payload, window.location.origin);
-                }}
-            }})();
-        </script>
-        <p>{html.escape(error or ("Upload complete" if ok else "Upload failed"))}</p>
-    </body>
-</html>
-"""
-        return HTMLResponse(content=html_body)
-
-
-def _store_business_logo(
-    current_user: User,
-    db: Session,
-    logo_bytes: bytes,
-    content_type: str | None,
-    filename: str | None,
-) -> UserResponse:
-    ensure_permission(current_user, "manage_business_profile", "Only Admin can update business logo")
-
-    if not is_supabase_storage_enabled():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo upload is not configured")
-
-    if not (content_type or "").startswith("image/"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be an image")
-
-    if len(logo_bytes) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be under 2MB")
-
-    try:
-        logo_url = upload_public_logo(logo_bytes, content_type, filename)
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
-    current_user.business_logo_url = logo_url
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
-    return _serialize_user(current_user, db)
-
-
 def _verify_recaptcha_or_raise(token: Optional[str]) -> None:
     secret = (os.getenv("RECAPTCHA_SECRET_KEY") or "").strip()
     if not secret:
@@ -389,7 +240,6 @@ def _serialize_user(user: User, db: Session | None = None) -> UserResponse:
         role=get_effective_role_name(user),
         permissions=get_role_permissions(user),
         business_name=user.business_name,
-        business_logo_url=getattr(user, "business_logo_url", None),
         business_types=business_types,
         product_categories=product_categories,
         categories=product_categories,
@@ -446,7 +296,7 @@ def _parse_list_input(value: object) -> Optional[list[str]]:
     return None
 
 
-async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFile | StarletteUploadFile | None]:
+async def _parse_signup_request(request: Request) -> UserCreate:
     content_type = (request.headers.get("content-type") or "").lower()
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -461,10 +311,7 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
         product_categories = _parse_list_input(form.get("product_categories"))
         categories = _parse_list_input(form.get("categories"))
         branches = _parse_list_input(form.get("branches"))
-        logo_file = form.get("business_logo")
-        if not isinstance(logo_file, (UploadFile, StarletteUploadFile)):
-            logo_file = None
-        user_data = UserCreate(
+        return UserCreate(
             email=email,
             phone=phone,
             name=name,
@@ -477,11 +324,9 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
             categories=categories,
             branches=branches,
         )
-        return user_data, logo_file
 
     payload = await request.json()
-    user_data = UserCreate(**payload)
-    return user_data, None
+    return UserCreate(**payload)
 
 
 class PasswordResetRequest(BaseModel):
@@ -508,12 +353,6 @@ class DeleteAccountRequest(BaseModel):
     current_password: str
 
 
-class BrandingImageUploadRequest(BaseModel):
-    data_base64: str
-    filename: Optional[str] = None
-    content_type: Optional[str] = None
-
-
 class UpdateMeRequest(BaseModel):
     business_types: Optional[list[str]] = None
     product_categories: Optional[list[str]] = None
@@ -524,7 +363,7 @@ class UpdateMeRequest(BaseModel):
 @router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def signup(request: Request, db: Session = Depends(get_db)):
     """Register a new user."""
-    user_data, logo_file = await _parse_signup_request(request)
+    user_data = await _parse_signup_request(request)
     _verify_recaptcha_or_raise(user_data.recaptcha_token)
     email = _normalize_email(str(user_data.email))
     # Check if user already exists
@@ -564,20 +403,6 @@ async def signup(request: Request, db: Session = Depends(get_db)):
                 detail=str(exc),
             ) from exc
 
-    logo_url: str | None = None
-    if logo_file is not None:
-        if not is_supabase_storage_enabled():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo upload is not configured")
-        if not (logo_file.content_type or "").startswith("image/"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be an image")
-        logo_bytes = await logo_file.read()
-        if len(logo_bytes) > 2 * 1024 * 1024:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be under 2MB")
-        try:
-            logo_url = upload_public_logo(logo_bytes, logo_file.content_type, logo_file.filename)
-        except Exception as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
     normalized_business_types = _normalize_business_types(user_data.business_types) or _normalize_business_types(user_data.categories)
     normalized_product_categories = _clean_string_list(user_data.product_categories) or _clean_string_list(user_data.categories)
 
@@ -588,7 +413,6 @@ async def signup(request: Request, db: Session = Depends(get_db)):
         name=user_data.name,
         hashed_password=get_password_hash(user_data.password),
         business_name=user_data.business_name,
-        business_logo_url=logo_url,
         categories=json.dumps(normalized_product_categories) if normalized_product_categories else None,
         business_types=json.dumps(normalized_business_types) if normalized_business_types else None,
         product_categories=json.dumps(normalized_product_categories) if normalized_product_categories else None,
@@ -713,58 +537,6 @@ def update_current_user_info(
     db.commit()
     db.refresh(current_user)
     return _serialize_user(current_user, db)
-
-
-@router.post("/me/logo", response_model=UserResponse)
-async def upload_business_logo(
-    logo: UploadFile = File(...),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    logo_bytes = await logo.read()
-    return _store_business_logo(current_user, db, logo_bytes, logo.content_type, logo.filename)
-
-
-@router.post("/me/branding-image", response_model=UserResponse)
-async def upload_business_branding_image(
-    request: Request,
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-):
-    logo_bytes, content_type, filename = await _read_branding_image_request(request)
-    return _store_business_logo(current_user, db, logo_bytes, content_type, filename)
-
-
-@router.post("/me/branding-image-form", response_class=HTMLResponse)
-async def upload_business_branding_image_form(
-    request: Request,
-    db: Session = Depends(get_db),
-):
-    form = await request.form()
-    request_id = str(form.get("request_id") or "").strip() or None
-    access_token = str(form.get("access_token") or "").strip()
-
-    if not access_token:
-        return _render_branding_image_form_response(
-            ok=False,
-            request_id=request_id,
-            error="Authentication is required.",
-        )
-
-    try:
-        current_user = get_current_active_user(get_current_user(token=access_token, db=db))
-        logo_file = form.get("logo") or form.get("file") or form.get("branding_image")
-        if not isinstance(logo_file, (UploadFile, StarletteUploadFile)):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is missing")
-
-        logo_bytes = await logo_file.read()
-        user = _store_business_logo(current_user, db, logo_bytes, logo_file.content_type, logo_file.filename)
-        return _render_branding_image_form_response(ok=True, request_id=request_id, user=user)
-    except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, str) else "Logo upload failed"
-        return _render_branding_image_form_response(ok=False, request_id=request_id, error=detail)
-
-
 
 
 @router.post("/password-reset/request", response_model=PasswordResetRequestResponse)

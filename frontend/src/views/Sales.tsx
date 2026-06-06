@@ -111,7 +111,6 @@ export default function Sales() {
   // Get user and business info for receipt
   const userData = readStoredUser();
   const businessName = userData?.business_name || "Your Business";
-  const businessLogoUrl = userData?.business_logo_url || "";
   const salesPerson = userData?.name || "Sales Person";
   const canDeleteSales = hasUserPermission("delete_sales", userData);
   const canSendSaleReceipts = hasUserPermission("send_sale_receipts", userData);
@@ -359,11 +358,7 @@ export default function Sales() {
       })
       .join("");
 
-    const logoHtml = businessLogoUrl
-      ? `<div style="margin-bottom:8px;"><img src="${businessLogoUrl}" alt="Logo" style="height:40px;max-width:140px;object-fit:contain;" /></div>`
-      : "";
-
-    const watermarkHtml = businessLogoUrl ? "" : "<div class=\"watermark\">Gel Invent</div>";
+    const watermarkHtml = "<div class=\"watermark\">Gel Invent</div>";
 
     const receiptHTML = `
       <!DOCTYPE html>
@@ -387,7 +382,6 @@ export default function Sales() {
       <body>
         ${watermarkHtml}
         <div class="header">
-          ${logoHtml}
           <div class="business-name">${businessName}</div>
           <div>Sales Receipt</div>
         </div>
@@ -467,10 +461,7 @@ export default function Sales() {
       if (timeDiff !== 0) return timeDiff;
       return left.id - right.id;
     });
-    const logoHtml = businessLogoUrl
-      ? `<div style="margin-bottom:8px;"><img src="${businessLogoUrl}" alt="Logo" style="height:40px;max-width:140px;object-fit:contain;" /></div>`
-      : "";
-    const watermarkHtml = businessLogoUrl ? "" : '<div class="watermark">Gel Invent</div>';
+    const watermarkHtml = '<div class="watermark">Gel Invent</div>';
     const itemsHTML = salesSorted
       .map((sale) => {
         const product = productById.get(sale.product_id);
@@ -508,7 +499,6 @@ export default function Sales() {
       <body>
         ${watermarkHtml}
         <div class="header">
-          ${logoHtml}
           <div class="business-name">${businessName}</div>
           <div>Sales Receipt</div>
         </div>
@@ -1279,38 +1269,22 @@ export default function Sales() {
               position: "relative",
               textAlign: "center",
             }}>
-              {businessLogoUrl ? (
-                <img
-                  src={businessLogoUrl}
-                  alt="Business Logo"
-                  style={{
-                    width: 54,
-                    height: 54,
-                    borderRadius: "50%",
-                    objectFit: "cover",
-                    margin: "0 auto 10px",
-                    display: "block",
-                    border: "2px solid #ddd6fe",
-                  }}
-                />
-              ) : (
-                <div style={{
-                  width: 54,
-                  height: 54,
-                  borderRadius: "50%",
-                  border: "2px solid #ddd6fe",
-                  color: "#6366f1",
-                  margin: "0 auto 10px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontWeight: 700,
-                  fontSize: 22,
-                  lineHeight: 1,
-                }}>
-                  POS
-                </div>
-              )}
+              <div style={{
+                width: 54,
+                height: 54,
+                borderRadius: "50%",
+                border: "2px solid #ddd6fe",
+                color: "#6366f1",
+                margin: "0 auto 10px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: 700,
+                fontSize: 22,
+                lineHeight: 1,
+              }}>
+                POS
+              </div>
               <h2 style={{ fontSize: 28, fontWeight: 800, margin: 0, color: "#0f172a", lineHeight: 1.05 }}>
                 {businessName.toUpperCase()}
               </h2>

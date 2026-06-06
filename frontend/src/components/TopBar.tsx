@@ -7,7 +7,6 @@ type Props = {
   userName?: string;
   userRole?: string;
   businessName?: string;
-  businessLogoUrl?: string | null;
   isOnline?: boolean;
   outboxCount?: number;
   isSyncingOutbox?: boolean;
@@ -26,7 +25,6 @@ export default function TopBar({
   userName = "User",
   userRole = "Admin",
   businessName = "Gel Invent",
-  businessLogoUrl,
   isOnline = true,
   outboxCount = 0,
   isSyncingOutbox = false,
@@ -70,7 +68,6 @@ export default function TopBar({
   }, [showDropdown]);
 
   const businessLabel = String(businessName || "Gel Invent").trim();
-  const logoSrc = businessLogoUrl || null;
   const initial = userName.charAt(0).toUpperCase();
   const statusPillStyle = {
     display: "inline-flex",
@@ -135,40 +132,24 @@ export default function TopBar({
           gap: isMobile ? 8 : 12,
         }}
       >
-        {logoSrc ? (
-          <img
-            src={logoSrc}
-            alt={businessLabel}
-            style={{
-              width: isMobile ? 30 : 36,
-              height: isMobile ? 30 : 36,
-              borderRadius: 10,
-              objectFit: "cover",
-              background: "#fff",
-              boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
-              flexShrink: 0,
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              width: isMobile ? 30 : 36,
-              height: isMobile ? 30 : 36,
-              borderRadius: 10,
-              background: "#1e3a8a",
-              color: "#fff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 800,
-              fontSize: isMobile ? 14 : 17,
-              flexShrink: 0,
-              boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
-            }}
-          >
-            {businessLabel.charAt(0).toUpperCase()}
-          </div>
-        )}
+        <div
+          style={{
+            width: isMobile ? 30 : 36,
+            height: isMobile ? 30 : 36,
+            borderRadius: 10,
+            background: "#1e3a8a",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: 800,
+            fontSize: isMobile ? 14 : 17,
+            flexShrink: 0,
+            boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
+          }}
+        >
+          {businessLabel.charAt(0).toUpperCase()}
+        </div>
         <div style={{ minWidth: 0 }}>
           <h1
             style={{
