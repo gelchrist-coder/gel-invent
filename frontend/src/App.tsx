@@ -8,7 +8,7 @@ import { useAppCategories } from "./categories";
 import { updateMyCategories } from "./api";
 import { Branch, NewProduct, Product, ProductUpdate, Supplier } from "./types";
 import { useExpiryTracking } from "./settings";
-import { getEffectiveUserRole, hasUserPermission, readStoredUser } from "./user-storage";
+import { getDisplayBusinessLogoUrl, getDisplayBusinessName, getEffectiveUserRole, hasUserPermission, readStoredUser } from "./user-storage";
 
 const LAZY_IMPORT_RETRY_KEY = "gel-invent:lazy-import-retry";
 
@@ -161,7 +161,8 @@ export default function App() {
   const [sortBy, setSortBy] = useState("name_asc");
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [userName, setUserName] = useState(() => readStoredUser()?.name || "User");
-  const [businessName, setBusinessName] = useState(() => readStoredUser()?.business_name || "Business");
+  const [businessName, setBusinessName] = useState(() => getDisplayBusinessName());
+  const [businessLogoUrl, setBusinessLogoUrl] = useState(() => getDisplayBusinessLogoUrl());
   const [userRole, setUserRole] = useState(() => readStoredUser()?.role || "Admin");
   const [currentUserId, setCurrentUserId] = useState<number | null>(() => readStoredUser()?.id ?? null);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -321,6 +322,7 @@ export default function App() {
     localStorage.removeItem("activeBranchId");
     setUserName("User");
     setBusinessName("Business");
+    setBusinessLogoUrl(null);
     setUserRole("Admin");
     setCurrentUserId(null);
     setBranches([]);
@@ -361,7 +363,8 @@ export default function App() {
     if (initialUser) {
       setIsAuthenticated(true);
       setUserName(initialUser.name || "User");
-      setBusinessName(initialUser.business_name || "Business");
+      setBusinessName(getDisplayBusinessName(initialUser));
+      setBusinessLogoUrl(getDisplayBusinessLogoUrl(initialUser));
       setUserRole(initialUser.role || "Admin");
       setCurrentUserId(initialUser.id || null);
       if (!hasUserPermission("manage_branches", initialUser)) {
@@ -379,7 +382,8 @@ export default function App() {
           localStorage.setItem("user", JSON.stringify(me));
           setIsAuthenticated(true);
           setUserName(me.name || "User");
-          setBusinessName(me.business_name || "Business");
+          setBusinessName(getDisplayBusinessName(me));
+          setBusinessLogoUrl(getDisplayBusinessLogoUrl(me));
           setUserRole(getEffectiveUserRole(me));
           setCurrentUserId(me.id || null);
 
@@ -584,6 +588,12 @@ export default function App() {
   // Auto-refresh when another user signs in
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "businessInfo") {
+        setBusinessName(getDisplayBusinessName());
+        setBusinessLogoUrl(getDisplayBusinessLogoUrl());
+        return;
+      }
+
       // Detect when user data changes in localStorage
       if (e.key === "user" && e.newValue) {
         try {
@@ -592,7 +602,13 @@ export default function App() {
           if (newUser.id && newUser.id !== currentUserId) {
             console.log("Different user detected, refreshing...");
             window.location.reload();
+            return;
           }
+
+          setUserName(newUser.name || "User");
+          setBusinessName(getDisplayBusinessName(newUser));
+          setBusinessLogoUrl(getDisplayBusinessLogoUrl(newUser));
+          setUserRole(newUser.role || "Admin");
         } catch (error) {
           console.error("Error parsing user change:", error);
         }
@@ -623,11 +639,18 @@ export default function App() {
       }
 
       setUserName(nextUser.name || "User");
-      setBusinessName(nextUser.business_name || "Business");
+      setBusinessName(getDisplayBusinessName(nextUser));
+      setBusinessLogoUrl(getDisplayBusinessLogoUrl(nextUser));
       setUserRole(nextUser.role || "Admin");
     };
 
     window.addEventListener("userChanged", handleCustomUserChange as EventListener);
+
+    const handleBusinessInfoChange = () => {
+      setBusinessName(getDisplayBusinessName());
+      setBusinessLogoUrl(getDisplayBusinessLogoUrl());
+    };
+    window.addEventListener("businessInfoChanged", handleBusinessInfoChange as EventListener);
 
     const handleProductsUpdated = () => {
       fetchProductsCached((fresh) => setProducts(fresh)).catch(() => {});
@@ -637,6 +660,7 @@ export default function App() {
     return () => {
       window.removeEventListener("storage", handleStorageChange);
       window.removeEventListener("userChanged", handleCustomUserChange as EventListener);
+      window.removeEventListener("businessInfoChanged", handleBusinessInfoChange as EventListener);
       window.removeEventListener("productsUpdated", handleProductsUpdated);
     };
   }, [currentUserId]);
@@ -723,7 +747,8 @@ export default function App() {
     const user = readStoredUser();
     if (user) {
       setUserName(user.name || "User");
-      setBusinessName(user.business_name || "Business");
+      setBusinessName(getDisplayBusinessName(user));
+      setBusinessLogoUrl(getDisplayBusinessLogoUrl(user));
       setUserRole(user.role || "Admin");
       setCurrentUserId(user.id ?? null);
 
@@ -1285,6 +1310,7 @@ export default function App() {
         onLogout={handleLogout}
         userName={userName}
         businessName={businessName}
+        businessLogoUrl={businessLogoUrl}
         userRole={userRole}
         userPermissions={userPermissions}
         isOnline={isOnline}

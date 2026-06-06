@@ -702,10 +702,18 @@ def send_sale_receipt_email(
         )
 
     business_name = (current_user.business_name or "Gel Invent Business").strip()
+    logo_url = (getattr(current_user, "brandmark_url", None) or "").strip()
+    logo_html = (
+        f"<div style='margin-top:10px'><img src='{escape(logo_url)}' alt='Logo' style='height:48px;max-width:160px;object-fit:contain'></div>"
+        if logo_url
+        else ""
+    )
     watermark_html = (
         "<tr><td style='padding:0 24px'>"
         "<div style='font-size:32px;opacity:.08;letter-spacing:4px;text-align:center;margin:6px 0 -6px'>Gel Invent</div>"
         "</td></tr>"
+        if not logo_url
+        else ""
     )
     served_by = (current_user.name or "Owner").strip()
     receipt_datetime = sales_sorted[0].created_at.strftime("%Y-%m-%d %H:%M")
@@ -766,6 +774,7 @@ def send_sale_receipt_email(
             <tr>
                 <td style=\"padding:20px 24px;background:linear-gradient(120deg,#1f7aff,#2563eb);color:#ffffff\">
                     <div style=\"font-size:12px;letter-spacing:1px;opacity:.9\">OFFICIAL RECEIPT</div>
+                    {logo_html}
                     <div style=\"font-size:28px;font-weight:800;line-height:1.1;margin-top:6px\">{escape(business_name)}</div>
                     <div style=\"margin-top:8px;font-size:13px;opacity:.95\">Receipt #{escape(receipt_number)} • {escape(receipt_datetime)}</div>
                 </td>

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
+import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateMyBusinessProfile, updateSystemSettings } from "../api";
 import { Branch } from "../types";
-import { hasUserPermission, readStoredUser } from "../user-storage";
+import { hasUserPermission, normalizeBusinessLogoUrl, readStoredUser } from "../user-storage";
 
 type PasswordInputProps = {
   label: string;
@@ -67,6 +67,7 @@ export default function Profile() {
     address: "",
     taxId: "",
     currency: "GHS",
+    logoUrl: "",
   });
 
   const [userInfo, setUserInfo] = useState({
@@ -187,12 +188,41 @@ export default function Profile() {
     }
   }, [activeTab, canAccessSystemTab, canManageBusinessProfile]);
 
+  const previewLogoUrl = normalizeBusinessLogoUrl(businessInfo.logoUrl);
+
   const handleSave = async () => {
-    localStorage.setItem("businessInfo", JSON.stringify(businessInfo));
+    const normalizedLogoUrl = normalizeBusinessLogoUrl(businessInfo.logoUrl);
+    if (businessInfo.logoUrl.trim() && !normalizedLogoUrl) {
+      setDataMessage("Enter a valid business logo URL starting with http:// or https://.");
+      return;
+    }
+
+    const nextBusinessInfo = {
+      ...businessInfo,
+      name: businessInfo.name.trim() || "Gel Invent Business",
+      owner: businessInfo.owner.trim() || userInfo.name || "Admin User",
+      phone: businessInfo.phone.trim(),
+      email: businessInfo.email.trim(),
+      address: businessInfo.address.trim(),
+      taxId: businessInfo.taxId.trim(),
+      currency: (businessInfo.currency || "GHS").toUpperCase(),
+      logoUrl: normalizedLogoUrl || "",
+    };
+
+    if (canManageBusinessProfile) {
+      await updateMyBusinessProfile({
+        business_name: nextBusinessInfo.name,
+        brandmark_url: normalizedLogoUrl,
+      });
+    }
+
+    localStorage.setItem("businessInfo", JSON.stringify(nextBusinessInfo));
     localStorage.setItem("userInfo", JSON.stringify(userInfo));
+    window.dispatchEvent(new CustomEvent("businessInfoChanged", { detail: nextBusinessInfo }));
+    setBusinessInfo(nextBusinessInfo);
 
     if (canManageSettings) {
-      const selectedCurrency = (businessInfo.currency || "GHS").toUpperCase();
+      const selectedCurrency = nextBusinessInfo.currency;
       const previousCurrency = (systemSettings.currencyCode || "GHS").toUpperCase();
 
       const payload = {
@@ -228,9 +258,6 @@ export default function Profile() {
         autoBackup: updated.auto_backup,
         emailNotifications: updated.email_notifications,
       });
-
-      setBusinessInfo((prev) => ({ ...prev, currency: selectedCurrency }));
-      localStorage.setItem("businessInfo", JSON.stringify({ ...businessInfo, currency: selectedCurrency }));
 
       // Notify other components that settings have changed
       window.dispatchEvent(new CustomEvent("systemSettingsChanged", { detail: updated }));
@@ -660,6 +687,78 @@ export default function Profile() {
                   style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
                 />
               </label>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.9fr", gap: 16, alignItems: "start" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                  Business Logo URL
+                </span>
+                <input
+                  type="url"
+                  value={businessInfo.logoUrl}
+                  onChange={(e) => setBusinessInfo({ ...businessInfo, logoUrl: e.target.value })}
+                  disabled={!editing}
+                  className="input"
+                  placeholder="https://example.com/logo.png"
+                  style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
+                />
+                <span style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+                  Paste a direct image URL for the business logo. This replaces the old file upload flow.
+                </span>
+              </label>
+
+              <div
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 16,
+                  background: "#f8fafc",
+                  padding: 16,
+                  display: "grid",
+                  gap: 12,
+                  justifyItems: "center",
+                  minHeight: 160,
+                }}
+              >
+                {previewLogoUrl ? (
+                  <img
+                    src={previewLogoUrl}
+                    alt={businessInfo.name || "Business logo preview"}
+                    style={{
+                      width: 88,
+                      height: 88,
+                      objectFit: "contain",
+                      borderRadius: 18,
+                      background: "#ffffff",
+                      border: "1px solid #dbe4f0",
+                      padding: 10,
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: 88,
+                      height: 88,
+                      borderRadius: 18,
+                      background: "#1e3a8a",
+                      color: "#ffffff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 30,
+                      fontWeight: 800,
+                    }}
+                  >
+                    {(businessInfo.name || "B").trim().charAt(0).toUpperCase() || "B"}
+                  </div>
+                )}
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>Live Preview</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                    {previewLogoUrl ? "The app will use this image across the active business views." : "No logo URL set yet."}
+                  </div>
+                </div>
+              </div>
             </div>
 
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>

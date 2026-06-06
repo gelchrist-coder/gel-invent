@@ -348,6 +348,7 @@ export type AuthUser = {
   role: string;
   permissions?: string[] | null;
   business_name?: string | null;
+  brandmark_url?: string | null;
   business_types?: string[] | null;
   product_categories?: string[] | null;
   // Legacy compatibility alias for product_categories.
@@ -356,10 +357,25 @@ export type AuthUser = {
   is_active: boolean;
 };
 
+export type BusinessProfileUpdate = {
+  business_name?: string;
+  brandmark_url?: string | null;
+};
+
 export async function updateMyCategories(categories: string[]): Promise<AuthUser> {
   const updated = await jsonRequest<AuthUser>("/auth/me", {
     method: "PUT",
     body: JSON.stringify({ product_categories: categories, categories }),
+  });
+  localStorage.setItem("user", JSON.stringify(updated));
+  window.dispatchEvent(new CustomEvent("userChanged", { detail: updated }));
+  return updated;
+}
+
+export async function updateMyBusinessProfile(payload: BusinessProfileUpdate): Promise<AuthUser> {
+  const updated = await jsonRequest<AuthUser>("/auth/me", {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
   localStorage.setItem("user", JSON.stringify(updated));
   window.dispatchEvent(new CustomEvent("userChanged", { detail: updated }));

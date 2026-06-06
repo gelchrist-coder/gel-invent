@@ -80,6 +80,7 @@ class UserResponse(BaseModel):
     role: str
     permissions: list[str]
     business_name: Optional[str] = None
+    brandmark_url: Optional[str] = None
     business_types: Optional[list[str]] = None
     product_categories: Optional[list[str]] = None
     # Legacy compatibility alias for product_categories.
@@ -240,6 +241,7 @@ def _serialize_user(user: User, db: Session | None = None) -> UserResponse:
         role=get_effective_role_name(user),
         permissions=get_role_permissions(user),
         business_name=user.business_name,
+        brandmark_url=getattr(user, "brandmark_url", None),
         business_types=business_types,
         product_categories=product_categories,
         categories=product_categories,
@@ -250,6 +252,24 @@ def _serialize_user(user: User, db: Session | None = None) -> UserResponse:
 
 def _normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _normalize_brandmark_url(value: str | None) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    if len(raw) > 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Business logo URL is too long")
+
+    parsed = urllib.parse.urlparse(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Business logo URL must start with http:// or https://",
+        )
+
+    return raw
 
 
 class Token(BaseModel):
@@ -354,6 +374,8 @@ class DeleteAccountRequest(BaseModel):
 
 
 class UpdateMeRequest(BaseModel):
+    business_name: Optional[str] = None
+    brandmark_url: Optional[str] = None
     business_types: Optional[list[str]] = None
     product_categories: Optional[list[str]] = None
     # Legacy compatibility alias for product_categories.
@@ -516,19 +538,36 @@ def update_current_user_info(
 ):
     """Update current user's info.
 
-    Supports updating business types and product categories (Admin only).
+    Supports updating business name, logo URL, business types, and product categories (Admin only).
     """
-    next_product_categories = payload.product_categories if payload.product_categories is not None else payload.categories
-    if next_product_categories is None and payload.business_types is None:
+    payload_data = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
+    next_product_categories = payload_data.get("product_categories", payload_data.get("categories"))
+    should_update_categories = "product_categories" in payload_data or "categories" in payload_data
+
+    if (
+        "business_name" not in payload_data
+        and "brandmark_url" not in payload_data
+        and "business_types" not in payload_data
+        and not should_update_categories
+    ):
         return _serialize_user(current_user, db)
 
     ensure_permission(current_user, "manage_business_profile", "Only Admin can update business profile")
 
-    if payload.business_types is not None:
-        normalized_business_types = _normalize_business_types(payload.business_types)
+    if "business_name" in payload_data:
+        normalized_business_name = str(payload_data.get("business_name") or "").strip()
+        if not normalized_business_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Business name is required")
+        current_user.business_name = normalized_business_name
+
+    if "brandmark_url" in payload_data:
+        current_user.brandmark_url = _normalize_brandmark_url(payload_data.get("brandmark_url"))
+
+    if "business_types" in payload_data:
+        normalized_business_types = _normalize_business_types(payload_data.get("business_types"))
         current_user.business_types = json.dumps(normalized_business_types) if normalized_business_types else None
 
-    if next_product_categories is not None:
+    if should_update_categories:
         cleaned_product_categories = _clean_string_list(next_product_categories)
         serialized_categories = json.dumps(cleaned_product_categories) if cleaned_product_categories else None
         current_user.product_categories = serialized_categories

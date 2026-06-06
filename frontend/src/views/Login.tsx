@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { fetchWithSameOriginApiFallback, warmBackend } from "../api";
 import appLogo from "../asset/logo.png";
 import wareImage from "../asset/Ware.png";
+import { readStoredBusinessInfo, readStoredUser } from "../user-storage";
 
 function loadRecaptchaScript(): Promise<void> {
   if (typeof window === "undefined") {
@@ -47,6 +48,7 @@ type AuthResponse = {
     role?: string;
     permissions?: string[] | null;
     business_name?: string | null;
+    brandmark_url?: string | null;
     business_types?: string[] | null;
     product_categories?: string[] | null;
     categories?: string[] | null;
@@ -271,6 +273,8 @@ export default function Login({ onLogin }: LoginProps) {
     password: string,
     options?: CompleteAuthenticatedSessionOptions,
   ) => {
+    const previousUser = readStoredUser();
+    const existingBusinessInfo = readStoredBusinessInfo();
     localStorage.setItem("token", authData.access_token);
     localStorage.setItem("lastSuccessfulLoginAt", String(Date.now()));
 
@@ -279,18 +283,22 @@ export default function Login({ onLogin }: LoginProps) {
       localStorage.setItem("user", JSON.stringify(userData));
 
       if (userData?.business_name || userData?.name || userData?.email) {
+        const isSameUser = previousUser?.id != null && userData?.id != null && previousUser.id === userData.id;
+        const nextBusinessInfo = {
+          name: userData.business_name || formData.businessName,
+          owner: userData.name,
+          phone: isSameUser ? existingBusinessInfo?.phone || "" : "",
+          email: userData.email,
+          address: isSameUser ? existingBusinessInfo?.address || "" : "",
+          taxId: isSameUser ? existingBusinessInfo?.taxId || "" : "",
+          currency: isSameUser ? existingBusinessInfo?.currency || "GHS" : "GHS",
+          logoUrl: userData.brandmark_url || (isSameUser ? existingBusinessInfo?.logoUrl || "" : ""),
+        };
         localStorage.setItem(
           "businessInfo",
-          JSON.stringify({
-            name: userData.business_name || formData.businessName,
-            owner: userData.name,
-            phone: "",
-            email: userData.email,
-            address: "",
-            taxId: "",
-            currency: "GHS",
-          })
+          JSON.stringify(nextBusinessInfo)
         );
+        window.dispatchEvent(new CustomEvent("businessInfoChanged", { detail: nextBusinessInfo }));
       }
 
       window.dispatchEvent(new CustomEvent("userChanged", { detail: userData }));

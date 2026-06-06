@@ -109,6 +109,7 @@ export type StoredUser = {
   email?: string;
   phone?: string | null;
   business_name?: string;
+  brandmark_url?: string | null;
   business_types?: string[] | null;
   product_categories?: string[] | null;
   categories?: string[] | null;
@@ -117,7 +118,27 @@ export type StoredUser = {
   branch_id?: number | null;
 };
 
+export type StoredBusinessInfo = {
+  name?: string;
+  owner?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  taxId?: string;
+  currency?: string;
+  logoUrl?: string;
+};
+
 type PermissionAwareUser = Pick<StoredUser, "role" | "permissions"> | null | undefined;
+
+function readStoredString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
 
 function normalizeRole(role: string | null | undefined): EffectiveRole {
   const value = String(role || "").trim().toLowerCase();
@@ -190,4 +211,55 @@ export function readStoredUser(): StoredUser | null {
   } catch {
     return null;
   }
+}
+
+export function normalizeBusinessLogoUrl(value: unknown): string | null {
+  const rawValue = typeof value === "string" ? value.trim() : "";
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(rawValue);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+export function readStoredBusinessInfo(): StoredBusinessInfo | null {
+  const raw = localStorage.getItem("businessInfo");
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      name: readStoredString(parsed.name),
+      owner: readStoredString(parsed.owner),
+      phone: readStoredString(parsed.phone),
+      email: readStoredString(parsed.email),
+      address: readStoredString(parsed.address),
+      taxId: readStoredString(parsed.taxId),
+      currency: readStoredString(parsed.currency),
+      logoUrl: readStoredString(parsed.logoUrl),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function getDisplayBusinessName(user: StoredUser | null = readStoredUser()): string {
+  const businessInfo = readStoredBusinessInfo();
+  return businessInfo?.name || user?.business_name || "Business";
+}
+
+export function getDisplayBusinessLogoUrl(user: StoredUser | null = readStoredUser()): string | null {
+  const businessInfo = readStoredBusinessInfo();
+  return normalizeBusinessLogoUrl(businessInfo?.logoUrl) ?? normalizeBusinessLogoUrl(user?.brandmark_url);
 }

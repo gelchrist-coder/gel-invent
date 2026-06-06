@@ -12,6 +12,7 @@ interface BeforeInstallPromptEvent extends Event {
 declare global {
   interface WindowEventMap {
     userChanged: CustomEvent<unknown>;
+    businessInfoChanged: CustomEvent<unknown>;
     offlineOutboxChanged: Event;
     productsUpdated: Event;
     beforeinstallprompt: BeforeInstallPromptEvent;
