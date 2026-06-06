@@ -367,7 +367,30 @@ export async function updateMyCategories(categories: string[]): Promise<AuthUser
   return updated;
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+}
+
+async function readFileAsDataUrl(file: File): Promise<string> {
+  const contentType = file.type || "application/octet-stream";
+
+  if (typeof file.arrayBuffer === "function") {
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      return `data:${contentType};base64,${encodeBase64(bytes)}`;
+    } catch {
+      // Fall back to FileReader for browsers that expose File but fail arrayBuffer reads.
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -443,11 +466,18 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
   };
 
   const requestUpload = async () => {
-    const response = await requestBrandingUpload();
-    if (response.status === 404 || response.status === 405) {
-      return requestLegacyUpload();
+    try {
+      const response = await requestBrandingUpload();
+      if (response.status === 404 || response.status === 405) {
+        return requestLegacyUpload();
+      }
+      return response;
+    } catch (error) {
+      if (error instanceof Error && error.message === "Could not read logo file") {
+        return requestLegacyUpload();
+      }
+      throw error;
     }
-    return response;
   };
 
   let response: Response;
