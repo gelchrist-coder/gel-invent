@@ -372,11 +372,29 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
   const formData = new FormData();
   formData.append("logo", file);
 
-  const requestUpload = () => fetchWithSameOriginApiFallback("/auth/me/logo", {
+  const requestInit: RequestInit = {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: formData,
-  });
+  };
+
+  const requestUpload = async () => {
+    const shouldPreferSameOrigin = typeof window !== "undefined"
+      && isAbsoluteHttpUrl(API_BASE)
+      && normalizeBaseUrl(window.location.origin) !== normalizeBaseUrl(API_BASE);
+
+    if (shouldPreferSameOrigin) {
+      try {
+        return await fetch(buildApiUrl("/auth/me/logo", SAME_ORIGIN_API_BASE), requestInit);
+      } catch (error) {
+        if (!isTransportAccessError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    return fetchWithSameOriginApiFallback("/auth/me/logo", requestInit);
+  };
 
   let response: Response;
 
