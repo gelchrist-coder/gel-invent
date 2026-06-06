@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 
 
 load_dotenv(override=True)
@@ -133,10 +134,21 @@ def main(argv: list[str]) -> int:
     statements = _split_sql(sql)
 
     engine = create_engine(db_url, future=True, pool_pre_ping=True)
+    hostname = (urlparse(db_url).hostname or "").lower()
     try:
-        with engine.begin() as conn:
-            for stmt in statements:
-                conn.exec_driver_sql(stmt)
+        try:
+            with engine.begin() as conn:
+                for stmt in statements:
+                    conn.exec_driver_sql(stmt)
+        except OperationalError as exc:
+            message = str(exc)
+            if hostname.startswith("db.") and hostname.endswith(".supabase.co") and "could not translate host name" in message:
+                print(f"Could not resolve Supabase direct database host: {hostname}")
+                print("This machine likely needs the Supabase Session pooler connection string instead of the direct db.<project-ref>.supabase.co host.")
+                print("In Supabase, open Connect -> Session pooler, copy that Postgres URL into DATABASE_URL, then rerun this command.")
+                return 1
+            raise
+
         print(f"Applied migration: {path}")
         return 0
     finally:
