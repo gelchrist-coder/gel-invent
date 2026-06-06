@@ -7,7 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Form, File, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import or_
@@ -32,6 +32,7 @@ from app.utils.supabase_auth import (
 )
 from app.utils.email import send_email, smtp_configured
 from app.utils.phone import is_valid_phone, normalize_phone
+from app.utils.supabase_storage import is_supabase_storage_enabled, upload_public_logo
 from app.permissions import ensure_permission, get_effective_role_name, get_role_permissions, is_admin
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -572,6 +573,36 @@ def update_current_user_info(
         serialized_categories = json.dumps(cleaned_product_categories) if cleaned_product_categories else None
         current_user.product_categories = serialized_categories
         current_user.categories = serialized_categories
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    return _serialize_user(current_user, db)
+
+
+@router.post("/me/brandmark", response_model=UserResponse)
+async def upload_current_user_brandmark(
+    logo: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    ensure_permission(current_user, "manage_business_profile", "Only Admin can update business profile")
+
+    if not is_supabase_storage_enabled():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo upload is not configured")
+
+    if not (logo.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be an image")
+
+    logo_bytes = await logo.read()
+    if len(logo_bytes) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be under 2MB")
+
+    try:
+        logo_url = upload_public_logo(logo_bytes, logo.content_type, logo.filename)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    current_user.brandmark_url = logo_url
     db.add(current_user)
     db.commit()
     db.refresh(current_user)

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateMyBusinessProfile, updateSystemSettings } from "../api";
+import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateMyBusinessProfile, updateSystemSettings, uploadMyBusinessLogo } from "../api";
 import { Branch } from "../types";
 import { hasUserPermission, normalizeBusinessLogoUrl, readStoredUser } from "../user-storage";
 
@@ -67,7 +67,7 @@ export default function Profile() {
     address: "",
     taxId: "",
     currency: "GHS",
-    logoUrl: "",
+    logoUrl: currentUserData?.brandmark_url || "",
   });
 
   const [userInfo, setUserInfo] = useState({
@@ -102,6 +102,10 @@ export default function Profile() {
   const [importingData, setImportingData] = useState(false);
   const [clearingData, setClearingData] = useState(false);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
+  const [logoUploadFile, setLogoUploadFile] = useState<File | null>(null);
+  const [logoUploadPreviewUrl, setLogoUploadPreviewUrl] = useState<string | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Branch management state
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -141,6 +145,7 @@ export default function Profile() {
           owner: String(parsedUser.name ?? prev.owner),
           phone: prev.phone || String(parsedUser.phone ?? ""),
           email: String(parsedUser.email ?? prev.email),
+          logoUrl: String(parsedUser.brandmark_url ?? prev.logoUrl ?? ""),
         }));
       }
     } catch {
@@ -188,87 +193,141 @@ export default function Profile() {
     }
   }, [activeTab, canAccessSystemTab, canManageBusinessProfile]);
 
-  const previewLogoUrl = normalizeBusinessLogoUrl(businessInfo.logoUrl);
+  useEffect(() => {
+    if (!logoUploadFile) {
+      setLogoUploadPreviewUrl(null);
+      return undefined;
+    }
 
-  const handleSave = async () => {
-    const normalizedLogoUrl = normalizeBusinessLogoUrl(businessInfo.logoUrl);
-    if (businessInfo.logoUrl.trim() && !normalizedLogoUrl) {
-      setDataMessage("Enter a valid business logo URL starting with http:// or https://.");
+    const objectUrl = URL.createObjectURL(logoUploadFile);
+    setLogoUploadPreviewUrl(objectUrl);
+
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [logoUploadFile]);
+
+  const previewLogoUrl = logoUploadPreviewUrl || normalizeBusinessLogoUrl(businessInfo.logoUrl);
+
+  const resetSelectedLogoFile = () => {
+    setLogoUploadFile(null);
+    setLogoUploadPreviewUrl(null);
+    if (logoFileInputRef.current) {
+      logoFileInputRef.current.value = "";
+    }
+  };
+
+  const handleLogoSelected = (file: File | null) => {
+    if (!file) {
+      resetSelectedLogoFile();
       return;
     }
 
-    const nextBusinessInfo = {
-      ...businessInfo,
-      name: businessInfo.name.trim() || "Gel Invent Business",
-      owner: businessInfo.owner.trim() || userInfo.name || "Admin User",
-      phone: businessInfo.phone.trim(),
-      email: businessInfo.email.trim(),
-      address: businessInfo.address.trim(),
-      taxId: businessInfo.taxId.trim(),
-      currency: (businessInfo.currency || "GHS").toUpperCase(),
-      logoUrl: normalizedLogoUrl || "",
-    };
-
-    if (canManageBusinessProfile) {
-      await updateMyBusinessProfile({
-        business_name: nextBusinessInfo.name,
-        brandmark_url: normalizedLogoUrl,
-      });
+    if (!file.type.startsWith("image/")) {
+      setDataMessage("Business logo must be an image file.");
+      resetSelectedLogoFile();
+      return;
     }
 
-    localStorage.setItem("businessInfo", JSON.stringify(nextBusinessInfo));
-    localStorage.setItem("userInfo", JSON.stringify(userInfo));
-    window.dispatchEvent(new CustomEvent("businessInfoChanged", { detail: nextBusinessInfo }));
-    setBusinessInfo(nextBusinessInfo);
+    if (file.size > 2 * 1024 * 1024) {
+      setDataMessage("Business logo must be under 2MB.");
+      resetSelectedLogoFile();
+      return;
+    }
 
-    if (canManageSettings) {
-      const selectedCurrency = nextBusinessInfo.currency;
-      const previousCurrency = (systemSettings.currencyCode || "GHS").toUpperCase();
+    setDataMessage(null);
+    setLogoUploadFile(file);
+  };
 
-      const payload = {
-        low_stock_threshold: Number(systemSettings.lowStockThreshold) || 0,
-        expiry_warning_days: Number(systemSettings.expiryWarningDays) || 0,
-        uses_expiry_tracking: true,
-        currency_code: selectedCurrency,
-        auto_backup: systemSettings.autoBackup,
-        email_notifications: systemSettings.emailNotifications,
+  const handleSave = async () => {
+    setDataMessage(null);
+    setSavingProfile(true);
+
+    try {
+      let persistedLogoUrl = logoUploadFile ? null : normalizeBusinessLogoUrl(businessInfo.logoUrl);
+
+      if (logoUploadFile) {
+        const updatedUser = await uploadMyBusinessLogo(logoUploadFile);
+        persistedLogoUrl = normalizeBusinessLogoUrl(updatedUser.brandmark_url);
+      }
+
+      const nextBusinessInfo = {
+        ...businessInfo,
+        name: businessInfo.name.trim() || "Gel Invent Business",
+        owner: businessInfo.owner.trim() || userInfo.name || "Admin User",
+        phone: businessInfo.phone.trim(),
+        email: businessInfo.email.trim(),
+        address: businessInfo.address.trim(),
+        taxId: businessInfo.taxId.trim(),
+        currency: (businessInfo.currency || "GHS").toUpperCase(),
+        logoUrl: persistedLogoUrl || "",
       };
-      const updated = await updateSystemSettings(payload);
 
-      let conversionMessage = "";
-      if (selectedCurrency !== previousCurrency) {
-        const convertExisting = confirm(
-          `Convert existing prices and amounts from ${previousCurrency} to ${selectedCurrency} using live exchange rate?\n\nChoose OK to convert all existing records. Choose Cancel if you are just starting the business in ${selectedCurrency}.`
-        );
+      if (canManageBusinessProfile) {
+        await updateMyBusinessProfile({
+          business_name: nextBusinessInfo.name,
+          brandmark_url: persistedLogoUrl,
+        });
+      }
 
-        const result = await convertBusinessCurrency({
-          target_currency: selectedCurrency,
-          convert_existing: convertExisting,
+      localStorage.setItem("businessInfo", JSON.stringify(nextBusinessInfo));
+      localStorage.setItem("userInfo", JSON.stringify(userInfo));
+      window.dispatchEvent(new CustomEvent("businessInfoChanged", { detail: nextBusinessInfo }));
+      setBusinessInfo(nextBusinessInfo);
+      resetSelectedLogoFile();
+
+      if (canManageSettings) {
+        const selectedCurrency = nextBusinessInfo.currency;
+        const previousCurrency = (systemSettings.currencyCode || "GHS").toUpperCase();
+
+        const payload = {
+          low_stock_threshold: Number(systemSettings.lowStockThreshold) || 0,
+          expiry_warning_days: Number(systemSettings.expiryWarningDays) || 0,
+          uses_expiry_tracking: true,
+          currency_code: selectedCurrency,
+          auto_backup: systemSettings.autoBackup,
+          email_notifications: systemSettings.emailNotifications,
+        };
+        const updated = await updateSystemSettings(payload);
+
+        let conversionMessage = "";
+        if (selectedCurrency !== previousCurrency) {
+          const convertExisting = confirm(
+            `Convert existing prices and amounts from ${previousCurrency} to ${selectedCurrency} using live exchange rate?\n\nChoose OK to convert all existing records. Choose Cancel if you are just starting the business in ${selectedCurrency}.`
+          );
+
+          const result = await convertBusinessCurrency({
+            target_currency: selectedCurrency,
+            convert_existing: convertExisting,
+          });
+
+          conversionMessage = convertExisting
+            ? ` Currency converted using live rate ${result.previous_currency}->${result.currency_code} (${result.conversion_rate.toFixed(4)}).`
+            : ` Currency switched to ${result.currency_code} without converting existing records.`;
+        }
+
+        setSystemSettings({
+          lowStockThreshold: String(updated.low_stock_threshold),
+          expiryWarningDays: String(updated.expiry_warning_days),
+          currencyCode: String(updated.currency_code || selectedCurrency),
+          autoBackup: updated.auto_backup,
+          emailNotifications: updated.email_notifications,
         });
 
-        conversionMessage = convertExisting
-          ? ` Currency converted using live rate ${result.previous_currency}->${result.currency_code} (${result.conversion_rate.toFixed(4)}).`
-          : ` Currency switched to ${result.currency_code} without converting existing records.`;
+        window.dispatchEvent(new CustomEvent("systemSettingsChanged", { detail: updated }));
+        if (conversionMessage) {
+          setDataMessage(`Settings saved.${conversionMessage}`);
+        }
       }
 
-      setSystemSettings({
-        lowStockThreshold: String(updated.low_stock_threshold),
-        expiryWarningDays: String(updated.expiry_warning_days),
-        currencyCode: String(updated.currency_code || selectedCurrency),
-        autoBackup: updated.auto_backup,
-        emailNotifications: updated.email_notifications,
-      });
-
-      // Notify other components that settings have changed
-      window.dispatchEvent(new CustomEvent("systemSettingsChanged", { detail: updated }));
-      if (conversionMessage) {
-        setDataMessage(`Settings saved.${conversionMessage}`);
-      }
+      setEditing(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (error) {
+      setDataMessage(error instanceof Error ? error.message : "Failed to save profile");
+    } finally {
+      setSavingProfile(false);
     }
-
-    setEditing(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
   };
 
   const openChangePassword = () => {
@@ -514,20 +573,32 @@ export default function Profile() {
         style={{ display: "none" }}
         onChange={(e) => handleImportFileSelected(e.target.files?.[0] ?? null)}
       />
+      <input
+        ref={logoFileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={(e) => handleLogoSelected(e.target.files?.[0] ?? null)}
+      />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <h1 className="page-title" style={{ margin: 0 }}>Profile & Settings</h1>
         {editing ? (
           <div style={{ display: "flex", gap: 12 }}>
             <button
-              onClick={() => setEditing(false)}
+              onClick={() => {
+                resetSelectedLogoFile();
+                setEditing(false);
+              }}
+              disabled={savingProfile}
               style={{
                 padding: "10px 20px",
                 background: "transparent",
                 border: "1px solid #d1d5db",
                 borderRadius: 8,
-                cursor: "pointer",
+                cursor: savingProfile ? "not-allowed" : "pointer",
                 fontWeight: 600,
+                opacity: savingProfile ? 0.7 : 1,
               }}
             >
               Cancel
@@ -535,9 +606,14 @@ export default function Profile() {
             <button
               onClick={handleSave}
               className="button"
-              style={{ background: "#10b981" }}
+              disabled={savingProfile}
+              style={{
+                background: "#10b981",
+                opacity: savingProfile ? 0.7 : 1,
+                cursor: savingProfile ? "not-allowed" : "pointer",
+              }}
             >
-              Save Changes
+              {savingProfile ? (logoUploadFile ? "Uploading..." : "Saving...") : "Save Changes"}
             </button>
           </div>
         ) : (
@@ -690,23 +766,54 @@ export default function Profile() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.9fr", gap: 16, alignItems: "start" }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                  Business Logo URL
+                  Business Logo
                 </span>
-                <input
-                  type="url"
-                  value={businessInfo.logoUrl}
-                  onChange={(e) => setBusinessInfo({ ...businessInfo, logoUrl: e.target.value })}
-                  disabled={!editing}
-                  className="input"
-                  placeholder="https://example.com/logo.png"
-                  style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
-                />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => logoFileInputRef.current?.click()}
+                    disabled={!editing || savingProfile}
+                    className="button"
+                    style={{
+                      background: "#1f7aff",
+                      opacity: !editing || savingProfile ? 0.7 : 1,
+                      cursor: !editing || savingProfile ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {businessInfo.logoUrl || logoUploadFile ? "Replace Logo" : "Upload Logo"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetSelectedLogoFile();
+                      setBusinessInfo((prev) => ({ ...prev, logoUrl: "" }));
+                    }}
+                    disabled={!editing || savingProfile || (!businessInfo.logoUrl && !logoUploadFile)}
+                    style={{
+                      padding: "10px 16px",
+                      background: "transparent",
+                      border: "1px solid #d1d5db",
+                      borderRadius: 8,
+                      fontWeight: 600,
+                      color: "#475569",
+                      cursor: !editing || savingProfile || (!businessInfo.logoUrl && !logoUploadFile) ? "not-allowed" : "pointer",
+                      opacity: !editing || savingProfile || (!businessInfo.logoUrl && !logoUploadFile) ? 0.6 : 1,
+                    }}
+                  >
+                    Remove Logo
+                  </button>
+                </div>
                 <span style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
-                  Paste a direct image URL for the business logo. This replaces the old file upload flow.
+                  Upload a PNG, JPG, or WEBP image up to 2MB. Save changes to apply it across the app.
                 </span>
-              </label>
+                {logoUploadFile ? (
+                  <span style={{ fontSize: 12, color: "#0f172a", fontWeight: 600 }}>
+                    Selected file: {logoUploadFile.name}
+                  </span>
+                ) : null}
+              </div>
 
               <div
                 style={{
@@ -755,7 +862,7 @@ export default function Profile() {
                 <div style={{ textAlign: "center" }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>Live Preview</div>
                   <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
-                    {previewLogoUrl ? "The app will use this image across the active business views." : "No logo URL set yet."}
+                    {previewLogoUrl ? "The app will use this image across the active business views." : "No logo uploaded yet."}
                   </div>
                 </div>
               </div>

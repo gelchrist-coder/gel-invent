@@ -382,6 +382,64 @@ export async function updateMyBusinessProfile(payload: BusinessProfileUpdate): P
   return updated;
 }
 
+export async function uploadMyBusinessLogo(file: File): Promise<AuthUser> {
+  const requestUpload = () => {
+    const formData = new FormData();
+    formData.append("logo", file);
+
+    return fetchWithSameOriginApiFallback("/auth/me/brandmark", {
+      method: "POST",
+      headers: buildAuthHeaders(),
+      body: formData,
+    });
+  };
+
+  let response = await requestUpload();
+
+  if (response.status >= 500) {
+    const isReady = await warmBackend("/health/db", true, {
+      timeoutMs: COLD_START_WARM_TIMEOUT_MS,
+      probeTimeoutMs: COLD_START_WARM_PROBE_TIMEOUT_MS,
+      retryIntervalMs: COLD_START_WARM_RETRY_INTERVAL_MS,
+    });
+
+    if (!isReady) {
+      throw new Error("Logo upload is temporarily unavailable while the server starts up. Please try again in a moment.");
+    }
+
+    response = await requestUpload();
+  }
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
+      throw new Error("Not authenticated");
+    }
+
+    const body = await response.text();
+    let message = response.statusText || "Failed to upload logo";
+    try {
+      const parsed = body ? (JSON.parse(body) as Record<string, unknown>) : {};
+      const detail = parsed?.detail ?? parsed?.message;
+      if (typeof detail === "string" && detail.trim()) {
+        message = detail;
+      }
+    } catch {
+      if (body?.trim()) {
+        message = body;
+      }
+    }
+    throw new Error(message);
+  }
+
+  const updated = await response.json() as AuthUser;
+  localStorage.setItem("user", JSON.stringify(updated));
+  window.dispatchEvent(new CustomEvent("userChanged", { detail: updated }));
+  return updated;
+}
+
 export type SystemSettings = {
   capability_overrides: CapabilityOverrides;
   effective_capabilities: CapabilityMap;
