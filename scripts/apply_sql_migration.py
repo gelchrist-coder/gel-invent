@@ -147,6 +147,12 @@ def main(argv: list[str]) -> int:
                 print("This machine likely needs the Supabase Session pooler connection string instead of the direct db.<project-ref>.supabase.co host.")
                 print("In Supabase, open Connect -> Session pooler, copy that Postgres URL into DATABASE_URL, then rerun this command.")
                 return 1
+            if hostname.endswith(".pooler.supabase.com") and "password authentication failed" in message:
+                print(f"Supabase pooler authentication failed for host: {hostname}")
+                print("The pooler host is correct, but the credentials in DATABASE_URL do not match what Supabase expects.")
+                print("In Supabase, open Connect -> Session pooler and copy the full Postgres URL exactly as provided.")
+                print("Do not swap only the host; the pooler URL includes the required username format and the current database password.")
+                return 1
             raise
 
         print(f"Applied migration: {path}")
