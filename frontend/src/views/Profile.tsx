@@ -1,8 +1,39 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings, uploadBusinessLogo } from "../api";
+import { AuthUser, changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
 import { Branch } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
+
+type BrandingImageFormMessage = {
+  type: "branding-image-upload-result";
+  ok: boolean;
+  request_id?: string | null;
+  user?: AuthUser | null;
+  error?: string | null;
+};
+
+function isBrandingImageFormMessage(value: unknown): value is BrandingImageFormMessage {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return candidate.type === "branding-image-upload-result";
+}
+
+function readBrandingImageFormPayload(frame: HTMLIFrameElement | null): BrandingImageFormMessage | null {
+  try {
+    const rawPayload = frame?.contentDocument?.getElementById("branding-upload-result")?.textContent?.trim();
+    if (!rawPayload) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawPayload) as unknown;
+    return isBrandingImageFormMessage(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 type PasswordInputProps = {
   label: string;
@@ -104,7 +135,13 @@ export default function Profile() {
   const [dataMessage, setDataMessage] = useState<string | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
   const [logoError, setLogoError] = useState<string | null>(null);
+  const logoUploadFormRef = useRef<HTMLFormElement | null>(null);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const logoUploadTokenRef = useRef<HTMLInputElement | null>(null);
+  const logoUploadRequestIdRef = useRef<HTMLInputElement | null>(null);
+  const logoUploadFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const logoUploadPendingRequestIdRef = useRef<string | null>(null);
+  const logoUploadTimeoutRef = useRef<number | null>(null);
 
   // Branch management state
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -451,42 +488,125 @@ export default function Profile() {
     logoInputRef.current?.click();
   };
 
-  const handleLogoSelected = async (file: File | null) => {
+  const clearLogoUploadWait = () => {
+    if (logoUploadTimeoutRef.current != null) {
+      window.clearTimeout(logoUploadTimeoutRef.current);
+      logoUploadTimeoutRef.current = null;
+    }
+  };
+
+  const finishLogoUpload = (updated: AuthUser) => {
+    clearLogoUploadWait();
+    logoUploadPendingRequestIdRef.current = null;
+
+    const logoUrl = updated.business_logo_url || "";
+    setBusinessInfo((prev) => ({ ...prev, logo: logoUrl }));
+
+    const rawUser = localStorage.getItem("user");
+    const parsedUser = rawUser ? (JSON.parse(rawUser) as Record<string, unknown>) : {};
+    const nextUser = { ...parsedUser, ...updated, business_logo_url: logoUrl };
+    localStorage.setItem("user", JSON.stringify(nextUser));
+    window.dispatchEvent(new CustomEvent("userChanged", { detail: nextUser }));
+
+    const rawBusiness = localStorage.getItem("businessInfo");
+    const parsedBusiness = rawBusiness ? (JSON.parse(rawBusiness) as Record<string, unknown>) : {};
+    localStorage.setItem("businessInfo", JSON.stringify({ ...parsedBusiness, logo: logoUrl }));
+
+    setLogoUploading(false);
+    setLogoError(null);
+    setDataMessage("Logo updated.");
+    if (logoInputRef.current) {
+      logoInputRef.current.value = "";
+    }
+  };
+
+  const failLogoUpload = (message: string) => {
+    clearLogoUploadWait();
+    logoUploadPendingRequestIdRef.current = null;
+    setLogoUploading(false);
+    setLogoError(message);
+    if (logoInputRef.current) {
+      logoInputRef.current.value = "";
+    }
+  };
+
+  const handleLogoUploadFrameLoad = () => {
+    const pendingRequestId = logoUploadPendingRequestIdRef.current;
+    if (!pendingRequestId) {
+      return;
+    }
+
+    const payload = readBrandingImageFormPayload(logoUploadFrameRef.current);
+    if (!payload || payload.request_id !== pendingRequestId) {
+      return;
+    }
+
+    if (payload.ok && payload.user) {
+      finishLogoUpload(payload.user);
+      return;
+    }
+
+    failLogoUpload(payload.error || "Failed to update logo.");
+  };
+
+  const handleLogoSelected = (file: File | null) => {
     if (!file) return;
     setLogoError(null);
+    setDataMessage(null);
 
     if (!file.type.startsWith("image/")) {
       setLogoError("Logo must be an image file.");
+      if (logoInputRef.current) {
+        logoInputRef.current.value = "";
+      }
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
       setLogoError("Logo must be under 2MB.");
+      if (logoInputRef.current) {
+        logoInputRef.current.value = "";
+      }
       return;
     }
 
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setLogoError("Not authenticated.");
+      if (logoInputRef.current) {
+        logoInputRef.current.value = "";
+      }
+      return;
+    }
+
+    if (!logoUploadFormRef.current || !logoUploadTokenRef.current || !logoUploadRequestIdRef.current) {
+      setLogoError("Logo upload is not ready. Please refresh and try again.");
+      if (logoInputRef.current) {
+        logoInputRef.current.value = "";
+      }
+      return;
+    }
+
+    const requestId = `profile-logo-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    logoUploadPendingRequestIdRef.current = requestId;
+    logoUploadTokenRef.current.value = token;
+    logoUploadRequestIdRef.current.value = requestId;
+
+    clearLogoUploadWait();
+
     setLogoUploading(true);
     try {
-      const updated = await uploadBusinessLogo(file, { sourceInput: logoInputRef.current });
-      const logoUrl = updated.business_logo_url || "";
-      setBusinessInfo((prev) => ({ ...prev, logo: logoUrl }));
-
-      const rawUser = localStorage.getItem("user");
-      const parsedUser = rawUser ? (JSON.parse(rawUser) as Record<string, unknown>) : {};
-      const nextUser = { ...parsedUser, business_logo_url: logoUrl };
-      localStorage.setItem("user", JSON.stringify(nextUser));
-      window.dispatchEvent(new CustomEvent("userChanged", { detail: nextUser }));
-
-      const rawBusiness = localStorage.getItem("businessInfo");
-      const parsedBusiness = rawBusiness ? (JSON.parse(rawBusiness) as Record<string, unknown>) : {};
-      localStorage.setItem("businessInfo", JSON.stringify({ ...parsedBusiness, logo: logoUrl }));
-      setDataMessage("Logo updated.");
+      logoUploadTimeoutRef.current = window.setTimeout(() => {
+        failLogoUpload("Logo upload timed out. Please try again.");
+      }, 60000);
+      logoUploadFormRef.current.submit();
     } catch (error) {
-      setLogoError(error instanceof Error ? error.message : "Failed to update logo.");
-    } finally {
-      setLogoUploading(false);
-      if (logoInputRef.current) logoInputRef.current.value = "";
+      failLogoUpload(error instanceof Error ? error.message : "Failed to update logo.");
     }
   };
+
+  useEffect(() => () => {
+    clearLogoUploadWait();
+  }, []);
 
   const handleImportFileSelected = async (file: File | null) => {
     if (!file) return;
@@ -534,12 +654,30 @@ export default function Profile() {
         style={{ display: "none" }}
         onChange={(e) => handleImportFileSelected(e.target.files?.[0] ?? null)}
       />
-      <input
-        ref={logoInputRef}
-        type="file"
-        accept="image/*"
+      <form
+        ref={logoUploadFormRef}
+        action="/api/auth/me/branding-image-form"
+        method="POST"
+        encType="multipart/form-data"
+        target="profile-logo-upload-target"
         style={{ display: "none" }}
-        onChange={(e) => handleLogoSelected(e.target.files?.[0] ?? null)}
+      >
+        <input ref={logoUploadTokenRef} type="hidden" name="access_token" />
+        <input ref={logoUploadRequestIdRef} type="hidden" name="request_id" />
+        <input
+          ref={logoInputRef}
+          type="file"
+          name="logo"
+          accept="image/*"
+          onChange={(e) => handleLogoSelected(e.target.files?.[0] ?? null)}
+        />
+      </form>
+      <iframe
+        ref={logoUploadFrameRef}
+        name="profile-logo-upload-target"
+        title="Profile logo upload"
+        style={{ display: "none" }}
+        onLoad={handleLogoUploadFrameLoad}
       />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
