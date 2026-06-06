@@ -348,7 +348,6 @@ export type AuthUser = {
   role: string;
   permissions?: string[] | null;
   business_name?: string | null;
-  brandmark_url?: string | null;
   business_types?: string[] | null;
   product_categories?: string[] | null;
   // Legacy compatibility alias for product_categories.
@@ -359,7 +358,6 @@ export type AuthUser = {
 
 export type BusinessProfileUpdate = {
   business_name?: string;
-  brandmark_url?: string | null;
 };
 
 export async function updateMyCategories(categories: string[]): Promise<AuthUser> {

@@ -109,7 +109,6 @@ export type StoredUser = {
   email?: string;
   phone?: string | null;
   business_name?: string;
-  brandmark_url?: string | null;
   business_types?: string[] | null;
   product_categories?: string[] | null;
   categories?: string[] | null;

@@ -207,7 +207,6 @@ export default function Profile() {
       if (canManageBusinessProfile) {
         await updateMyBusinessProfile({
           business_name: nextBusinessInfo.name,
-          brandmark_url: null,
         });
       }
 
