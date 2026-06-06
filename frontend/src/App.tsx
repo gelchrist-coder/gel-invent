@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ErrorInfo, type ReactNode } from "react";
 
 import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, updateProduct, getCachedProducts, clearDataCache, isTemporaryServerDelayError, warmBackend } from "./api";
 import Layout from "./components/Layout";
@@ -10,18 +10,130 @@ import { Branch, NewProduct, Product, ProductUpdate, Supplier } from "./types";
 import { useExpiryTracking } from "./settings";
 import { getEffectiveUserRole, hasUserPermission, readStoredUser } from "./user-storage";
 
-const ProductForm = lazy(() => import("./components/ProductForm"));
-const ProductList = lazy(() => import("./components/ProductList"));
-const Creditors = lazy(() => import("./views/Creditors"));
-const Dashboard = lazy(() => import("./views/Dashboard"));
-const Inventory = lazy(() => import("./views/Inventory"));
-const Invoice = lazy(() => import("./views/Invoice"));
-const Login = lazy(() => import("./views/Login"));
-const Profile = lazy(() => import("./views/Profile"));
-const Reports = lazy(() => import("./views/Reports"));
-const RevenueAnalysis = lazy(() => import("./views/RevenueAnalysis"));
-const Sales = lazy(() => import("./views/Sales"));
-const UserManagement = lazy(() => import("./views/UserManagement"));
+const LAZY_IMPORT_RETRY_KEY = "gel-invent:lazy-import-retry";
+
+function isRecoverableLazyLoadError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("failed to fetch dynamically imported module")
+    || message.includes("importing a module script failed")
+    || message.includes("chunkloaderror")
+    || message.includes("loading chunk")
+    || message.includes("failed to load module script")
+  );
+}
+
+function lazyWithRetry<T extends ComponentType<object>>(
+  loader: () => Promise<{ default: T }>,
+) {
+  return lazy(async () => {
+    try {
+      const module = await loader();
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem(LAZY_IMPORT_RETRY_KEY);
+      }
+      return module;
+    } catch (error) {
+      if (typeof window !== "undefined" && isRecoverableLazyLoadError(error)) {
+        const alreadyRetried = sessionStorage.getItem(LAZY_IMPORT_RETRY_KEY) === "1";
+        if (!alreadyRetried) {
+          sessionStorage.setItem(LAZY_IMPORT_RETRY_KEY, "1");
+          window.location.reload();
+          return new Promise<never>(() => {});
+        }
+
+        sessionStorage.removeItem(LAZY_IMPORT_RETRY_KEY);
+      }
+
+      throw error;
+    }
+  });
+}
+
+type ViewErrorBoundaryProps = {
+  activeView: string;
+  onRetry: () => void;
+  onNavigate: (view: string) => void;
+  children: ReactNode;
+};
+
+type ViewErrorBoundaryState = {
+  errorMessage: string | null;
+};
+
+class ViewErrorBoundary extends Component<ViewErrorBoundaryProps, ViewErrorBoundaryState> {
+  state: ViewErrorBoundaryState = {
+    errorMessage: null,
+  };
+
+  static getDerivedStateFromError(error: unknown): ViewErrorBoundaryState {
+    return {
+      errorMessage: error instanceof Error
+        ? error.message
+        : "An unexpected error occurred while loading this view.",
+    };
+  }
+
+  componentDidCatch(error: unknown, errorInfo: ErrorInfo) {
+    if (import.meta.env.DEV) {
+      console.error(`View '${this.props.activeView}' crashed`, error, errorInfo);
+    }
+  }
+
+  render() {
+    if (!this.state.errorMessage) {
+      return this.props.children;
+    }
+
+    const isDashboardView = this.props.activeView === "dashboard";
+
+    return (
+      <div className="card" style={{ margin: 16, padding: 20, display: "grid", gap: 12 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#0f172a" }}>
+            {isDashboardView ? "Dashboard load interrupted" : "Page load interrupted"}
+          </h2>
+          <p style={{ margin: "6px 0 0", color: "#475569", lineHeight: 1.5 }}>
+            The current view hit an unexpected loading problem, but the rest of the app is still available.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button className="button" type="button" onClick={this.props.onRetry}>
+            Retry View
+          </button>
+          <button className="button secondary" type="button" onClick={() => this.props.onNavigate("profile")}>
+            Open Profile
+          </button>
+          <button className="button secondary" type="button" onClick={() => window.location.reload()}>
+            Reload App
+          </button>
+        </div>
+        {this.state.errorMessage ? (
+          <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>
+            Details: {this.state.errorMessage}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+}
+
+const ProductForm = lazyWithRetry(() => import("./components/ProductForm"));
+const ProductList = lazyWithRetry(() => import("./components/ProductList"));
+const Creditors = lazyWithRetry(() => import("./views/Creditors"));
+const Dashboard = lazyWithRetry(() => import("./views/Dashboard"));
+const Inventory = lazyWithRetry(() => import("./views/Inventory"));
+const Invoice = lazyWithRetry(() => import("./views/Invoice"));
+const Login = lazyWithRetry(() => import("./views/Login"));
+const Profile = lazyWithRetry(() => import("./views/Profile"));
+const Reports = lazyWithRetry(() => import("./views/Reports"));
+const RevenueAnalysis = lazyWithRetry(() => import("./views/RevenueAnalysis"));
+const Sales = lazyWithRetry(() => import("./views/Sales"));
+const UserManagement = lazyWithRetry(() => import("./views/UserManagement"));
 
 function LazyViewFallback() {
   return (
@@ -33,6 +145,7 @@ function LazyViewFallback() {
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("token"));
+  const [viewRetryNonce, setViewRetryNonce] = useState(0);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [outboxCount, setOutboxCount] = useState(() => getSalesOutboxCount());
   const [isSyncingOutbox, setIsSyncingOutbox] = useState(false);
@@ -636,6 +749,10 @@ export default function App() {
     logoutAndReset();
   };
 
+  const handleRetryCurrentView = useCallback(() => {
+    setViewRetryNonce((current) => current + 1);
+  }, []);
+
   const handleInstallApp = async () => {
     if (!installPromptEvent) return;
     await installPromptEvent.prompt();
@@ -1162,27 +1279,34 @@ export default function App() {
   };
 
   return (
-    <Layout
+    <ViewErrorBoundary
+      key={`${activeView}:${viewRetryNonce}`}
       activeView={activeView}
+      onRetry={handleRetryCurrentView}
       onNavigate={setActiveView}
-      onLogout={handleLogout}
-      userName={userName}
-      businessName={businessName}
-      businessLogoUrl={businessLogoUrl}
-      userRole={userRole}
-      userPermissions={userPermissions}
-      isOnline={isOnline}
-      outboxCount={outboxCount}
-      isSyncingOutbox={isSyncingOutbox}
-      canInstallApp={installPromptEvent !== null}
-      onInstallApp={handleInstallApp}
-      branches={branches}
-      activeBranchId={activeBranchId}
-      onChangeBranch={canManageBranches ? handleChangeBranch : undefined}
     >
-      <Suspense fallback={<LazyViewFallback />}>
-        {renderView(activeView)}
-      </Suspense>
-    </Layout>
+      <Layout
+        activeView={activeView}
+        onNavigate={setActiveView}
+        onLogout={handleLogout}
+        userName={userName}
+        businessName={businessName}
+        businessLogoUrl={businessLogoUrl}
+        userRole={userRole}
+        userPermissions={userPermissions}
+        isOnline={isOnline}
+        outboxCount={outboxCount}
+        isSyncingOutbox={isSyncingOutbox}
+        canInstallApp={installPromptEvent !== null}
+        onInstallApp={handleInstallApp}
+        branches={branches}
+        activeBranchId={activeBranchId}
+        onChangeBranch={canManageBranches ? handleChangeBranch : undefined}
+      >
+        <Suspense fallback={<LazyViewFallback />}>
+          {renderView(activeView)}
+        </Suspense>
+      </Layout>
+    </ViewErrorBoundary>
   );
 }
