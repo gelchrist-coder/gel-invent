@@ -1,6 +1,7 @@
 import base64
 import binascii
 from datetime import timedelta, datetime, timezone
+import html
 from typing import Optional
 import json
 import secrets
@@ -10,6 +11,8 @@ import urllib.parse
 import urllib.request
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Form
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, ValidationError
 from sqlalchemy import or_
@@ -22,6 +25,7 @@ from app.auth import (
     create_access_token,
     get_password_rule_error,
     get_password_hash,
+    get_current_user,
     verify_password,
     get_current_active_user,
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -266,6 +270,43 @@ async def _read_branding_image_request(request: Request) -> tuple[bytes, str | N
     filename_header = str(request.headers.get("x-upload-filename") or "").strip()
     filename = urllib.parse.unquote(filename_header) if filename_header else None
     return logo_bytes, content_type, filename
+
+
+def _render_branding_image_form_response(
+        *,
+        ok: bool,
+        request_id: str | None,
+        user: UserResponse | None = None,
+        error: str | None = None,
+) -> HTMLResponse:
+        payload = {
+                "type": "branding-image-upload-result",
+                "ok": ok,
+                "request_id": request_id or None,
+                "user": jsonable_encoder(user) if user is not None else None,
+                "error": error or None,
+        }
+        payload_json = json.dumps(payload).replace("</", "<\\/")
+        html_body = f"""<!doctype html>
+<html lang=\"en\">
+    <head>
+        <meta charset=\"utf-8\" />
+        <title>Branding Upload</title>
+    </head>
+    <body>
+        <script>
+            (function() {{
+                var payload = {payload_json};
+                if (window.parent && typeof window.parent.postMessage === 'function') {{
+                    window.parent.postMessage(payload, window.location.origin);
+                }}
+            }})();
+        </script>
+        <p>{html.escape(error or ("Upload complete" if ok else "Upload failed"))}</p>
+    </body>
+</html>
+"""
+        return HTMLResponse(content=html_body)
 
 
 def _store_business_logo(
@@ -683,6 +724,36 @@ async def upload_business_branding_image(
 ):
     logo_bytes, content_type, filename = await _read_branding_image_request(request)
     return _store_business_logo(current_user, db, logo_bytes, content_type, filename)
+
+
+@router.post("/me/branding-image-form", response_class=HTMLResponse)
+async def upload_business_branding_image_form(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    request_id = str(form.get("request_id") or "").strip() or None
+    access_token = str(form.get("access_token") or "").strip()
+
+    if not access_token:
+        return _render_branding_image_form_response(
+            ok=False,
+            request_id=request_id,
+            error="Authentication is required.",
+        )
+
+    try:
+        current_user = get_current_active_user(get_current_user(token=access_token, db=db))
+        logo_file = form.get("logo") or form.get("file") or form.get("branding_image")
+        if not isinstance(logo_file, (UploadFile, StarletteUploadFile)):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is missing")
+
+        logo_bytes = await logo_file.read()
+        user = _store_business_logo(current_user, db, logo_bytes, logo_file.content_type, logo_file.filename)
+        return _render_branding_image_form_response(ok=True, request_id=request_id, user=user)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else "Logo upload failed"
+        return _render_branding_image_form_response(ok=False, request_id=request_id, error=detail)
 
 
 

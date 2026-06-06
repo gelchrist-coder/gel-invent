@@ -357,6 +357,144 @@ export type AuthUser = {
   is_active: boolean;
 };
 
+type UploadBusinessLogoOptions = {
+  sourceInput?: HTMLInputElement | null;
+};
+
+type BrandingImageFormMessage = {
+  type: "branding-image-upload-result";
+  ok: boolean;
+  request_id?: string | null;
+  user?: AuthUser | null;
+  error?: string | null;
+};
+
+function isBrandingImageFormMessage(data: unknown): data is BrandingImageFormMessage {
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+
+  const candidate = data as Record<string, unknown>;
+  return candidate.type === "branding-image-upload-result";
+}
+
+async function uploadBusinessLogoViaNativeForm(sourceInput: HTMLInputElement): Promise<AuthUser> {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    throw new Error("Native logo upload is unavailable in this environment.");
+  }
+
+  const token = localStorage.getItem("token");
+  if (!token) {
+    throw new Error("Not authenticated");
+  }
+
+  if (!sourceInput.files || sourceInput.files.length === 0) {
+    throw new Error("Please choose a logo file.");
+  }
+
+  const originalParent = sourceInput.parentNode;
+  if (!originalParent) {
+    throw new Error("Unable to access the selected logo file.");
+  }
+
+  const originalNextSibling = sourceInput.nextSibling;
+  const originalName = sourceInput.name;
+  const requestId = `branding-upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const iframe = document.createElement("iframe");
+  iframe.name = `${requestId}-target`;
+  iframe.style.display = "none";
+
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.enctype = "multipart/form-data";
+  form.action = buildApiUrl("/auth/me/branding-image-form", SAME_ORIGIN_API_BASE);
+  form.target = iframe.name;
+  form.style.display = "none";
+
+  const tokenInput = document.createElement("input");
+  tokenInput.type = "hidden";
+  tokenInput.name = "access_token";
+  tokenInput.value = token;
+
+  const requestIdInput = document.createElement("input");
+  requestIdInput.type = "hidden";
+  requestIdInput.name = "request_id";
+  requestIdInput.value = requestId;
+
+  const restoreSourceInput = () => {
+    sourceInput.name = originalName;
+    if (sourceInput.parentNode !== form) {
+      return;
+    }
+
+    if (originalNextSibling && originalNextSibling.parentNode === originalParent) {
+      originalParent.insertBefore(sourceInput, originalNextSibling);
+      return;
+    }
+
+    originalParent.appendChild(sourceInput);
+  };
+
+  return await new Promise<AuthUser>((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener("message", handleMessage);
+      restoreSourceInput();
+      iframe.remove();
+      form.remove();
+    };
+
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      callback();
+    };
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+      if (!isBrandingImageFormMessage(event.data)) {
+        return;
+      }
+      if (event.data.request_id !== requestId) {
+        return;
+      }
+
+      if (event.data.ok && event.data.user) {
+        finish(() => resolve(event.data.user));
+        return;
+      }
+
+      finish(() => reject(new Error(event.data.error || "Failed to update logo.")));
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      finish(() => reject(new Error("Logo upload timed out. Please try again.")));
+    }, 60000);
+
+    window.addEventListener("message", handleMessage);
+
+    sourceInput.name = "logo";
+    form.appendChild(tokenInput);
+    form.appendChild(requestIdInput);
+    form.appendChild(sourceInput);
+    document.body.appendChild(iframe);
+    document.body.appendChild(form);
+
+    try {
+      form.submit();
+    } catch (error) {
+      finish(() => reject(error instanceof Error ? error : new Error("Failed to submit logo upload.")));
+    }
+  });
+}
+
 export async function updateMyCategories(categories: string[]): Promise<AuthUser> {
   const updated = await jsonRequest<AuthUser>("/auth/me", {
     method: "PUT",
@@ -408,7 +546,11 @@ async function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
+export async function uploadBusinessLogo(file: File, options?: UploadBusinessLogoOptions): Promise<AuthUser> {
+  if (options?.sourceInput) {
+    return uploadBusinessLogoViaNativeForm(options.sourceInput);
+  }
+
   const token = localStorage.getItem("token");
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
   const shouldPreferSameOrigin = typeof window !== "undefined"

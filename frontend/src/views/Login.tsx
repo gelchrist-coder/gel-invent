@@ -128,6 +128,7 @@ export default function Login({ onLogin }: LoginProps) {
     branches: [] as string[],
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
+  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
   const [branchInput, setBranchInput] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -690,7 +691,7 @@ export default function Login({ onLogin }: LoginProps) {
           beforeLogin: logoFile
             ? async () => {
               try {
-                const updatedUser = await uploadBusinessLogo(logoFile);
+                const updatedUser = await uploadBusinessLogo(logoFile, { sourceInput: logoFileInputRef.current });
                 const rawBusiness = localStorage.getItem("businessInfo");
                 const parsedBusiness = rawBusiness ? (JSON.parse(rawBusiness) as Record<string, unknown>) : {};
                 localStorage.setItem(
@@ -955,6 +956,7 @@ export default function Login({ onLogin }: LoginProps) {
                     Business Logo (optional)
                   </span>
                   <input
+                    ref={logoFileInputRef}
                     type="file"
                     accept="image/*"
                     onChange={(e) => {

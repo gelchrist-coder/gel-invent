@@ -466,7 +466,7 @@ export default function Profile() {
 
     setLogoUploading(true);
     try {
-      const updated = await uploadBusinessLogo(file);
+      const updated = await uploadBusinessLogo(file, { sourceInput: logoInputRef.current });
       const logoUrl = updated.business_logo_url || "";
       setBusinessInfo((prev) => ({ ...prev, logo: logoUrl }));
 
