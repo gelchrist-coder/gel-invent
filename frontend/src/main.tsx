@@ -13,7 +13,7 @@ if (typeof window !== "undefined" && navigator.onLine) {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    const swVersion = "20260606";
+    const swVersion = "20260606-2";
     const hadController = Boolean(navigator.serviceWorker.controller);
     let refreshing = false;
 

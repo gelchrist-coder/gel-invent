@@ -383,14 +383,41 @@ export async function updateMyBusinessProfile(payload: BusinessProfileUpdate): P
 }
 
 export async function uploadMyBusinessLogo(file: File): Promise<AuthUser> {
-  const requestUpload = () => {
+  const requestUploadToBase = (base?: string) => {
     const formData = new FormData();
     formData.append("logo", file);
+
+    return fetch(base ? buildApiUrl("/auth/me/brandmark", base) : buildApiUrl("/auth/me/brandmark"), {
+      method: "POST",
+      headers: buildAuthHeaders(),
+      body: formData,
+    });
+  };
+
+  const requestUpload = async () => {
+    if (canRetryViaSameOriginProxy()) {
+      try {
+        const proxyResponse = await requestUploadToBase(SAME_ORIGIN_API_BASE);
+        if (proxyResponse.status !== 404) {
+          return proxyResponse;
+        }
+      } catch (error) {
+        if (!isTransportAccessError(error)) {
+          throw error;
+        }
+      }
+
+      return requestUploadToBase(API_BASE);
+    }
 
     return fetchWithSameOriginApiFallback("/auth/me/brandmark", {
       method: "POST",
       headers: buildAuthHeaders(),
-      body: formData,
+      body: (() => {
+        const formData = new FormData();
+        formData.append("logo", file);
+        return formData;
+      })(),
     });
   };
 

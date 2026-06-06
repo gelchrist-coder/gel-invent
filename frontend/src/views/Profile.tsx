@@ -199,15 +199,34 @@ export default function Profile() {
       return undefined;
     }
 
-    const objectUrl = URL.createObjectURL(logoUploadFile);
-    setLogoUploadPreviewUrl(objectUrl);
+    const reader = new FileReader();
+    let cancelled = false;
+
+    reader.onload = () => {
+      if (!cancelled) {
+        setLogoUploadPreviewUrl(typeof reader.result === "string" ? reader.result : null);
+      }
+    };
+
+    reader.onerror = () => {
+      if (!cancelled) {
+        setLogoUploadPreviewUrl(null);
+      }
+    };
+
+    reader.readAsDataURL(logoUploadFile);
 
     return () => {
-      URL.revokeObjectURL(objectUrl);
+      cancelled = true;
+      if (reader.readyState === FileReader.LOADING) {
+        reader.abort();
+      }
     };
   }, [logoUploadFile]);
 
-  const previewLogoUrl = logoUploadPreviewUrl || normalizeBusinessLogoUrl(businessInfo.logoUrl);
+  const previewLogoUrl = logoUploadFile
+    ? logoUploadPreviewUrl
+    : normalizeBusinessLogoUrl(businessInfo.logoUrl);
 
   const resetSelectedLogoFile = () => {
     setLogoUploadFile(null);
