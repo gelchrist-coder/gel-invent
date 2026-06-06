@@ -6,7 +6,7 @@ import { getSalesOutboxCount } from "./offline/storage";
 import { syncSalesOutboxOnce } from "./offline/sync";
 import { useAppCategories } from "./categories";
 import { updateMyCategories } from "./api";
-import { Branch, NewProduct, Product, Supplier } from "./types";
+import { Branch, NewProduct, Product, ProductUpdate, Supplier } from "./types";
 import { useExpiryTracking } from "./settings";
 import { getEffectiveUserRole, hasUserPermission, readStoredUser } from "./user-storage";
 
@@ -705,7 +705,7 @@ export default function App() {
     setSelectedId(created.id);
   };
 
-  const handleEditProduct = async (id: number, updates: Partial<Product>) => {
+  const handleEditProduct = async (id: number, updates: ProductUpdate) => {
     const updated = await updateProduct(id, updates);
     setProducts((prev) => prev.map((p) => (p.id === id ? updated : p)));
   };

@@ -8,6 +8,7 @@ import {
   NewSupplier,
   NewSupplierPayment,
   Product,
+  ProductUpdate,
   Purchase,
   PurchaseOrder,
   PurchaseReturn,
@@ -1008,7 +1009,7 @@ export async function createMovement(
   return { ...data, change: Number(data.change) };
 }
 
-export async function updateProduct(id: number, updates: Partial<Product>): Promise<Product> {
+export async function updateProduct(id: number, updates: ProductUpdate): Promise<Product> {
   const result = await jsonRequest<ProductResponse>(`/products/${id}`, {
     method: "PATCH",
     body: JSON.stringify(updates),

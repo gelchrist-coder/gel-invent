@@ -111,6 +111,11 @@ export type NewProduct = {
   unit_conversions?: NewProductUnitConversion[];
 };
 
+export type ProductUpdate = Partial<Omit<Product, "variants" | "unit_conversions">> & {
+  variants?: NewProductVariant[];
+  unit_conversions?: NewProductUnitConversion[];
+};
+
 export type NewMovement = {
   change: number;
   reason?: string;

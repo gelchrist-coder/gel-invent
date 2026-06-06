@@ -1,16 +1,80 @@
 import { useEffect, useState } from "react";
-import { Product } from "../types";
+import { NewProductUnitConversion, NewProductVariant, Product, ProductUpdate } from "../types";
 import { updateMyCategories } from "../api";
 import { useAppCategories } from "../categories";
 import { getProductBatchSummary, getProductSearchText, getProductUnitConversionSummary, getProductVariantSummary } from "../product-display";
 import { useCapabilities, useExpiryTracking, useSystemSettings } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
+type VariantDraft = {
+  label: string;
+  attributesText: string;
+  isActive: boolean;
+};
+
+type UnitConversionDraft = {
+  unit_name: string;
+  base_quantity: string;
+  is_sale_unit: boolean;
+  is_purchase_unit: boolean;
+};
+
+const cleanOptionalText = (value: string | null | undefined): string | undefined => {
+  const normalized = (value ?? "").trim();
+  return normalized || undefined;
+};
+
+const createVariantDraft = (): VariantDraft => ({
+  label: "",
+  attributesText: "",
+  isActive: true,
+});
+
+const createUnitConversionDraft = (): UnitConversionDraft => ({
+  unit_name: "",
+  base_quantity: "",
+  is_sale_unit: true,
+  is_purchase_unit: false,
+});
+
+const formatVariantAttributes = (attributes: Record<string, unknown> | null | undefined): string =>
+  Object.entries(attributes ?? {})
+    .map(([key, value]) => `${key}:${String(value ?? "")}`)
+    .join(", ");
+
+const parseVariantAttributes = (value: string): { attributes: Record<string, string>; invalidTokens: string[] } => {
+  const attributes: Record<string, string> = {};
+  const invalidTokens: string[] = [];
+  const tokens = value
+    .split(/\n|,/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  tokens.forEach((token) => {
+    const separatorIndex = token.includes(":") ? token.indexOf(":") : token.indexOf("=");
+    if (separatorIndex <= 0) {
+      invalidTokens.push(token);
+      return;
+    }
+
+    const rawKey = token.slice(0, separatorIndex).trim();
+    const rawValue = token.slice(separatorIndex + 1).trim();
+    if (!rawKey || !rawValue) {
+      invalidTokens.push(token);
+      return;
+    }
+
+    attributes[rawKey] = rawValue;
+  });
+
+  return { attributes, invalidTokens };
+};
+
 type Props = {
   products: Product[];
   selectedId: number | null;
   onSelect: (id: number) => void;
-  onEdit: (id: number, updates: Partial<Product>) => Promise<void>;
+  onEdit: (id: number, updates: ProductUpdate) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
   searchTerm: string;
   filterCategory: string;
@@ -49,11 +113,15 @@ export default function ProductList({
   const effectiveFilterExpiry = showExpiryStatusFilter ? filterExpiry : "all";
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
+  const [variantDrafts, setVariantDrafts] = useState<VariantDraft[]>([]);
+  const [unitConversionDrafts, setUnitConversionDrafts] = useState<UnitConversionDraft[]>([]);
   const [stockData, setStockData] = useState<Record<number, number>>({});
   const [expiryByProduct, setExpiryByProduct] = useState<Record<number, string | null>>({});
   const [busy, setBusy] = useState(false);
   const [isCompactLayout, setIsCompactLayout] = useState(() => window.innerWidth < 980);
   const editingProduct = products.find((product) => product.id === editingId) ?? null;
+  const showVariantEditor = capabilities.variants || Boolean(editingProduct?.variants?.length);
+  const showUnitConversionEditor = capabilities.unit_conversions || Boolean(editingProduct?.unit_conversions?.length);
 
   useEffect(() => {
     const onResize = () => setIsCompactLayout(window.innerWidth < 980);
@@ -95,6 +163,7 @@ export default function ProductList({
       size: product.size,
       color: product.color,
       shade: product.shade,
+      pack_size: product.pack_size,
       category: product.category,
       supplier: product.supplier,
       expiry_date: product.expiry_date,
@@ -103,11 +172,32 @@ export default function ProductList({
       selling_price: product.selling_price,
       pack_selling_price: product.pack_selling_price,
     });
+    setVariantDrafts(
+      product.variants?.length
+        ? product.variants.map((variant) => ({
+            label: variant.label,
+            attributesText: formatVariantAttributes(variant.attributes_json),
+            isActive: variant.is_active,
+          }))
+        : [],
+    );
+    setUnitConversionDrafts(
+      product.unit_conversions?.length
+        ? product.unit_conversions.map((conversion) => ({
+            unit_name: conversion.unit_name,
+            base_quantity: String(conversion.base_quantity ?? ""),
+            is_sale_unit: conversion.is_sale_unit,
+            is_purchase_unit: conversion.is_purchase_unit,
+          }))
+        : [],
+    );
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setEditForm({});
+    setVariantDrafts([]);
+    setUnitConversionDrafts([]);
   };
 
   const saveEdit = async (id: number) => {
@@ -119,23 +209,100 @@ export default function ProductList({
       alert("SKU is required");
       return;
     }
+
+    let preparedVariants: NewProductVariant[];
+    let preparedUnitConversions: NewProductUnitConversion[];
+    try {
+      preparedVariants = variantDrafts.reduce<NewProductVariant[]>((items, draft, index) => {
+        const label = cleanOptionalText(draft.label);
+        const rawAttributes = draft.attributesText.trim();
+
+        if (!label && !rawAttributes) {
+          return items;
+        }
+
+        if (!label) {
+          throw new Error("Each product variant row needs a label.");
+        }
+
+        const { attributes, invalidTokens } = parseVariantAttributes(rawAttributes);
+        if (invalidTokens.length > 0) {
+          throw new Error("Variant attributes must use key:value or key=value format.");
+        }
+
+        items.push({
+          label,
+          attributes_json: attributes,
+          is_active: draft.isActive,
+          sort_order: index,
+        });
+        return items;
+      }, []);
+
+      preparedUnitConversions = unitConversionDrafts.reduce<NewProductUnitConversion[]>((items, draft, index) => {
+        const unitName = cleanOptionalText(draft.unit_name);
+        const rawBaseQuantity = draft.base_quantity.trim();
+
+        if (!unitName && !rawBaseQuantity) {
+          return items;
+        }
+
+        const baseQuantity = Number.parseFloat(rawBaseQuantity);
+        if (!unitName || !Number.isFinite(baseQuantity) || baseQuantity <= 0) {
+          throw new Error("Each unit conversion needs a unit name and a positive base quantity.");
+        }
+
+        items.push({
+          unit_name: unitName,
+          base_quantity: baseQuantity,
+          is_sale_unit: draft.is_sale_unit,
+          is_purchase_unit: draft.is_purchase_unit,
+          sort_order: index,
+        });
+        return items;
+      }, []);
+    } catch (err) {
+      alert((err as Error).message || "Failed to prepare product update");
+      return;
+    }
+
     setBusy(true);
     try {
-          const selectedCategory = (editForm.category ?? "").trim();
-          if (selectedCategory) {
-            const exists = categoryOptions.some((c) => c.toLowerCase() === selectedCategory.toLowerCase());
-            if (!exists) {
-              try {
-                await updateMyCategories([...categoryOptions, selectedCategory]);
-              } catch {
-                // Don't block product edits if categories can't be persisted.
-              }
-            }
+      const selectedCategory = (editForm.category ?? "").trim();
+      if (selectedCategory) {
+        const exists = categoryOptions.some((c) => c.toLowerCase() === selectedCategory.toLowerCase());
+        if (!exists) {
+          try {
+            await updateMyCategories([...categoryOptions, selectedCategory]);
+          } catch {
+            // Don't block product edits if categories can't be persisted.
           }
+        }
+      }
 
-      await onEdit(id, editForm);
+      const updates: ProductUpdate = {
+        ...editForm,
+        unit: cleanOptionalText(editForm.unit) ?? editingProduct?.unit,
+        description: cleanOptionalText(editForm.description) ?? null,
+        variant_group: cleanOptionalText(editForm.variant_group) ?? null,
+        variant_label: cleanOptionalText(editForm.variant_label) ?? null,
+        brand: cleanOptionalText(editForm.brand) ?? null,
+        size: cleanOptionalText(editForm.size) ?? null,
+        color: cleanOptionalText(editForm.color) ?? null,
+        shade: cleanOptionalText(editForm.shade) ?? null,
+        category: cleanOptionalText(editForm.category) ?? null,
+        supplier: cleanOptionalText(editForm.supplier) ?? null,
+        expiry_date: editForm.expiry_date || null,
+        pack_size: editForm.pack_size ?? null,
+        variants: preparedVariants,
+        unit_conversions: preparedUnitConversions,
+      };
+
+      await onEdit(id, updates);
       setEditingId(null);
       setEditForm({});
+      setVariantDrafts([]);
+      setUnitConversionDrafts([]);
     } catch (err) {
       alert((err as Error).message || "Failed to update product");
     } finally {
@@ -278,7 +445,7 @@ export default function ProductList({
               background: "white",
               borderRadius: 12,
               padding: 24,
-              maxWidth: 500,
+              maxWidth: 680,
               width: "100%",
               maxHeight: "90vh",
               overflowY: "auto",
@@ -503,7 +670,7 @@ export default function ProductList({
                   />
                 </label>
               </div>
-              {editForm.unit !== "pcs" && editForm.unit !== "unit" && products.find(p => p.id === editingId)?.pack_size && (
+              {editForm.unit !== "pcs" && editForm.unit !== "unit" && editingProduct?.pack_size && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <label>
                     <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
@@ -520,7 +687,7 @@ export default function ProductList({
                       style={{ fontSize: 14, padding: 10 }}
                     />
                     <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
-                      Cost per {editForm.unit} ({products.find(p => p.id === editingId)?.pack_size} pieces)
+                      Cost per {editForm.unit} ({editingProduct.pack_size} pieces)
                     </small>
                   </label>
                   <label>
@@ -538,7 +705,7 @@ export default function ProductList({
                       style={{ fontSize: 14, padding: 10 }}
                     />
                     <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
-                      Selling price per {editForm.unit} ({products.find(p => p.id === editingId)?.pack_size} pieces)
+                      Selling price per {editForm.unit} ({editingProduct.pack_size} pieces)
                     </small>
                   </label>
                 </div>
@@ -547,7 +714,7 @@ export default function ProductList({
                 style={{
                   display: "grid",
                   gridTemplateColumns:
-                    usesExpiryTracking && !!products.find((p) => p.id === editingId)?.expiry_date
+                    usesExpiryTracking && !!editingProduct?.expiry_date
                       ? "1fr 1fr"
                       : "1fr",
                   gap: 12,
@@ -566,7 +733,7 @@ export default function ProductList({
                     style={{ fontSize: 14, padding: 10 }}
                   />
                 </label>
-                {usesExpiryTracking && !!products.find((p) => p.id === editingId)?.expiry_date && (
+                {usesExpiryTracking && !!editingProduct?.expiry_date && (
                 <label>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Expiry Date
@@ -581,6 +748,171 @@ export default function ProductList({
                 </label>
                 )}
               </div>
+              <label>
+                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                  Pack Size
+                </span>
+                <input
+                  className="input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={editForm.pack_size ?? ""}
+                  onChange={(e) => setEditForm({ ...editForm, pack_size: e.target.value ? parseInt(e.target.value, 10) : null })}
+                  placeholder="Units per pack/carton"
+                  style={{ fontSize: 14, padding: 10 }}
+                />
+                <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
+                  Keep using pack size for legacy pack pricing while unit conversions stay additive.
+                </small>
+              </label>
+              {showUnitConversionEditor ? (
+                <div style={{ border: "1px solid #dbe5f2", borderRadius: 10, padding: 12, background: "#f8fafc" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#1f2937" }}>Units</div>
+                      <div style={{ fontSize: 12, color: "#64748b" }}>Define extra sale or purchase units in base {editForm.unit || editingProduct?.unit || "unit"} quantities.</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setUnitConversionDrafts((previous) => [...previous, createUnitConversionDraft()])}
+                      style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "white", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+                    >
+                      Add Unit
+                    </button>
+                  </div>
+                  {unitConversionDrafts.length === 0 ? (
+                    <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>No extra unit conversions yet.</p>
+                  ) : (
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {unitConversionDrafts.map((draft, index) => (
+                        <div key={`unit-conversion-${index}`} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#ffffff" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, alignItems: "end" }}>
+                            <label>
+                              <span style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}>Unit Name</span>
+                              <input
+                                className="input"
+                                type="text"
+                                value={draft.unit_name}
+                                onChange={(e) => setUnitConversionDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, unit_name: e.target.value } : entry))}
+                                placeholder="e.g. carton, box, dozen"
+                                style={{ fontSize: 13, padding: 9 }}
+                              />
+                            </label>
+                            <label>
+                              <span style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}>Base Quantity</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min="0.01"
+                                step="0.01"
+                                value={draft.base_quantity}
+                                onChange={(e) => setUnitConversionDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, base_quantity: e.target.value } : entry))}
+                                placeholder="12"
+                                style={{ fontSize: 13, padding: 9 }}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setUnitConversionDrafts((previous) => previous.filter((_, entryIndex) => entryIndex !== index))}
+                              style={{ padding: "9px 10px", borderRadius: 8, border: "1px solid #fecdd3", background: "#fff1f2", color: "#be123c", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#475569" }}>
+                              <input
+                                type="checkbox"
+                                checked={draft.is_sale_unit}
+                                onChange={(e) => setUnitConversionDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, is_sale_unit: e.target.checked } : entry))}
+                              />
+                              Sale unit
+                            </label>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#475569" }}>
+                              <input
+                                type="checkbox"
+                                checked={draft.is_purchase_unit}
+                                onChange={(e) => setUnitConversionDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, is_purchase_unit: e.target.checked } : entry))}
+                              />
+                              Purchase unit
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+              {showVariantEditor ? (
+                <div style={{ border: "1px solid #dbe5f2", borderRadius: 10, padding: 12, background: "#f8fafc" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#1f2937" }}>Variants</div>
+                      <div style={{ fontSize: 12, color: "#64748b" }}>Manage sellable variant options and optional JSON-style attributes.</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setVariantDrafts((previous) => [...previous, createVariantDraft()])}
+                      style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "white", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+                    >
+                      Add Variant
+                    </button>
+                  </div>
+                  {variantDrafts.length === 0 ? (
+                    <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>No additive variants defined.</p>
+                  ) : (
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {variantDrafts.map((draft, index) => (
+                        <div key={`variant-${index}`} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#ffffff" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
+                            <label>
+                              <span style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}>Label</span>
+                              <input
+                                className="input"
+                                type="text"
+                                value={draft.label}
+                                onChange={(e) => setVariantDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, label: e.target.value } : entry))}
+                                placeholder="e.g. Red / XL, 500ml"
+                                style={{ fontSize: 13, padding: 9 }}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setVariantDrafts((previous) => previous.filter((_, entryIndex) => entryIndex !== index))}
+                              style={{ padding: "9px 10px", borderRadius: 8, border: "1px solid #fecdd3", background: "#fff1f2", color: "#be123c", cursor: "pointer", fontSize: 12, fontWeight: 700 }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <label style={{ display: "block", marginTop: 10 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, display: "block" }}>Attributes</span>
+                            <textarea
+                              className="input"
+                              value={draft.attributesText}
+                              onChange={(e) => setVariantDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, attributesText: e.target.value } : entry))}
+                              placeholder="size:XL, color:Red"
+                              rows={2}
+                              style={{ fontSize: 13, padding: 9, resize: "vertical" }}
+                            />
+                            <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
+                              Use key:value or key=value pairs separated by commas.
+                            </small>
+                          </label>
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 12, color: "#475569" }}>
+                            <input
+                              type="checkbox"
+                              checked={draft.isActive}
+                              onChange={(e) => setVariantDrafts((previous) => previous.map((entry, entryIndex) => entryIndex === index ? { ...entry, isActive: e.target.checked } : entry))}
+                            />
+                            Active for sales
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <button
                   className="button"
