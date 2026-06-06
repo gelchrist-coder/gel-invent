@@ -1,5 +1,5 @@
-const SHELL_CACHE = "gel-invent-shell-v4";
-const ASSET_CACHE = "gel-invent-assets-v4";
+const SHELL_CACHE = "gel-invent-shell-v5";
+const ASSET_CACHE = "gel-invent-assets-v5";
 const APP_SHELL_URLS = [
   "/offline.html",
   "/manifest.webmanifest",
@@ -86,11 +86,6 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirst(request));
-    return;
-  }
-
-  if (["script", "style"].includes(request.destination)) {
     event.respondWith(networkFirst(request));
     return;
   }
