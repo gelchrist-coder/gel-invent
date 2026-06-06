@@ -24,9 +24,18 @@ function normalizeBaseUrl(url: string): string {
 }
 
 const PLACEHOLDER_API_URL = "https://your-backend.vercel.app";
+const SAME_ORIGIN_API_BASE = "/api";
+
+function isAbsoluteHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
 
 function hasConfiguredApiBase(url: string): boolean {
   return url.length > 0 && url !== PLACEHOLDER_API_URL;
+}
+
+function normalizeApiPath(path: string): string {
+  return path.startsWith("/") ? path : `/${path}`;
 }
 
 function resolveApiBaseUrl(): string {
@@ -43,6 +52,42 @@ function resolveApiBaseUrl(): string {
 
 // API base URL (configure via VITE_API_URL on Vercel/Netlify/etc)
 const API_BASE = normalizeBaseUrl(resolveApiBaseUrl());
+
+export function buildApiUrl(path: string, base: string = API_BASE): string {
+  return `${normalizeBaseUrl(base)}${normalizeApiPath(path)}`;
+}
+
+function canRetryViaSameOriginProxy(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  if (!isAbsoluteHttpUrl(API_BASE)) {
+    return false;
+  }
+
+  return normalizeBaseUrl(window.location.origin) !== normalizeBaseUrl(API_BASE);
+}
+
+function isTransportAccessError(error: unknown): boolean {
+  if (error instanceof TypeError) {
+    return true;
+  }
+
+  return error instanceof Error && /failed to fetch|networkerror|access_denied|err_access_denied/i.test(error.message);
+}
+
+export async function fetchWithSameOriginApiFallback(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(buildApiUrl(path), init);
+  } catch (error) {
+    if (!canRetryViaSameOriginProxy() || !isTransportAccessError(error)) {
+      throw error;
+    }
+
+    return fetch(buildApiUrl(path, SAME_ORIGIN_API_BASE), init);
+  }
+}
 
 // Export for use in other components
 export { API_BASE };

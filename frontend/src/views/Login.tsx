@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { API_BASE, warmBackend } from "../api";
+import { fetchWithSameOriginApiFallback, warmBackend } from "../api";
 import appLogo from "../asset/logo.png";
 import wareImage from "../asset/Ware.png";
 
@@ -290,7 +290,7 @@ export default function Login({ onLogin }: LoginProps) {
       window.dispatchEvent(new CustomEvent("userChanged", { detail: userData }));
     } else {
       // Fallback: fetch user data separately if not included in auth response
-      const userResponse = await fetch(`${API_BASE}/auth/me`, {
+      const userResponse = await fetchWithSameOriginApiFallback("/auth/me", {
         headers: { Authorization: `Bearer ${authData.access_token}` },
       });
       if (userResponse.ok) {
@@ -320,7 +320,7 @@ export default function Login({ onLogin }: LoginProps) {
     const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      return await fetch(`${API_BASE}/auth/login`, {
+      return await fetchWithSameOriginApiFallback("/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: loginFormData,
@@ -477,7 +477,7 @@ export default function Login({ onLogin }: LoginProps) {
       return false;
     }
 
-    const res = await fetch(`${API_BASE}/auth/password-reset/request`, {
+    const res = await fetchWithSameOriginApiFallback("/auth/password-reset/request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
@@ -545,7 +545,7 @@ export default function Login({ onLogin }: LoginProps) {
           return;
         }
 
-        const confirmRes = await fetch(`${API_BASE}/auth/password-reset/confirm`, {
+        const confirmRes = await fetchWithSameOriginApiFallback("/auth/password-reset/confirm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -657,7 +657,7 @@ export default function Login({ onLogin }: LoginProps) {
           signupFormData.append("business_logo", logoFile);
         }
 
-        const signupResponse = await fetch(`${API_BASE}/auth/signup`, {
+        const signupResponse = await fetchWithSameOriginApiFallback("/auth/signup", {
           method: "POST",
           body: signupFormData,
         });
