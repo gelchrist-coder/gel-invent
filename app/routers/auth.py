@@ -250,6 +250,15 @@ async def _read_branding_image_request(request: Request) -> tuple[bytes, str | N
 
         return _decode_branding_image_payload(payload)
 
+    if (content_type or "").lower() == "multipart/form-data":
+        form = await request.form()
+        logo_file = form.get("logo") or form.get("file") or form.get("branding_image")
+        if not isinstance(logo_file, (UploadFile, StarletteUploadFile)):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is missing")
+
+        logo_bytes = await logo_file.read()
+        return logo_bytes, logo_file.content_type, logo_file.filename
+
     logo_bytes = await request.body()
     if not logo_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is missing")

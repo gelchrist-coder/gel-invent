@@ -112,7 +112,6 @@ const COLD_START_WARM_PROBE_TIMEOUT_MS = 35000;
 const COLD_START_WARM_RETRY_INTERVAL_MS = 2000;
 const AUTH_LOGOUT_GRACE_MS = 120000;
 const AUTH_LAST_LOGIN_AT_KEY = "lastSuccessfulLoginAt";
-const BINARY_BRANDING_UPLOAD_DISABLED_KEY = "gel-invent:disable-binary-branding-upload";
 
 function shouldDeferLogoutForUnauthorized(): boolean {
   const raw = localStorage.getItem(AUTH_LAST_LOGIN_AT_KEY);
@@ -430,20 +429,14 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
     return fetchWithSameOriginApiFallback("/auth/me/branding-image", requestInit);
   };
 
-  const requestBinaryBrandingUpload = async () => {
-    const requestHeaders: Record<string, string> = {
-      ...authHeaders,
-      "Content-Type": file.type || "application/octet-stream",
-    };
-
-    if (file.name) {
-      requestHeaders["X-Upload-Filename"] = encodeURIComponent(file.name);
-    }
+  const requestMultipartBrandingUpload = async () => {
+    const formData = new FormData();
+    formData.append("logo", file);
 
     return sendBrandingUpload({
       method: "POST",
-      headers: requestHeaders,
-      body: file,
+      headers: authHeaders,
+      body: formData,
     });
   };
 
@@ -464,62 +457,23 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
     return sendBrandingUpload(requestInit);
   };
 
-  const requestLegacyUpload = async () => {
-    const formData = new FormData();
-    formData.append("logo", file);
-
-    const requestInit: RequestInit = {
-      method: "POST",
-      headers: authHeaders,
-      body: formData,
-    };
-
-    if (shouldPreferSameOrigin) {
-      try {
-        return await fetch(buildApiUrl("/auth/me/logo", SAME_ORIGIN_API_BASE), requestInit);
-      } catch (error) {
-        if (!isTransportAccessError(error)) {
-          throw error;
-        }
-      }
-    }
-
-    return fetchWithSameOriginApiFallback("/auth/me/logo", requestInit);
-  };
-
   const requestUpload = async () => {
-    const shouldTryBinaryBrandingUpload = typeof window === "undefined"
-      || sessionStorage.getItem(BINARY_BRANDING_UPLOAD_DISABLED_KEY) !== "1";
-
-    if (shouldTryBinaryBrandingUpload) {
-      try {
-        const binaryResponse = await requestBinaryBrandingUpload();
-        if (typeof window !== "undefined") {
-          sessionStorage.removeItem(BINARY_BRANDING_UPLOAD_DISABLED_KEY);
-        }
-        if (![400, 404, 405, 415, 422].includes(binaryResponse.status)) {
-          return binaryResponse;
-        }
-      } catch (error) {
-        if (!isTransportAccessError(error)) {
-          throw error;
-        }
-
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem(BINARY_BRANDING_UPLOAD_DISABLED_KEY, "1");
-        }
+    try {
+      const multipartResponse = await requestMultipartBrandingUpload();
+      if (![400, 404, 405, 415, 422].includes(multipartResponse.status)) {
+        return multipartResponse;
+      }
+    } catch (error) {
+      if (!isTransportAccessError(error)) {
+        throw error;
       }
     }
 
     try {
-      const response = await requestJsonBrandingUpload();
-      if (response.status === 404 || response.status === 405) {
-        return requestLegacyUpload();
-      }
-      return response;
+      return await requestJsonBrandingUpload();
     } catch (error) {
       if (error instanceof Error && error.message === "Could not read logo file") {
-        return requestLegacyUpload();
+        throw new Error("Logo upload could not prepare the selected file in this browser.");
       }
       throw error;
     }
