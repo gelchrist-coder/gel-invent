@@ -4,7 +4,11 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
+
+
+load_dotenv(override=True)
 
 
 def _split_sql(script: str) -> list[str]:
