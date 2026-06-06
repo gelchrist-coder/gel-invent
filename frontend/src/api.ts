@@ -415,7 +415,38 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
     && isAbsoluteHttpUrl(API_BASE)
     && normalizeBaseUrl(window.location.origin) !== normalizeBaseUrl(API_BASE);
 
-  const requestBrandingUpload = async () => {
+  const sendBrandingUpload = async (requestInit: RequestInit) => {
+    if (shouldPreferSameOrigin) {
+      try {
+        return await fetch(buildApiUrl("/auth/me/branding-image", SAME_ORIGIN_API_BASE), requestInit);
+      } catch (error) {
+        if (!isTransportAccessError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    return fetchWithSameOriginApiFallback("/auth/me/branding-image", requestInit);
+  };
+
+  const requestBinaryBrandingUpload = async () => {
+    const requestHeaders: Record<string, string> = {
+      ...authHeaders,
+      "Content-Type": file.type || "application/octet-stream",
+    };
+
+    if (file.name) {
+      requestHeaders["X-Upload-Filename"] = encodeURIComponent(file.name);
+    }
+
+    return sendBrandingUpload({
+      method: "POST",
+      headers: requestHeaders,
+      body: file,
+    });
+  };
+
+  const requestJsonBrandingUpload = async () => {
     const requestInit: RequestInit = {
       method: "POST",
       headers: {
@@ -429,17 +460,7 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
       }),
     };
 
-    if (shouldPreferSameOrigin) {
-      try {
-        return await fetch(buildApiUrl("/auth/me/branding-image", SAME_ORIGIN_API_BASE), requestInit);
-      } catch (error) {
-        if (!isTransportAccessError(error)) {
-          throw error;
-        }
-      }
-    }
-
-    return fetchWithSameOriginApiFallback("/auth/me/branding-image", requestInit);
+    return sendBrandingUpload(requestInit);
   };
 
   const requestLegacyUpload = async () => {
@@ -466,8 +487,13 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
   };
 
   const requestUpload = async () => {
+    const binaryResponse = await requestBinaryBrandingUpload();
+    if (![400, 404, 405, 415, 422].includes(binaryResponse.status)) {
+      return binaryResponse;
+    }
+
     try {
-      const response = await requestBrandingUpload();
+      const response = await requestJsonBrandingUpload();
       if (response.status === 404 || response.status === 405) {
         return requestLegacyUpload();
       }

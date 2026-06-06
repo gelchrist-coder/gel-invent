@@ -11,7 +11,7 @@ import urllib.request
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Form
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ValidationError
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -231,6 +231,32 @@ def _decode_branding_image_payload(payload: "BrandingImageUploadRequest") -> tup
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is invalid") from exc
 
     return logo_bytes, content_type, payload.filename
+
+
+async def _read_branding_image_request(request: Request) -> tuple[bytes, str | None, str | None]:
+    content_type_header = str(request.headers.get("content-type") or "").strip()
+    content_type = content_type_header.split(";", 1)[0].strip() or None
+
+    if (content_type or "").lower() == "application/json":
+        try:
+            payload_data = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is invalid") from exc
+
+        try:
+            payload = BrandingImageUploadRequest(**payload_data)
+        except ValidationError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+
+        return _decode_branding_image_payload(payload)
+
+    logo_bytes = await request.body()
+    if not logo_bytes:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is missing")
+
+    filename_header = str(request.headers.get("x-upload-filename") or "").strip()
+    filename = urllib.parse.unquote(filename_header) if filename_header else None
+    return logo_bytes, content_type, filename
 
 
 def _store_business_logo(
@@ -641,12 +667,12 @@ async def upload_business_logo(
 
 
 @router.post("/me/branding-image", response_model=UserResponse)
-def upload_business_branding_image(
-    payload: BrandingImageUploadRequest,
+async def upload_business_branding_image(
+    request: Request,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    logo_bytes, content_type, filename = _decode_branding_image_payload(payload)
+    logo_bytes, content_type, filename = await _read_branding_image_request(request)
     return _store_business_logo(current_user, db, logo_bytes, content_type, filename)
 
 
