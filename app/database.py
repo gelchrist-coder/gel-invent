@@ -1,5 +1,6 @@
 import os
 import threading
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
@@ -15,14 +16,19 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 
+def _is_supabase_host(database_url: str) -> bool:
+    hostname = (urlparse(database_url).hostname or "").lower()
+    return hostname.endswith(".supabase.co") or hostname.endswith(".supabase.com") or hostname.endswith(".supabase.net")
+
+
 # Ensure we're using the correct PostgreSQL driver
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
 elif DATABASE_URL.startswith("postgresql://") and "+psycopg2" not in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
-# Supabase requires SSL. If sslmode isn't specified, add it for supabase hosts.
-if "supabase.co" in DATABASE_URL and "sslmode=" not in DATABASE_URL:
+# Supabase requires SSL. Support direct and pooled hostnames.
+if _is_supabase_host(DATABASE_URL) and "sslmode=" not in DATABASE_URL:
     separator = "&" if "?" in DATABASE_URL else "?"
     DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
 

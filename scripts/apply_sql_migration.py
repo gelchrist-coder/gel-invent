@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from sqlalchemy import create_engine
 
@@ -83,6 +84,26 @@ def _strip_full_line_comments(sql: str) -> str:
     return "\n".join(lines)
 
 
+def _is_supabase_host(database_url: str) -> bool:
+    hostname = (urlparse(database_url).hostname or "").lower()
+    return hostname.endswith(".supabase.co") or hostname.endswith(".supabase.com") or hostname.endswith(".supabase.net")
+
+
+def _normalize_database_url(database_url: str) -> str:
+    # Normalize postgres:// -> postgresql+psycopg2:// like app.database
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif database_url.startswith("postgresql://") and "+psycopg2" not in database_url:
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
+    # Supabase requires SSL. Support direct and pooled hostnames.
+    if _is_supabase_host(database_url) and "sslmode=" not in database_url:
+        separator = "&" if "?" in database_url else "?"
+        database_url = f"{database_url}{separator}sslmode=require"
+
+    return database_url
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print("Usage: python3 scripts/apply_sql_migration.py <path/to/migration.sql>")
@@ -101,11 +122,7 @@ def main(argv: list[str]) -> int:
         print("DATABASE_URL is not set")
         return 2
 
-    # Normalize postgres:// -> postgresql+psycopg2:// like app.database
-    if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql+psycopg2://", 1)
-    elif db_url.startswith("postgresql://") and "+psycopg2" not in db_url:
-        db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    db_url = _normalize_database_url(db_url)
 
     sql = path.read_text(encoding="utf-8")
     sql = _strip_full_line_comments(sql)
