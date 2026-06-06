@@ -367,21 +367,67 @@ export async function updateMyCategories(categories: string[]): Promise<AuthUser
   return updated;
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onerror = () => reject(new Error("Could not read logo file"));
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error("Could not read logo file"));
+    };
+
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
   const token = localStorage.getItem("token");
-  const formData = new FormData();
-  formData.append("logo", file);
+  const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+  const shouldPreferSameOrigin = typeof window !== "undefined"
+    && isAbsoluteHttpUrl(API_BASE)
+    && normalizeBaseUrl(window.location.origin) !== normalizeBaseUrl(API_BASE);
 
-  const requestInit: RequestInit = {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
+  const requestBrandingUpload = async () => {
+    const requestInit: RequestInit = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+      body: JSON.stringify({
+        data_base64: await readFileAsDataUrl(file),
+        content_type: file.type || null,
+        filename: file.name || null,
+      }),
+    };
+
+    if (shouldPreferSameOrigin) {
+      try {
+        return await fetch(buildApiUrl("/auth/me/branding-image", SAME_ORIGIN_API_BASE), requestInit);
+      } catch (error) {
+        if (!isTransportAccessError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    return fetchWithSameOriginApiFallback("/auth/me/branding-image", requestInit);
   };
 
-  const requestUpload = async () => {
-    const shouldPreferSameOrigin = typeof window !== "undefined"
-      && isAbsoluteHttpUrl(API_BASE)
-      && normalizeBaseUrl(window.location.origin) !== normalizeBaseUrl(API_BASE);
+  const requestLegacyUpload = async () => {
+    const formData = new FormData();
+    formData.append("logo", file);
+
+    const requestInit: RequestInit = {
+      method: "POST",
+      headers: authHeaders,
+      body: formData,
+    };
 
     if (shouldPreferSameOrigin) {
       try {
@@ -394,6 +440,14 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
     }
 
     return fetchWithSameOriginApiFallback("/auth/me/logo", requestInit);
+  };
+
+  const requestUpload = async () => {
+    const response = await requestBrandingUpload();
+    if (response.status === 404 || response.status === 405) {
+      return requestLegacyUpload();
+    }
+    return response;
   };
 
   let response: Response;

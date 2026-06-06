@@ -1,3 +1,5 @@
+import base64
+import binascii
 from datetime import timedelta, datetime, timezone
 from typing import Optional
 import json
@@ -202,6 +204,65 @@ def _ordered_branch_names(primary_location: Optional[str], branches: Optional[li
     return ordered
 
 
+def _decode_branding_image_payload(payload: "BrandingImageUploadRequest") -> tuple[bytes, str | None, str | None]:
+    raw_data = str(payload.data_base64 or "").strip()
+    if not raw_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is missing")
+
+    content_type = str(payload.content_type or "").strip() or None
+
+    if raw_data.startswith("data:"):
+        try:
+            header, encoded = raw_data.split(",", 1)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is invalid") from exc
+
+        if ";base64" not in header.lower():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data must be base64-encoded")
+
+        if not content_type:
+            content_type = header[5:].split(";", 1)[0].strip() or None
+
+        raw_data = encoded.strip()
+
+    try:
+        logo_bytes = base64.b64decode(raw_data, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo data is invalid") from exc
+
+    return logo_bytes, content_type, payload.filename
+
+
+def _store_business_logo(
+    current_user: User,
+    db: Session,
+    logo_bytes: bytes,
+    content_type: str | None,
+    filename: str | None,
+) -> UserResponse:
+    ensure_permission(current_user, "manage_business_profile", "Only Admin can update business logo")
+
+    if not is_supabase_storage_enabled():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo upload is not configured")
+
+    if not (content_type or "").startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be an image")
+
+    if len(logo_bytes) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be under 2MB")
+
+    try:
+        logo_url = upload_public_logo(logo_bytes, content_type, filename)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    current_user.business_logo_url = logo_url
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
+    return _serialize_user(current_user, db)
+
+
 def _verify_recaptcha_or_raise(token: Optional[str]) -> None:
     secret = (os.getenv("RECAPTCHA_SECRET_KEY") or "").strip()
     if not secret:
@@ -360,6 +421,12 @@ class ChangePasswordRequest(BaseModel):
 
 class DeleteAccountRequest(BaseModel):
     current_password: str
+
+
+class BrandingImageUploadRequest(BaseModel):
+    data_base64: str
+    filename: Optional[str] = None
+    content_type: Optional[str] = None
 
 
 class UpdateMeRequest(BaseModel):
@@ -569,28 +636,18 @@ async def upload_business_logo(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    ensure_permission(current_user, "manage_business_profile", "Only Admin can update business logo")
-
-    if not is_supabase_storage_enabled():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo upload is not configured")
-
-    if not (logo.content_type or "").startswith("image/"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be an image")
-
     logo_bytes = await logo.read()
-    if len(logo_bytes) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Logo must be under 2MB")
+    return _store_business_logo(current_user, db, logo_bytes, logo.content_type, logo.filename)
 
-    try:
-        logo_url = upload_public_logo(logo_bytes, logo.content_type, logo.filename)
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    current_user.business_logo_url = logo_url
-    db.add(current_user)
-    db.commit()
-    db.refresh(current_user)
-    return _serialize_user(current_user, db)
+@router.post("/me/branding-image", response_model=UserResponse)
+def upload_business_branding_image(
+    payload: BrandingImageUploadRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    logo_bytes, content_type, filename = _decode_branding_image_payload(payload)
+    return _store_business_logo(current_user, db, logo_bytes, content_type, filename)
 
 
 
