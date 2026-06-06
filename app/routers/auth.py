@@ -12,6 +12,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.database import get_db
 from app.models import User, PasswordResetToken, Branch, SystemSettings
@@ -299,7 +300,7 @@ def _parse_list_input(value: object) -> Optional[list[str]]:
     return None
 
 
-async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFile | None]:
+async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFile | StarletteUploadFile | None]:
     content_type = (request.headers.get("content-type") or "").lower()
     if "multipart/form-data" in content_type:
         form = await request.form()
@@ -315,7 +316,7 @@ async def _parse_signup_request(request: Request) -> tuple[UserCreate, UploadFil
         categories = _parse_list_input(form.get("categories"))
         branches = _parse_list_input(form.get("branches"))
         logo_file = form.get("business_logo")
-        if not isinstance(logo_file, UploadFile):
+        if not isinstance(logo_file, (UploadFile, StarletteUploadFile)):
             logo_file = None
         user_data = UserCreate(
             email=email,
