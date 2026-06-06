@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy import func, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 try:
     import openpyxl  # type: ignore[import-not-found]
@@ -137,6 +137,10 @@ def export_data(
 
     products = (
         db.query(models.Product)
+        .options(
+            selectinload(models.Product.variants),
+            selectinload(models.Product.unit_conversions),
+        )
         .filter(models.Product.user_id.in_(tenant_user_ids))
         .order_by(models.Product.id.asc())
         .all()
@@ -207,11 +211,37 @@ def export_data(
                 "shade": getattr(p, "shade", None),
                 "pack_size": p.pack_size,
                 "category": p.category,
+                "supplier": p.supplier,
                 "expiry_date": _serialize_dt(p.expiry_date),
                 "cost_price": _serialize_decimal(p.cost_price),
                 "pack_cost_price": _serialize_decimal(p.pack_cost_price),
                 "selling_price": _serialize_decimal(p.selling_price),
                 "pack_selling_price": _serialize_decimal(p.pack_selling_price),
+                "variants": [
+                    {
+                        "id": v.id,
+                        "label": v.label,
+                        "attributes_json": v.attributes_json or {},
+                        "is_active": v.is_active,
+                        "sort_order": v.sort_order,
+                        "created_at": _serialize_dt(v.created_at),
+                        "updated_at": _serialize_dt(v.updated_at),
+                    }
+                    for v in p.variants
+                ],
+                "unit_conversions": [
+                    {
+                        "id": conversion.id,
+                        "unit_name": conversion.unit_name,
+                        "base_quantity": _serialize_decimal(conversion.base_quantity),
+                        "is_sale_unit": conversion.is_sale_unit,
+                        "is_purchase_unit": conversion.is_purchase_unit,
+                        "sort_order": conversion.sort_order,
+                        "created_at": _serialize_dt(conversion.created_at),
+                        "updated_at": _serialize_dt(conversion.updated_at),
+                    }
+                    for conversion in p.unit_conversions
+                ],
                 "created_at": _serialize_dt(p.created_at),
                 "updated_at": _serialize_dt(p.updated_at),
             }
@@ -222,6 +252,8 @@ def export_data(
                 "id": m.id,
                 "branch_id": m.branch_id,
                 "product_id": m.product_id,
+                "variant_id": m.variant_id,
+                "sale_id": m.sale_id,
                 "change": _serialize_decimal(m.change),
                 "reason": m.reason,
                 "batch_number": m.batch_number,
@@ -238,6 +270,7 @@ def export_data(
                 "id": s.id,
                 "branch_id": s.branch_id,
                 "product_id": s.product_id,
+                "variant_id": s.variant_id,
                 "quantity": _serialize_decimal(s.quantity),
                 "sale_unit_type": getattr(s, "sale_unit_type", None),
                 "pack_quantity": getattr(s, "pack_quantity", None),
@@ -246,6 +279,8 @@ def export_data(
                 "customer_name": s.customer_name,
                 "payment_method": s.payment_method,
                 "amount_paid": _serialize_decimal(s.amount_paid),
+                "partial_payment_method": getattr(s, "partial_payment_method", None),
+                "client_sale_id": getattr(s, "client_sale_id", None),
                 "notes": s.notes,
                 "created_at": _serialize_dt(s.created_at),
             }
@@ -318,6 +353,10 @@ def export_data_xlsx(
 
     products = (
         db.query(models.Product)
+        .options(
+            selectinload(models.Product.variants),
+            selectinload(models.Product.unit_conversions),
+        )
         .filter(models.Product.user_id.in_(tenant_user_ids))
         .filter(models.Product.updated_at >= cutoff)
         .order_by(models.Product.id.asc())
@@ -350,6 +389,10 @@ def export_data_xlsx(
     if product_ids:
         for p in (
             db.query(models.Product)
+            .options(
+                selectinload(models.Product.variants),
+                selectinload(models.Product.unit_conversions),
+            )
             .filter(models.Product.user_id.in_(tenant_user_ids))
             .filter(models.Product.id.in_(list(product_ids)))
             .all()
@@ -373,6 +416,7 @@ def export_data_xlsx(
         "Barcode",
         "Name",
         "Category",
+        "Supplier",
         "Unit",
         "Measurement Type",
         "Allows Fractional Sales",
@@ -383,6 +427,8 @@ def export_data_xlsx(
         "Size",
         "Color",
         "Shade",
+        "Variant Options",
+        "Sale Units",
         "Pack Size",
         "Cost Price",
         "Selling Price",
@@ -403,6 +449,7 @@ def export_data_xlsx(
                 p.barcode,
                 p.name,
                 p.category,
+                p.supplier,
                 p.unit,
                 getattr(p, "measurement_type", "count"),
                 getattr(p, "allows_fractional_sales", False),
@@ -413,6 +460,12 @@ def export_data_xlsx(
                 getattr(p, "size", None),
                 getattr(p, "color", None),
                 getattr(p, "shade", None),
+                ", ".join(v.label for v in p.variants if v.label) or None,
+                ", ".join(
+                    f"{conversion.unit_name} ({_serialize_decimal(conversion.base_quantity)} {p.unit})"
+                    for conversion in p.unit_conversions
+                    if conversion.is_sale_unit
+                ) or None,
                 p.pack_size,
                 _serialize_num(p.cost_price),
                 _serialize_num(p.selling_price),
@@ -429,12 +482,16 @@ def export_data_xlsx(
         "Product ID",
         "SKU",
         "Product Name",
+        "Variant ID",
+        "Sale Unit",
+        "Pack Quantity",
         "Quantity",
         "Unit Price",
         "Total Price",
         "Customer",
         "Payment Method",
         "Amount Paid",
+        "Partial Payment Method",
         "Notes",
     ]
     ws_sales.append(sales_headers)
@@ -452,12 +509,16 @@ def export_data_xlsx(
                 s.product_id,
                 getattr(p, "sku", None),
                 getattr(p, "name", None),
+                s.variant_id,
+                getattr(s, "sale_unit_type", None),
+                getattr(s, "pack_quantity", None),
                 _serialize_num(s.quantity),
                 _serialize_num(s.unit_price),
                 _serialize_num(s.total_price),
                 s.customer_name,
                 s.payment_method,
                 _serialize_num(s.amount_paid),
+                getattr(s, "partial_payment_method", None),
                 s.notes,
             ]
         )
@@ -470,6 +531,7 @@ def export_data_xlsx(
         "Product ID",
         "SKU",
         "Product Name",
+        "Variant ID",
         "Change",
         "Reason",
         "Batch",
@@ -491,6 +553,7 @@ def export_data_xlsx(
                 m.product_id,
                 getattr(p, "sku", None),
                 getattr(p, "name", None),
+                m.variant_id,
                 _serialize_num(m.change),
                 m.reason,
                 m.batch_number,
@@ -542,6 +605,15 @@ def _clean_text(value: Any) -> str | None:
         return None
     text_value = str(value).strip()
     return text_value or None
+
+
+def _as_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalized_product_signature_text(value: Any) -> str:
@@ -640,8 +712,10 @@ def import_data(
 
     branch_id_map: dict[int, int] = {}
     product_id_map: dict[int, int] = {}
+    variant_id_map: dict[int, int] = {}
     creditor_id_map: dict[int, int] = {}
     sale_id_map: dict[int, int] = {}
+    pending_sale_links: list[tuple[models.StockMovement, int]] = []
 
     # Branches: upsert by name (for this admin).
     for b in payload.get("branches", []) or []:
@@ -722,6 +796,7 @@ def import_data(
             shade=_clean_text(p.get("shade")),
             pack_size=p.get("pack_size"),
             category=_clean_text(p.get("category")),
+            supplier=_clean_text(p.get("supplier")),
             expiry_date=_as_date(p.get("expiry_date")),
             cost_price=_as_decimal(p.get("cost_price")) if p.get("cost_price") is not None else None,
             pack_cost_price=_as_decimal(p.get("pack_cost_price")) if p.get("pack_cost_price") is not None else None,
@@ -731,6 +806,72 @@ def import_data(
         db.add(product)
         db.flush()
         product_id_map[legacy_id] = product.id
+
+    # Product extension tables (variants and unit conversions)
+    for p in payload.get("products", []) or []:
+        legacy_product_id = _as_int(p.get("id"))
+        if legacy_product_id is None:
+            continue
+        new_product_id = product_id_map.get(legacy_product_id)
+        if not new_product_id:
+            continue
+
+        for v in p.get("variants", []) or []:
+            label = _clean_text(v.get("label"))
+            if not label:
+                continue
+
+            existing_variant = (
+                db.query(models.ProductVariant)
+                .filter(models.ProductVariant.product_id == new_product_id)
+                .filter(func.lower(func.trim(models.ProductVariant.label)) == label.lower())
+                .first()
+            )
+            if existing_variant is None:
+                existing_variant = models.ProductVariant(product_id=new_product_id, label=label)
+                db.add(existing_variant)
+                db.flush()
+
+            existing_variant.label = label
+            existing_variant.attributes_json = v.get("attributes_json") if isinstance(v.get("attributes_json"), dict) else {}
+            existing_variant.is_active = _as_bool(v.get("is_active", True))
+            sort_order = _as_int(v.get("sort_order"))
+            existing_variant.sort_order = sort_order if sort_order is not None else 0
+            db.add(existing_variant)
+            db.flush()
+
+            legacy_variant_id = _as_int(v.get("id"))
+            if legacy_variant_id is not None:
+                variant_id_map[legacy_variant_id] = existing_variant.id
+
+        for conversion in p.get("unit_conversions", []) or []:
+            unit_name = _clean_text(conversion.get("unit_name"))
+            base_quantity = conversion.get("base_quantity")
+            if not unit_name or base_quantity is None:
+                continue
+
+            existing_conversion = (
+                db.query(models.ProductUnitConversion)
+                .filter(models.ProductUnitConversion.product_id == new_product_id)
+                .filter(func.lower(func.trim(models.ProductUnitConversion.unit_name)) == unit_name.lower())
+                .first()
+            )
+            if existing_conversion is None:
+                existing_conversion = models.ProductUnitConversion(
+                    product_id=new_product_id,
+                    unit_name=unit_name,
+                    base_quantity=_as_decimal(base_quantity),
+                )
+                db.add(existing_conversion)
+                db.flush()
+
+            existing_conversion.unit_name = unit_name
+            existing_conversion.base_quantity = _as_decimal(base_quantity)
+            existing_conversion.is_sale_unit = _as_bool(conversion.get("is_sale_unit", True))
+            existing_conversion.is_purchase_unit = _as_bool(conversion.get("is_purchase_unit", False))
+            sort_order = _as_int(conversion.get("sort_order"))
+            existing_conversion.sort_order = sort_order if sort_order is not None else 0
+            db.add(existing_conversion)
 
     # Stock movements
     for m in payload.get("stock_movements", []) or []:
@@ -750,19 +891,29 @@ def import_data(
             except Exception:
                 new_branch_id = None
 
+        legacy_variant_id = _as_int(m.get("variant_id"))
+        new_variant_id = variant_id_map.get(legacy_variant_id) if legacy_variant_id is not None else None
+
+        legacy_sale_id = _as_int(m.get("sale_id"))
+        new_sale_id = sale_id_map.get(legacy_sale_id) if legacy_sale_id is not None else None
+
         movement = models.StockMovement(
             user_id=current_user.id,
             branch_id=new_branch_id,
             product_id=new_product_id,
+            variant_id=new_variant_id,
+            sale_id=new_sale_id,
             change=_as_decimal(m.get("change", 0)),
             reason=str(m.get("reason") or "adjustment"),
             batch_number=m.get("batch_number"),
-            expiry_date=m.get("expiry_date"),
+            expiry_date=_as_date(m.get("expiry_date")),
             unit_cost_price=_as_decimal(m.get("unit_cost_price")) if m.get("unit_cost_price") is not None else None,
             unit_selling_price=_as_decimal(m.get("unit_selling_price")) if m.get("unit_selling_price") is not None else None,
             location=m.get("location") or "Main Store",
         )
         db.add(movement)
+        if legacy_sale_id is not None and new_sale_id is None:
+            pending_sale_links.append((movement, legacy_sale_id))
 
     # Sales
     for s in payload.get("sales", []) or []:
@@ -782,18 +933,26 @@ def import_data(
             except Exception:
                 new_branch_id = None
 
+        legacy_variant_id = _as_int(s.get("variant_id"))
+        new_variant_id = variant_id_map.get(legacy_variant_id) if legacy_variant_id is not None else None
+
+        pack_quantity = _as_int(s.get("pack_quantity"))
+
         sale = models.Sale(
             user_id=current_user.id,
             branch_id=new_branch_id,
             product_id=new_product_id,
+            variant_id=new_variant_id,
             quantity=_as_decimal(s.get("quantity", 0)),
             sale_unit_type=str(s.get("sale_unit_type") or "piece"),
-            pack_quantity=s.get("pack_quantity"),
+            pack_quantity=pack_quantity,
             unit_price=_as_decimal(s.get("unit_price", 0)),
             total_price=_as_decimal(s.get("total_price", 0)),
             customer_name=s.get("customer_name"),
             payment_method=str(s.get("payment_method") or "cash"),
             amount_paid=_as_decimal(s.get("amount_paid")) if s.get("amount_paid") is not None else None,
+            partial_payment_method=_clean_text(s.get("partial_payment_method")),
+            client_sale_id=_clean_text(s.get("client_sale_id")),
             notes=s.get("notes"),
         )
         db.add(sale)
@@ -804,6 +963,12 @@ def import_data(
                 sale_id_map[int(s.get("id"))] = sale.id
             except Exception:
                 pass
+
+    for movement, legacy_sale_id in pending_sale_links:
+        new_sale_id = sale_id_map.get(legacy_sale_id)
+        if new_sale_id is not None:
+            movement.sale_id = new_sale_id
+            db.add(movement)
 
     # Creditors
     for c in payload.get("creditors", []) or []:
