@@ -112,6 +112,7 @@ const COLD_START_WARM_PROBE_TIMEOUT_MS = 35000;
 const COLD_START_WARM_RETRY_INTERVAL_MS = 2000;
 const AUTH_LOGOUT_GRACE_MS = 120000;
 const AUTH_LAST_LOGIN_AT_KEY = "lastSuccessfulLoginAt";
+const BINARY_BRANDING_UPLOAD_DISABLED_KEY = "gel-invent:disable-binary-branding-upload";
 
 function shouldDeferLogoutForUnauthorized(): boolean {
   const raw = localStorage.getItem(AUTH_LAST_LOGIN_AT_KEY);
@@ -487,9 +488,27 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
   };
 
   const requestUpload = async () => {
-    const binaryResponse = await requestBinaryBrandingUpload();
-    if (![400, 404, 405, 415, 422].includes(binaryResponse.status)) {
-      return binaryResponse;
+    const shouldTryBinaryBrandingUpload = typeof window === "undefined"
+      || sessionStorage.getItem(BINARY_BRANDING_UPLOAD_DISABLED_KEY) !== "1";
+
+    if (shouldTryBinaryBrandingUpload) {
+      try {
+        const binaryResponse = await requestBinaryBrandingUpload();
+        if (typeof window !== "undefined") {
+          sessionStorage.removeItem(BINARY_BRANDING_UPLOAD_DISABLED_KEY);
+        }
+        if (![400, 404, 405, 415, 422].includes(binaryResponse.status)) {
+          return binaryResponse;
+        }
+      } catch (error) {
+        if (!isTransportAccessError(error)) {
+          throw error;
+        }
+
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem(BINARY_BRANDING_UPLOAD_DISABLED_KEY, "1");
+        }
+      }
     }
 
     try {
