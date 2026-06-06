@@ -23,23 +23,22 @@ function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
 
+const PLACEHOLDER_API_URL = "https://your-backend.vercel.app";
+
+function hasConfiguredApiBase(url: string): boolean {
+  return url.length > 0 && url !== PLACEHOLDER_API_URL;
+}
+
 function resolveApiBaseUrl(): string {
-  const configured = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
-  const hostname = typeof window !== "undefined" ? window.location.hostname : "";
-  const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1";
+  const configured = normalizeBaseUrl((import.meta.env.VITE_API_URL as string | undefined)?.trim() || "");
 
-  // In hosted environments we always use same-origin /api rewrites.
-  // This prevents direct cross-origin backend calls and stale-token/domain issues.
-  if (!isLocalhost) {
-    return "/api";
+  // Respect an explicit backend URL in any environment. When none is set,
+  // fall back to same-origin /api so local Vite proxy and host rewrites still work.
+  if (hasConfiguredApiBase(configured)) {
+    return configured;
   }
 
-  // Use same-origin proxy by default so preview/staging deployments avoid CORS issues.
-  if (!configured || configured === "https://your-backend.vercel.app") {
-    return "/api";
-  }
-
-  return configured;
+  return "/api";
 }
 
 // API base URL (configure via VITE_API_URL on Vercel/Netlify/etc)

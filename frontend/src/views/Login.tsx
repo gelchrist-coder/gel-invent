@@ -879,6 +879,7 @@ export default function Login({ onLogin }: LoginProps) {
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="John Doe"
                     required={isSignUp}
+                    autoComplete="name"
                     className="input"
                     style={{ padding: 12 }}
                   />
@@ -894,6 +895,7 @@ export default function Login({ onLogin }: LoginProps) {
                     onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
                     placeholder="My Business Ltd"
                     required={isSignUp}
+                    autoComplete="organization"
                     className="input"
                     style={{ padding: 12 }}
                   />
@@ -945,6 +947,7 @@ export default function Login({ onLogin }: LoginProps) {
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     placeholder="e.g., 0241234567"
+                    autoComplete="tel"
                     className="input"
                     style={{ padding: 12 }}
                   />
@@ -1145,6 +1148,7 @@ export default function Login({ onLogin }: LoginProps) {
                     onChange={(e) => setResetEmail(e.target.value)}
                     placeholder="you@example.com"
                     required
+                    autoComplete="email"
                     className="input"
                     style={{ padding: 12 }}
                     readOnly={resetStep === "confirm"}
@@ -1162,6 +1166,7 @@ export default function Login({ onLogin }: LoginProps) {
                         value={resetCode}
                         onChange={(e) => setResetCode(e.target.value)}
                         placeholder="Enter the 6-digit code"
+                        autoComplete="one-time-code"
                         className="input"
                         style={{ padding: 12 }}
                       />
@@ -1263,6 +1268,7 @@ export default function Login({ onLogin }: LoginProps) {
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 placeholder={isSignUp ? "you@example.com" : "you@example.com or 0241234567"}
                 required
+                autoComplete={isSignUp ? "email" : "username"}
                 className="input"
                 style={{ padding: 12 }}
               />
