@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchWithSameOriginApiFallback, warmBackend } from "../api";
+import { fetchWithSameOriginApiFallback, uploadBusinessLogo, warmBackend } from "../api";
 import appLogo from "../asset/logo.png";
 import wareImage from "../asset/Ware.png";
 
@@ -31,6 +31,10 @@ function loadRecaptchaScript(): Promise<void> {
 
 type LoginProps = {
   onLogin: (email: string, password: string) => void;
+};
+
+type CompleteAuthenticatedSessionOptions = {
+  beforeLogin?: () => Promise<void>;
 };
 
 type AuthResponse = {
@@ -263,7 +267,12 @@ export default function Login({ onLogin }: LoginProps) {
     return null;
   };
 
-  const completeAuthenticatedSession = async (authData: AuthResponse, identifier: string, password: string) => {
+  const completeAuthenticatedSession = async (
+    authData: AuthResponse,
+    identifier: string,
+    password: string,
+    options?: CompleteAuthenticatedSessionOptions,
+  ) => {
     localStorage.setItem("token", authData.access_token);
     localStorage.setItem("lastSuccessfulLoginAt", String(Date.now()));
 
@@ -298,6 +307,10 @@ export default function Login({ onLogin }: LoginProps) {
         localStorage.setItem("user", JSON.stringify(meData));
         window.dispatchEvent(new CustomEvent("userChanged", { detail: meData }));
       }
+    }
+
+    if (options?.beforeLogin) {
+      await options.beforeLogin();
     }
 
     onLogin(identifier, password);
@@ -640,32 +653,31 @@ export default function Login({ onLogin }: LoginProps) {
           return;
         }
 
-        // Call signup API
-        const signupFormData = new FormData();
-        signupFormData.append("email", formData.email.trim());
-        signupFormData.append("phone", formData.phone.trim());
-        signupFormData.append("name", formData.name.trim());
-        signupFormData.append("password", formData.password);
-        signupFormData.append("business_name", formData.businessName.trim());
-        signupFormData.append("business_location", formData.businessLocation.trim());
-        signupFormData.append("business_types", JSON.stringify(formData.businessTypes));
-        signupFormData.append("branches", JSON.stringify(formData.hasBranches ? formData.branches : []));
-        if (recaptchaEnabled) {
-          signupFormData.append("recaptcha_token", recaptchaToken);
-        }
-        if (logoFile) {
-          signupFormData.append("business_logo", logoFile);
-        }
+        // Use JSON for signup itself; upload the optional logo after the
+        // account is created so signup avoids multipart transport issues.
+        const signupPayload = {
+          email: formData.email.trim(),
+          phone: formData.phone.trim() || null,
+          name: formData.name.trim(),
+          password: formData.password,
+          business_name: formData.businessName.trim(),
+          business_location: formData.businessLocation.trim(),
+          business_types: formData.businessTypes,
+          branches: formData.hasBranches ? formData.branches : [],
+          ...(recaptchaEnabled ? { recaptcha_token: recaptchaToken } : {}),
+        };
 
         const signupResponse = await fetchWithSameOriginApiFallback("/auth/signup", {
           method: "POST",
-          body: signupFormData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(signupPayload),
         });
 
         if (!signupResponse.ok) {
-          const errorData = await signupResponse.json();
+          const errorData = await safeJson(signupResponse);
+          const detail = isRecord(errorData) && typeof errorData.detail === "string" ? errorData.detail : null;
           resetRecaptcha();
-          setError(errorData.detail || "Signup failed");
+          setError(detail || "Signup failed");
           setLoading(false);
           return;
         }
@@ -674,7 +686,26 @@ export default function Login({ onLogin }: LoginProps) {
         const signupData = (await signupResponse.json().catch(() => {
           throw new Error(`Server returned non-JSON response (status ${signupResponse.status}). The backend URL may be misconfigured.`);
         })) as AuthResponse;
-        await completeAuthenticatedSession(signupData, formData.email, formData.password);
+        await completeAuthenticatedSession(signupData, formData.email.trim(), formData.password, {
+          beforeLogin: logoFile
+            ? async () => {
+              try {
+                const updatedUser = await uploadBusinessLogo(logoFile);
+                const rawBusiness = localStorage.getItem("businessInfo");
+                const parsedBusiness = rawBusiness ? (JSON.parse(rawBusiness) as Record<string, unknown>) : {};
+                localStorage.setItem(
+                  "businessInfo",
+                  JSON.stringify({
+                    ...parsedBusiness,
+                    logo: updatedUser.business_logo_url || "",
+                  }),
+                );
+              } catch (uploadError) {
+                console.error("[Signup] Logo upload failed after account creation:", uploadError);
+              }
+            }
+            : undefined,
+        });
       } else {
         // Sign in validation
         if (!formData.email.trim() || !formData.password.trim()) {

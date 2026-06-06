@@ -372,18 +372,11 @@ export async function uploadBusinessLogo(file: File): Promise<AuthUser> {
   const formData = new FormData();
   formData.append("logo", file);
 
-  const requestUpload = () => resilientFetch(
-    `${API_BASE}/auth/me/logo`,
-    {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: formData,
-    },
-    {
-      timeoutMs: 45000,
-      retries: 0,
-    },
-  );
+  const requestUpload = () => fetchWithSameOriginApiFallback("/auth/me/logo", {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
 
   let response: Response;
 
