@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateMyBusinessProfile, updateSystemSettings, uploadMyBusinessLogo } from "../api";
+import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateMyBusinessProfile, updateSystemSettings } from "../api";
 import { Branch } from "../types";
-import { hasUserPermission, normalizeBusinessLogoUrl, readStoredUser } from "../user-storage";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type PasswordInputProps = {
   label: string;
@@ -67,7 +67,6 @@ export default function Profile() {
     address: "",
     taxId: "",
     currency: "GHS",
-    logoUrl: currentUserData?.brandmark_url || "",
   });
 
   const [userInfo, setUserInfo] = useState({
@@ -102,10 +101,7 @@ export default function Profile() {
   const [importingData, setImportingData] = useState(false);
   const [clearingData, setClearingData] = useState(false);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
-  const [logoUploadFile, setLogoUploadFile] = useState<File | null>(null);
-  const [logoUploadPreviewUrl, setLogoUploadPreviewUrl] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
-  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Branch management state
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -145,7 +141,6 @@ export default function Profile() {
           owner: String(parsedUser.name ?? prev.owner),
           phone: prev.phone || String(parsedUser.phone ?? ""),
           email: String(parsedUser.email ?? prev.email),
-          logoUrl: String(parsedUser.brandmark_url ?? prev.logoUrl ?? ""),
         }));
       }
     } catch {
@@ -193,83 +188,11 @@ export default function Profile() {
     }
   }, [activeTab, canAccessSystemTab, canManageBusinessProfile]);
 
-  useEffect(() => {
-    if (!logoUploadFile) {
-      setLogoUploadPreviewUrl(null);
-      return undefined;
-    }
-
-    const reader = new FileReader();
-    let cancelled = false;
-
-    reader.onload = () => {
-      if (!cancelled) {
-        setLogoUploadPreviewUrl(typeof reader.result === "string" ? reader.result : null);
-      }
-    };
-
-    reader.onerror = () => {
-      if (!cancelled) {
-        setLogoUploadPreviewUrl(null);
-      }
-    };
-
-    reader.readAsDataURL(logoUploadFile);
-
-    return () => {
-      cancelled = true;
-      if (reader.readyState === FileReader.LOADING) {
-        reader.abort();
-      }
-    };
-  }, [logoUploadFile]);
-
-  const previewLogoUrl = logoUploadFile
-    ? logoUploadPreviewUrl
-    : normalizeBusinessLogoUrl(businessInfo.logoUrl);
-
-  const resetSelectedLogoFile = () => {
-    setLogoUploadFile(null);
-    setLogoUploadPreviewUrl(null);
-    if (logoFileInputRef.current) {
-      logoFileInputRef.current.value = "";
-    }
-  };
-
-  const handleLogoSelected = (file: File | null) => {
-    if (!file) {
-      resetSelectedLogoFile();
-      return;
-    }
-
-    if (!file.type.startsWith("image/")) {
-      setDataMessage("Business logo must be an image file.");
-      resetSelectedLogoFile();
-      return;
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-      setDataMessage("Business logo must be under 2MB.");
-      resetSelectedLogoFile();
-      return;
-    }
-
-    setDataMessage(null);
-    setLogoUploadFile(file);
-  };
-
   const handleSave = async () => {
     setDataMessage(null);
     setSavingProfile(true);
 
     try {
-      let persistedLogoUrl = logoUploadFile ? null : normalizeBusinessLogoUrl(businessInfo.logoUrl);
-
-      if (logoUploadFile) {
-        const updatedUser = await uploadMyBusinessLogo(logoUploadFile);
-        persistedLogoUrl = normalizeBusinessLogoUrl(updatedUser.brandmark_url);
-      }
-
       const nextBusinessInfo = {
         ...businessInfo,
         name: businessInfo.name.trim() || "Gel Invent Business",
@@ -279,13 +202,12 @@ export default function Profile() {
         address: businessInfo.address.trim(),
         taxId: businessInfo.taxId.trim(),
         currency: (businessInfo.currency || "GHS").toUpperCase(),
-        logoUrl: persistedLogoUrl || "",
       };
 
       if (canManageBusinessProfile) {
         await updateMyBusinessProfile({
           business_name: nextBusinessInfo.name,
-          brandmark_url: persistedLogoUrl,
+          brandmark_url: null,
         });
       }
 
@@ -293,7 +215,6 @@ export default function Profile() {
       localStorage.setItem("userInfo", JSON.stringify(userInfo));
       window.dispatchEvent(new CustomEvent("businessInfoChanged", { detail: nextBusinessInfo }));
       setBusinessInfo(nextBusinessInfo);
-      resetSelectedLogoFile();
 
       if (canManageSettings) {
         const selectedCurrency = nextBusinessInfo.currency;
@@ -592,23 +513,13 @@ export default function Profile() {
         style={{ display: "none" }}
         onChange={(e) => handleImportFileSelected(e.target.files?.[0] ?? null)}
       />
-      <input
-        ref={logoFileInputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: "none" }}
-        onChange={(e) => handleLogoSelected(e.target.files?.[0] ?? null)}
-      />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <h1 className="page-title" style={{ margin: 0 }}>Profile & Settings</h1>
         {editing ? (
           <div style={{ display: "flex", gap: 12 }}>
             <button
-              onClick={() => {
-                resetSelectedLogoFile();
-                setEditing(false);
-              }}
+              onClick={() => setEditing(false)}
               disabled={savingProfile}
               style={{
                 padding: "10px 20px",
@@ -632,7 +543,7 @@ export default function Profile() {
                 cursor: savingProfile ? "not-allowed" : "pointer",
               }}
             >
-              {savingProfile ? (logoUploadFile ? "Uploading..." : "Saving...") : "Save Changes"}
+              {savingProfile ? "Saving..." : "Save Changes"}
             </button>
           </div>
         ) : (
@@ -782,109 +693,6 @@ export default function Profile() {
                   style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
                 />
               </label>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.9fr", gap: 16, alignItems: "start" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                  Business Logo
-                </span>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                  <button
-                    type="button"
-                    onClick={() => logoFileInputRef.current?.click()}
-                    disabled={!editing || savingProfile}
-                    className="button"
-                    style={{
-                      background: "#1f7aff",
-                      opacity: !editing || savingProfile ? 0.7 : 1,
-                      cursor: !editing || savingProfile ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {businessInfo.logoUrl || logoUploadFile ? "Replace Logo" : "Upload Logo"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      resetSelectedLogoFile();
-                      setBusinessInfo((prev) => ({ ...prev, logoUrl: "" }));
-                    }}
-                    disabled={!editing || savingProfile || (!businessInfo.logoUrl && !logoUploadFile)}
-                    style={{
-                      padding: "10px 16px",
-                      background: "transparent",
-                      border: "1px solid #d1d5db",
-                      borderRadius: 8,
-                      fontWeight: 600,
-                      color: "#475569",
-                      cursor: !editing || savingProfile || (!businessInfo.logoUrl && !logoUploadFile) ? "not-allowed" : "pointer",
-                      opacity: !editing || savingProfile || (!businessInfo.logoUrl && !logoUploadFile) ? 0.6 : 1,
-                    }}
-                  >
-                    Remove Logo
-                  </button>
-                </div>
-                <span style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
-                  Upload a PNG, JPG, or WEBP image up to 2MB. Save changes to apply it across the app.
-                </span>
-                {logoUploadFile ? (
-                  <span style={{ fontSize: 12, color: "#0f172a", fontWeight: 600 }}>
-                    Selected file: {logoUploadFile.name}
-                  </span>
-                ) : null}
-              </div>
-
-              <div
-                style={{
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 16,
-                  background: "#f8fafc",
-                  padding: 16,
-                  display: "grid",
-                  gap: 12,
-                  justifyItems: "center",
-                  minHeight: 160,
-                }}
-              >
-                {previewLogoUrl ? (
-                  <img
-                    src={previewLogoUrl}
-                    alt={businessInfo.name || "Business logo preview"}
-                    style={{
-                      width: 88,
-                      height: 88,
-                      objectFit: "contain",
-                      borderRadius: 18,
-                      background: "#ffffff",
-                      border: "1px solid #dbe4f0",
-                      padding: 10,
-                    }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: 88,
-                      height: 88,
-                      borderRadius: 18,
-                      background: "#1e3a8a",
-                      color: "#ffffff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 30,
-                      fontWeight: 800,
-                    }}
-                  >
-                    {(businessInfo.name || "B").trim().charAt(0).toUpperCase() || "B"}
-                  </div>
-                )}
-                <div style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1f2937" }}>Live Preview</div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
-                    {previewLogoUrl ? "The app will use this image across the active business views." : "No logo uploaded yet."}
-                  </div>
-                </div>
-              </div>
             </div>
 
             <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>

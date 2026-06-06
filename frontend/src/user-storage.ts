@@ -126,7 +126,6 @@ export type StoredBusinessInfo = {
   address?: string;
   taxId?: string;
   currency?: string;
-  logoUrl?: string;
 };
 
 type PermissionAwareUser = Pick<StoredUser, "role" | "permissions"> | null | undefined;
@@ -213,24 +212,6 @@ export function readStoredUser(): StoredUser | null {
   }
 }
 
-export function normalizeBusinessLogoUrl(value: unknown): string | null {
-  const rawValue = typeof value === "string" ? value.trim() : "";
-  if (!rawValue) {
-    return null;
-  }
-
-  try {
-    const parsed = new URL(rawValue);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return parsed.toString();
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
 export function readStoredBusinessInfo(): StoredBusinessInfo | null {
   const raw = localStorage.getItem("businessInfo");
   if (!raw) {
@@ -247,7 +228,6 @@ export function readStoredBusinessInfo(): StoredBusinessInfo | null {
       address: readStoredString(parsed.address),
       taxId: readStoredString(parsed.taxId),
       currency: readStoredString(parsed.currency),
-      logoUrl: readStoredString(parsed.logoUrl),
     };
   } catch {
     return null;
@@ -257,9 +237,4 @@ export function readStoredBusinessInfo(): StoredBusinessInfo | null {
 export function getDisplayBusinessName(user: StoredUser | null = readStoredUser()): string {
   const businessInfo = readStoredBusinessInfo();
   return businessInfo?.name || user?.business_name || "Business";
-}
-
-export function getDisplayBusinessLogoUrl(user: StoredUser | null = readStoredUser()): string | null {
-  const businessInfo = readStoredBusinessInfo();
-  return normalizeBusinessLogoUrl(businessInfo?.logoUrl) ?? normalizeBusinessLogoUrl(user?.brandmark_url);
 }

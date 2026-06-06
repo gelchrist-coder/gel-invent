@@ -292,7 +292,6 @@ export default function Login({ onLogin }: LoginProps) {
           address: isSameUser ? existingBusinessInfo?.address || "" : "",
           taxId: isSameUser ? existingBusinessInfo?.taxId || "" : "",
           currency: isSameUser ? existingBusinessInfo?.currency || "GHS" : "GHS",
-          logoUrl: userData.brandmark_url || (isSameUser ? existingBusinessInfo?.logoUrl || "" : ""),
         };
         localStorage.setItem(
           "businessInfo",

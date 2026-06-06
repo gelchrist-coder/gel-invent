@@ -8,7 +8,7 @@ import { useAppCategories } from "./categories";
 import { updateMyCategories } from "./api";
 import { Branch, NewProduct, Product, ProductUpdate, Supplier } from "./types";
 import { useExpiryTracking } from "./settings";
-import { getDisplayBusinessLogoUrl, getDisplayBusinessName, getEffectiveUserRole, hasUserPermission, readStoredUser } from "./user-storage";
+import { getDisplayBusinessName, getEffectiveUserRole, hasUserPermission, readStoredUser } from "./user-storage";
 
 const LAZY_IMPORT_RETRY_KEY = "gel-invent:lazy-import-retry";
 
@@ -162,7 +162,6 @@ export default function App() {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [userName, setUserName] = useState(() => readStoredUser()?.name || "User");
   const [businessName, setBusinessName] = useState(() => getDisplayBusinessName());
-  const [businessLogoUrl, setBusinessLogoUrl] = useState(() => getDisplayBusinessLogoUrl());
   const [userRole, setUserRole] = useState(() => readStoredUser()?.role || "Admin");
   const [currentUserId, setCurrentUserId] = useState<number | null>(() => readStoredUser()?.id ?? null);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -322,7 +321,6 @@ export default function App() {
     localStorage.removeItem("activeBranchId");
     setUserName("User");
     setBusinessName("Business");
-    setBusinessLogoUrl(null);
     setUserRole("Admin");
     setCurrentUserId(null);
     setBranches([]);
@@ -364,7 +362,6 @@ export default function App() {
       setIsAuthenticated(true);
       setUserName(initialUser.name || "User");
       setBusinessName(getDisplayBusinessName(initialUser));
-      setBusinessLogoUrl(getDisplayBusinessLogoUrl(initialUser));
       setUserRole(initialUser.role || "Admin");
       setCurrentUserId(initialUser.id || null);
       if (!hasUserPermission("manage_branches", initialUser)) {
@@ -383,7 +380,6 @@ export default function App() {
           setIsAuthenticated(true);
           setUserName(me.name || "User");
           setBusinessName(getDisplayBusinessName(me));
-          setBusinessLogoUrl(getDisplayBusinessLogoUrl(me));
           setUserRole(getEffectiveUserRole(me));
           setCurrentUserId(me.id || null);
 
@@ -590,7 +586,6 @@ export default function App() {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === "businessInfo") {
         setBusinessName(getDisplayBusinessName());
-        setBusinessLogoUrl(getDisplayBusinessLogoUrl());
         return;
       }
 
@@ -607,7 +602,6 @@ export default function App() {
 
           setUserName(newUser.name || "User");
           setBusinessName(getDisplayBusinessName(newUser));
-          setBusinessLogoUrl(getDisplayBusinessLogoUrl(newUser));
           setUserRole(newUser.role || "Admin");
         } catch (error) {
           console.error("Error parsing user change:", error);
@@ -640,7 +634,6 @@ export default function App() {
 
       setUserName(nextUser.name || "User");
       setBusinessName(getDisplayBusinessName(nextUser));
-      setBusinessLogoUrl(getDisplayBusinessLogoUrl(nextUser));
       setUserRole(nextUser.role || "Admin");
     };
 
@@ -648,7 +641,6 @@ export default function App() {
 
     const handleBusinessInfoChange = () => {
       setBusinessName(getDisplayBusinessName());
-      setBusinessLogoUrl(getDisplayBusinessLogoUrl());
     };
     window.addEventListener("businessInfoChanged", handleBusinessInfoChange as EventListener);
 
@@ -748,7 +740,6 @@ export default function App() {
     if (user) {
       setUserName(user.name || "User");
       setBusinessName(getDisplayBusinessName(user));
-      setBusinessLogoUrl(getDisplayBusinessLogoUrl(user));
       setUserRole(user.role || "Admin");
       setCurrentUserId(user.id ?? null);
 
@@ -1310,7 +1301,6 @@ export default function App() {
         onLogout={handleLogout}
         userName={userName}
         businessName={businessName}
-        businessLogoUrl={businessLogoUrl}
         userRole={userRole}
         userPermissions={userPermissions}
         isOnline={isOnline}
