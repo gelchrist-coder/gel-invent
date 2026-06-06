@@ -378,6 +378,22 @@ function isBrandingImageFormMessage(data: unknown): data is BrandingImageFormMes
   return candidate.type === "branding-image-upload-result";
 }
 
+function readBrandingImageFormPayload(iframe: HTMLIFrameElement): BrandingImageFormMessage | null {
+  try {
+    const doc = iframe.contentDocument;
+    const payloadNode = doc?.getElementById("branding-upload-result");
+    const rawPayload = payloadNode?.textContent?.trim();
+    if (!rawPayload) {
+      return null;
+    }
+
+    const parsed = JSON.parse(rawPayload) as unknown;
+    return isBrandingImageFormMessage(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 async function uploadBusinessLogoViaNativeForm(sourceInput: HTMLInputElement): Promise<AuthUser> {
   if (typeof window === "undefined" || typeof document === "undefined") {
     throw new Error("Native logo upload is unavailable in this environment.");
@@ -437,10 +453,12 @@ async function uploadBusinessLogoViaNativeForm(sourceInput: HTMLInputElement): P
 
   return await new Promise<AuthUser>((resolve, reject) => {
     let settled = false;
+    let hasSubmitted = false;
 
     const cleanup = () => {
       window.clearTimeout(timeoutId);
       window.removeEventListener("message", handleMessage);
+      iframe.removeEventListener("load", handleLoad);
       restoreSourceInput();
       iframe.remove();
       form.remove();
@@ -474,11 +492,30 @@ async function uploadBusinessLogoViaNativeForm(sourceInput: HTMLInputElement): P
       finish(() => reject(new Error(event.data.error || "Failed to update logo.")));
     };
 
+    const handleLoad = () => {
+      if (!hasSubmitted) {
+        return;
+      }
+
+      const payload = readBrandingImageFormPayload(iframe);
+      if (!payload || payload.request_id !== requestId) {
+        return;
+      }
+
+      if (payload.ok && payload.user) {
+        finish(() => resolve(payload.user));
+        return;
+      }
+
+      finish(() => reject(new Error(payload.error || "Failed to update logo.")));
+    };
+
     const timeoutId = window.setTimeout(() => {
       finish(() => reject(new Error("Logo upload timed out. Please try again.")));
     }, 60000);
 
     window.addEventListener("message", handleMessage);
+    iframe.addEventListener("load", handleLoad);
 
     sourceInput.name = "logo";
     form.appendChild(tokenInput);
@@ -488,6 +525,7 @@ async function uploadBusinessLogoViaNativeForm(sourceInput: HTMLInputElement): P
     document.body.appendChild(form);
 
     try {
+      hasSubmitted = true;
       form.submit();
     } catch (error) {
       finish(() => reject(error instanceof Error ? error : new Error("Failed to submit logo upload.")));

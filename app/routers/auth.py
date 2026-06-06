@@ -294,9 +294,18 @@ def _render_branding_image_form_response(
         <title>Branding Upload</title>
     </head>
     <body>
+        <script id=\"branding-upload-result\" type=\"application/json\">{payload_json}</script>
         <script>
             (function() {{
-                var payload = {payload_json};
+                var payloadNode = document.getElementById('branding-upload-result');
+                var payload = null;
+                if (payloadNode && payloadNode.textContent) {{
+                    try {{
+                        payload = JSON.parse(payloadNode.textContent);
+                    }} catch (_error) {{
+                        payload = null;
+                    }}
+                }}
                 if (window.parent && typeof window.parent.postMessage === 'function') {{
                     window.parent.postMessage(payload, window.location.origin);
                 }}
