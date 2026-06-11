@@ -3,7 +3,7 @@
    - Subsequent loads can work offline (for previously visited routes/assets).
 */
 
-const CACHE_NAME = "gel-invent-shell-v1";
+const CACHE_NAME = "gel-invent-shell-v2";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

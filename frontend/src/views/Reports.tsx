@@ -318,60 +318,55 @@ export default function Reports() {
   const [revenueData, setRevenueData] = useState<RevenueAnalytics | null>(null);
   const [revenuePeriod, setRevenuePeriod] = useState<"today" | "7d" | "30d" | "90d" | "all">("30d");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const headers = buildAuthHeaders({ "Content-Type": "application/json" });
 
       if (activeTab === "sales") {
-        if (!salesData) {
-          const res = await fetch(`${API_BASE}/reports/sales-dashboard`, { headers });
-          if (res.ok) {
-            setSalesData(await res.json());
-          }
-        }
-        if (!revenueData) {
-          const data = await fetchRevenueAnalytics(revenuePeriod);
-          setRevenueData(data as RevenueAnalytics);
-        }
-      } else if (activeTab === "inventory" && !inventoryData) {
+        const [salesRes, revenueResult] = await Promise.all([
+          fetch(`${API_BASE}/reports/sales-dashboard`, { headers }),
+          fetchRevenueAnalytics(revenuePeriod),
+        ]);
+        if (!salesRes.ok) throw new Error(`Failed to load sales data (${salesRes.status})`);
+        setSalesData(await salesRes.json());
+        setRevenueData(revenueResult as unknown as RevenueAnalytics);
+      } else if (activeTab === "inventory") {
         const res = await fetch(`${API_BASE}/reports/inventory-status`, { headers });
-        if (res.ok) {
-          setInventoryData(await res.json());
-        }
-      } else if (activeTab === "creditors" && !creditorsData) {
+        if (!res.ok) throw new Error(`Failed to load inventory data (${res.status})`);
+        setInventoryData(await res.json());
+      } else if (activeTab === "creditors") {
         const res = await fetch(`${API_BASE}/reports/creditors-summary`, { headers });
-        if (res.ok) {
-          setCreditorsData(await res.json());
-        }
+        if (!res.ok) throw new Error(`Failed to load creditors data (${res.status})`);
+        setCreditorsData(await res.json());
       }
-    } catch (error) {
-      console.error("Failed to load report data:", error);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load report data");
     } finally {
       setLoading(false);
     }
-  }, [activeTab, creditorsData, inventoryData, revenueData, revenuePeriod, salesData]);
+  }, [activeTab, revenuePeriod]);
 
   useEffect(() => {
-    // Only load data if user is Admin
-    if (isAdmin) {
-      loadData();
-    }
+    if (isAdmin) void loadData();
   }, [isAdmin, loadData]);
 
-  // Clear cached data when branch changes so fresh data is loaded
+  // Clear cached data when branch changes and reload for current tab
   useEffect(() => {
     const handleBranchChange = () => {
       setSalesData(null);
       setInventoryData(null);
       setCreditorsData(null);
       setRevenueData(null);
+      if (isAdmin) void loadData();
     };
 
     window.addEventListener("activeBranchChanged", handleBranchChange);
     return () => window.removeEventListener("activeBranchChanged", handleBranchChange);
-  }, []);
+  }, [isAdmin, loadData]);
 
   const formatCurrency = (amount: number) => `GHS ${amount.toFixed(2)}`;
   const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString();
@@ -430,6 +425,13 @@ export default function Reports() {
         <div style={{ textAlign: "center", padding: 36, color: "#6b7280", background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 14 }}>Loading...</div>
       )}
 
+      {error && (
+        <div style={{ padding: "14px 18px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, color: "#b91c1c", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>{error}</span>
+          <button onClick={() => { setError(null); if (isAdmin) void loadData(); }} style={{ marginLeft: 16, padding: "4px 12px", border: "1px solid #fca5a5", borderRadius: 6, background: "white", color: "#b91c1c", cursor: "pointer", fontSize: 13 }}>Retry</button>
+        </div>
+      )}
+
       {activeTab === "sales" && (
         <div style={{ marginBottom: 18, display: "flex", justifyContent: "flex-end" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#334155", background: "#ffffff", border: "1px solid #dbe5f2", borderRadius: 10, padding: "8px 10px" }}>
@@ -437,8 +439,7 @@ export default function Reports() {
             <select
               value={revenuePeriod}
               onChange={(e) => {
-                const next = e.target.value as "today" | "7d" | "30d" | "90d" | "all";
-                setRevenuePeriod(next);
+                setRevenuePeriod(e.target.value as "today" | "7d" | "30d" | "90d" | "all");
                 setRevenueData(null);
               }}
               style={{

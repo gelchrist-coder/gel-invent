@@ -254,12 +254,18 @@ export default function ProductList({
       );
       setAdjustingId(null);
       setAdjustment({ quantity: "", reason: "", expiry_date: "", unit_type: "piece", cost_price: "", selling_price: "" });
-      // Refresh stock data
+    } catch (err) {
+      alert((err as Error).message || "Failed to adjust stock");
+      setBusy(false);
+      return;
+    }
+    // Best-effort stock refresh after a successful adjustment
+    try {
       const movements = await fetchMovements(productId);
       const totalStock = movements.reduce((sum, m) => sum + m.change, 0);
       setStockData(prev => ({ ...prev, [productId]: Math.max(0, totalStock) }));
-    } catch (err) {
-      alert((err as Error).message || "Failed to adjust stock");
+    } catch {
+      // Refresh failed — parent will update current_stock on next product list reload
     } finally {
       setBusy(false);
     }
