@@ -555,7 +555,7 @@ function CreditorSelectionModal({ onSelect, onClose }: CreditorSelectionModalPro
   const fetchCreditors = async () => {
     try {
       setLoading(true);
-      const response = await resilientFetch(`${API_BASE}/creditors`, {
+      const response = await resilientFetch(`${API_BASE}/creditors/`, {
         headers: buildAuthHeaders(),
       });
       const data = await response.json();
@@ -573,7 +573,7 @@ function CreditorSelectionModal({ onSelect, onClose }: CreditorSelectionModalPro
 
   const handleCreateCreditor = async (name: string, phone: string) => {
     try {
-      const response = await resilientFetch(`${API_BASE}/creditors`, {
+      const response = await resilientFetch(`${API_BASE}/creditors/`, {
         method: "POST",
         headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ name, phone: phone || null }),

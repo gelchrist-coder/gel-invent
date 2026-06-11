@@ -1,6 +1,5 @@
 import os
 import threading
-from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
@@ -16,19 +15,14 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is required")
 
-def _is_supabase_host(database_url: str) -> bool:
-    hostname = (urlparse(database_url).hostname or "").lower()
-    return hostname.endswith(".supabase.co") or hostname.endswith(".supabase.com") or hostname.endswith(".supabase.net")
-
-
 # Ensure we're using the correct PostgreSQL driver
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
 elif DATABASE_URL.startswith("postgresql://") and "+psycopg2" not in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
-# Supabase requires SSL. Support direct and pooled hostnames.
-if _is_supabase_host(DATABASE_URL) and "sslmode=" not in DATABASE_URL:
+# Supabase requires SSL. If sslmode isn't specified, add it for supabase hosts.
+if "supabase.co" in DATABASE_URL and "sslmode=" not in DATABASE_URL:
     separator = "&" if "?" in DATABASE_URL else "?"
     DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
 
@@ -93,6 +87,28 @@ def ensure_critical_schema() -> None:
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
                 conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
 
+                # Index creation is optional at runtime; do not block requests if
+                # legacy duplicate data prevents creating a unique index.
+                try:
+                    conn.execute(
+                        text(
+                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id_unique "
+                            "ON users (supabase_user_id) WHERE supabase_user_id IS NOT NULL"
+                        )
+                    )
+                except Exception as exc:
+                    print(f"⚠️ Could not ensure idx_users_supabase_user_id_unique: {exc}")
+
+                try:
+                    conn.execute(
+                        text(
+                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique "
+                            "ON users (phone) WHERE phone IS NOT NULL"
+                        )
+                    )
+                except Exception as exc:
+                    print(f"⚠️ Could not ensure idx_users_phone_unique: {exc}")
+
             _critical_schema_ready = True
         except Exception as exc:
             # Keep requests flowing; retry on next request.
@@ -101,6 +117,7 @@ def ensure_critical_schema() -> None:
 
 def get_db():
     """Dependency that yields a database session."""
+    ensure_critical_schema()
     db = SessionLocal()
     try:
         yield db

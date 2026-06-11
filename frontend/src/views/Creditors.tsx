@@ -8,17 +8,12 @@ interface Creditor {
   name: string;
   phone: string | null;
   email: string | null;
-  birthday?: string | null;
   total_debt: number;
   actual_debt: number;
   total_purchases: number;
   total_payments: number;
   transaction_count: number;
-  purchase_count?: number;
-  credit_transaction_count?: number;
-  loyalty_points?: number;
   last_transaction_at: string | null;
-  last_purchase_at?: string | null;
   loyalty_level: "Bronze" | "Silver" | "Gold" | "VIP";
   notes: string | null;
   created_at: string;
@@ -59,6 +54,7 @@ export default function Creditors() {
     };
     window.addEventListener("activeBranchChanged", handler as EventListener);
     return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

@@ -4,11 +4,6 @@ import RevenueMetrics from "../components/RevenueMetrics";
 import RevenueTrend from "../components/RevenueTrend";
 import TopProducts from "../components/TopProducts";
 import PaymentMethodBreakdown from "../components/PaymentMethodBreakdown";
-import { hasUserPermission, readStoredUser } from "../user-storage";
-
-type RevenueAnalysisProps = {
-  embedded?: boolean;
-};
 
 type RevenueMetricsData = {
   total_revenue: number;
@@ -53,18 +48,20 @@ type RevenueAnalyticsResponse = {
   top_products: TopProductRow[];
 };
 
-export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisProps) {
-  const currentUser = readStoredUser();
-  const canViewRevenue = hasUserPermission("view_revenue", currentUser);
+export default function RevenueAnalysis() {
+  // Check if current user is Admin
+  const currentUser = localStorage.getItem("user");
+  const userRole = currentUser ? JSON.parse(currentUser).role : null;
+  const isAdmin = userRole === "Admin";
 
   const [data, setData] = useState<RevenueAnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState("30d");
-  const title = "Revenue";
 
   const loadData = useCallback(async () => {
-    if (!canViewRevenue) return;
+    // Only load data if user is Admin
+    if (!isAdmin) return;
     
     setLoading(true);
     setError(null);
@@ -76,31 +73,32 @@ export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisPro
     } finally {
       setLoading(false);
     }
-  }, [canViewRevenue, period]);
+  }, [isAdmin, period]);
 
   useEffect(() => {
-    if (canViewRevenue) {
+    if (isAdmin) {
       loadData();
     } else {
       setLoading(false);
     }
-  }, [canViewRevenue, loadData, period]);
+  }, [isAdmin, loadData, period]);
 
   // Reload data when branch changes
   useEffect(() => {
     const handleBranchChange = () => {
-      if (canViewRevenue) {
+      if (isAdmin) {
         loadData();
       }
     };
 
     window.addEventListener("activeBranchChanged", handleBranchChange);
     return () => window.removeEventListener("activeBranchChanged", handleBranchChange);
-  }, [canViewRevenue, loadData]);
+  }, [isAdmin, loadData]);
 
-  if (!canViewRevenue) {
+  // Block access for non-Admin users
+  if (!isAdmin) {
     return (
-      <div style={{ padding: embedded ? 0 : 32 }}>
+      <div style={{ padding: 32 }}>
         <div
           style={{
             padding: 32,
@@ -111,7 +109,7 @@ export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisPro
           }}
         >
           <h2 style={{ color: "#c33", marginBottom: 8 }}>Access Denied</h2>
-          <p style={{ color: "#666" }}>Your account does not have access to revenue.</p>
+          <p style={{ color: "#666" }}>Only business owners can access revenue analysis.</p>
         </div>
       </div>
     );
@@ -119,8 +117,8 @@ export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisPro
 
   if (loading) {
     return (
-      <div className={embedded ? undefined : "app-shell"}>
-        {!embedded ? <h1 className="page-title" style={{ marginBottom: 24 }}>{title}</h1> : null}
+      <div className="app-shell">
+        <h1 className="page-title" style={{ marginBottom: 24 }}>Revenue Analysis</h1>
         <div className="card">
           <p style={{ margin: 0, color: "#6b7280" }}>Loading revenue data...</p>
         </div>
@@ -130,8 +128,8 @@ export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisPro
 
   if (error) {
     return (
-      <div className={embedded ? undefined : "app-shell"}>
-        {!embedded ? <h1 className="page-title" style={{ marginBottom: 24 }}>{title}</h1> : null}
+      <div className="app-shell">
+        <h1 className="page-title" style={{ marginBottom: 24 }}>Revenue Analysis</h1>
         <div className="card">
           <p style={{ margin: 0, color: "#ef4444" }}>Error: {error}</p>
           <button
@@ -158,9 +156,9 @@ export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisPro
   }
 
   return (
-    <div className={embedded ? undefined : "app-shell"}>
+    <div className="app-shell">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <h1 className="page-title" style={{ margin: 0, fontSize: embedded ? 24 : undefined }}>{title}</h1>
+        <h1 className="page-title" style={{ margin: 0 }}>Revenue Analysis</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <label style={{ fontSize: 14, color: "#6b7280", fontWeight: 500 }}>Period:</label>
           <select

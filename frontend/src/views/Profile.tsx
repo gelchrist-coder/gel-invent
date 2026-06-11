@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateMyBusinessProfile, updateSystemSettings } from "../api";
+import { changePassword, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateSystemSettings } from "../api";
 import { Branch } from "../types";
-import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type PasswordInputProps = {
   label: string;
@@ -49,16 +48,13 @@ function getPasswordRuleError(password: string): string | null {
 }
 
 export default function Profile() {
-  const currentUserData = readStoredUser();
-  const canManageBranches = hasUserPermission("manage_branches", currentUserData);
-  const canManageBusinessProfile = hasUserPermission("manage_business_profile", currentUserData);
-  const canManageSettings = hasUserPermission("manage_settings", currentUserData);
-  const canManageData = hasUserPermission("manage_data", currentUserData);
-  const canAccessSystemTab = canManageSettings || canManageData;
+  // Get user role from localStorage
+  const currentUserStr = localStorage.getItem("user");
+  const currentUserData = currentUserStr ? JSON.parse(currentUserStr) : null;
+  const userRole = currentUserData?.role || "Admin";
+  const isAdmin = userRole === "Admin";
 
-  const [activeTab, setActiveTab] = useState<"business" | "user" | "system">(
-    canManageBusinessProfile ? "business" : canAccessSystemTab ? "system" : "user",
-  );
+  const [activeTab, setActiveTab] = useState<"business" | "user" | "system">(isAdmin ? "business" : "user");
   const [businessInfo, setBusinessInfo] = useState({
     name: currentUserData?.business_name || "Gel Invent Business",
     owner: currentUserData?.name || "Gel Christ Boateng",
@@ -67,6 +63,7 @@ export default function Profile() {
     address: "",
     taxId: "",
     currency: "GHS",
+    logo: "",
   });
 
   const [userInfo, setUserInfo] = useState({
@@ -78,7 +75,7 @@ export default function Profile() {
 
   const [systemSettings, setSystemSettings] = useState({
     lowStockThreshold: "10",
-    expiryWarningDays: "45",
+    expiryWarningDays: "180",
     currencyCode: "GHS",
     autoBackup: true,
     emailNotifications: false,
@@ -99,9 +96,7 @@ export default function Profile() {
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const [exportingData, setExportingData] = useState(false);
   const [importingData, setImportingData] = useState(false);
-  const [clearingData, setClearingData] = useState(false);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
-  const [savingProfile, setSavingProfile] = useState(false);
 
   // Branch management state
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -166,7 +161,8 @@ export default function Profile() {
         // If unauthenticated or API unavailable, keep defaults.
       }
 
-      if (canManageBranches) {
+      // Load branches for Admin users
+      if (isAdmin) {
         try {
           const branchData = await fetchBranches();
           setBranches(branchData);
@@ -175,98 +171,64 @@ export default function Profile() {
         }
       }
     })();
-  }, [canManageBranches]);
-
-  useEffect(() => {
-    if (activeTab === "business" && !canManageBusinessProfile) {
-      setActiveTab(canAccessSystemTab ? "system" : "user");
-      return;
-    }
-
-    if (activeTab === "system" && !canAccessSystemTab) {
-      setActiveTab(canManageBusinessProfile ? "business" : "user");
-    }
-  }, [activeTab, canAccessSystemTab, canManageBusinessProfile]);
+  }, [isAdmin]);
 
   const handleSave = async () => {
-    setDataMessage(null);
-    setSavingProfile(true);
+    localStorage.setItem("businessInfo", JSON.stringify(businessInfo));
+    localStorage.setItem("userInfo", JSON.stringify(userInfo));
 
-    try {
-      const nextBusinessInfo = {
-        ...businessInfo,
-        name: businessInfo.name.trim() || "Gel Invent Business",
-        owner: businessInfo.owner.trim() || userInfo.name || "Admin User",
-        phone: businessInfo.phone.trim(),
-        email: businessInfo.email.trim(),
-        address: businessInfo.address.trim(),
-        taxId: businessInfo.taxId.trim(),
-        currency: (businessInfo.currency || "GHS").toUpperCase(),
+    // Persist system settings (Admin only)
+    if (isAdmin) {
+      const selectedCurrency = (businessInfo.currency || "GHS").toUpperCase();
+      const previousCurrency = (systemSettings.currencyCode || "GHS").toUpperCase();
+
+      const payload = {
+        low_stock_threshold: Number(systemSettings.lowStockThreshold) || 0,
+        expiry_warning_days: Number(systemSettings.expiryWarningDays) || 0,
+        uses_expiry_tracking: true,
+        currency_code: selectedCurrency,
+        auto_backup: systemSettings.autoBackup,
+        email_notifications: systemSettings.emailNotifications,
       };
+      const updated = await updateSystemSettings(payload);
 
-      if (canManageBusinessProfile) {
-        await updateMyBusinessProfile({
-          business_name: nextBusinessInfo.name,
-        });
-      }
+      let conversionMessage = "";
+      if (selectedCurrency !== previousCurrency) {
+        const convertExisting = confirm(
+          `Convert existing prices and amounts from ${previousCurrency} to ${selectedCurrency} using live exchange rate?\n\nChoose OK to convert all existing records. Choose Cancel if you are just starting the business in ${selectedCurrency}.`
+        );
 
-      localStorage.setItem("businessInfo", JSON.stringify(nextBusinessInfo));
-      localStorage.setItem("userInfo", JSON.stringify(userInfo));
-      window.dispatchEvent(new CustomEvent("businessInfoChanged", { detail: nextBusinessInfo }));
-      setBusinessInfo(nextBusinessInfo);
-
-      if (canManageSettings) {
-        const selectedCurrency = nextBusinessInfo.currency;
-        const previousCurrency = (systemSettings.currencyCode || "GHS").toUpperCase();
-
-        const payload = {
-          low_stock_threshold: Number(systemSettings.lowStockThreshold) || 0,
-          expiry_warning_days: Number(systemSettings.expiryWarningDays) || 0,
-          uses_expiry_tracking: true,
-          currency_code: selectedCurrency,
-          auto_backup: systemSettings.autoBackup,
-          email_notifications: systemSettings.emailNotifications,
-        };
-        const updated = await updateSystemSettings(payload);
-
-        let conversionMessage = "";
-        if (selectedCurrency !== previousCurrency) {
-          const convertExisting = confirm(
-            `Convert existing prices and amounts from ${previousCurrency} to ${selectedCurrency} using live exchange rate?\n\nChoose OK to convert all existing records. Choose Cancel if you are just starting the business in ${selectedCurrency}.`
-          );
-
-          const result = await convertBusinessCurrency({
-            target_currency: selectedCurrency,
-            convert_existing: convertExisting,
-          });
-
-          conversionMessage = convertExisting
-            ? ` Currency converted using live rate ${result.previous_currency}->${result.currency_code} (${result.conversion_rate.toFixed(4)}).`
-            : ` Currency switched to ${result.currency_code} without converting existing records.`;
-        }
-
-        setSystemSettings({
-          lowStockThreshold: String(updated.low_stock_threshold),
-          expiryWarningDays: String(updated.expiry_warning_days),
-          currencyCode: String(updated.currency_code || selectedCurrency),
-          autoBackup: updated.auto_backup,
-          emailNotifications: updated.email_notifications,
+        const result = await convertBusinessCurrency({
+          target_currency: selectedCurrency,
+          convert_existing: convertExisting,
         });
 
-        window.dispatchEvent(new CustomEvent("systemSettingsChanged", { detail: updated }));
-        if (conversionMessage) {
-          setDataMessage(`Settings saved.${conversionMessage}`);
-        }
+        conversionMessage = convertExisting
+          ? ` Currency converted using live rate ${result.previous_currency}->${result.currency_code} (${result.conversion_rate.toFixed(4)}).`
+          : ` Currency switched to ${result.currency_code} without converting existing records.`;
       }
 
-      setEditing(false);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    } catch (error) {
-      setDataMessage(error instanceof Error ? error.message : "Failed to save profile");
-    } finally {
-      setSavingProfile(false);
+      setSystemSettings({
+        lowStockThreshold: String(updated.low_stock_threshold),
+        expiryWarningDays: String(updated.expiry_warning_days),
+        currencyCode: String(updated.currency_code || selectedCurrency),
+        autoBackup: updated.auto_backup,
+        emailNotifications: updated.email_notifications,
+      });
+
+      setBusinessInfo((prev) => ({ ...prev, currency: selectedCurrency }));
+      localStorage.setItem("businessInfo", JSON.stringify({ ...businessInfo, currency: selectedCurrency }));
+
+      // Notify other components that settings have changed
+      window.dispatchEvent(new CustomEvent("systemSettingsChanged", { detail: updated }));
+      if (conversionMessage) {
+        setDataMessage(`Settings saved.${conversionMessage}`);
+      }
     }
+
+    setEditing(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
   };
 
   const openChangePassword = () => {
@@ -369,38 +331,6 @@ export default function Profile() {
       setDataMessage(error instanceof Error ? error.message : "Export failed");
     } finally {
       setExportingData(false);
-    }
-  };
-
-  const handleClearAllData = async () => {
-    const confirmed = confirm(
-      "Reset the entire application database? This permanently deletes users, branches, products, suppliers, purchases, sales, settings, returns, creditors, and cached offline app data. All IDs will restart from 1."
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    const typed = prompt("Type CLEAR to confirm this data wipe:");
-    if (typed !== "CLEAR") {
-      setDataMessage("Clear data cancelled.");
-      return;
-    }
-
-    setDataMessage(null);
-    setClearingData(true);
-    let didResetDatabase = false;
-    try {
-      const result = await clearAllData();
-      didResetDatabase = true;
-      window.alert(`${result.message} You will be signed out now. Create a new account to start again from ID 1.`);
-      await clearClientOperationalData();
-      return;
-    } catch (error) {
-      setDataMessage(error instanceof Error ? error.message : "Failed to clear data");
-    } finally {
-      if (!didResetDatabase) {
-        setClearingData(false);
-      }
     }
   };
 
@@ -519,15 +449,13 @@ export default function Profile() {
           <div style={{ display: "flex", gap: 12 }}>
             <button
               onClick={() => setEditing(false)}
-              disabled={savingProfile}
               style={{
                 padding: "10px 20px",
                 background: "transparent",
                 border: "1px solid #d1d5db",
                 borderRadius: 8,
-                cursor: savingProfile ? "not-allowed" : "pointer",
+                cursor: "pointer",
                 fontWeight: 600,
-                opacity: savingProfile ? 0.7 : 1,
               }}
             >
               Cancel
@@ -535,14 +463,9 @@ export default function Profile() {
             <button
               onClick={handleSave}
               className="button"
-              disabled={savingProfile}
-              style={{
-                background: "#10b981",
-                opacity: savingProfile ? 0.7 : 1,
-                cursor: savingProfile ? "not-allowed" : "pointer",
-              }}
+              style={{ background: "#10b981" }}
             >
-              {savingProfile ? "Saving..." : "Save Changes"}
+              Save Changes
             </button>
           </div>
         ) : (
@@ -597,11 +520,11 @@ export default function Profile() {
         }}
       >
         {[
-          { id: "business", label: "Business Info", icon: "", hidden: !canManageBusinessProfile },
+          { id: "business", label: "Business Info", icon: "", adminOnly: true },
           { id: "user", label: "User Account", icon: "" },
-          { id: "system", label: "System Settings", icon: "", hidden: !canAccessSystemTab },
+          { id: "system", label: "System Settings", icon: "", adminOnly: true },
         ]
-          .filter((tab) => !tab.hidden)
+          .filter((tab) => !tab.adminOnly || isAdmin)
           .map((tab) => (
           <button
             key={tab.id}
@@ -1008,25 +931,6 @@ export default function Profile() {
                     Alert when stock falls below this number
                   </small>
                 </label>
-                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    Expiry Warning Days
-                  </span>
-                  <input
-                    type="number"
-                    value={systemSettings.expiryWarningDays}
-                    onChange={(e) =>
-                      setSystemSettings({ ...systemSettings, expiryWarningDays: e.target.value })
-                    }
-                    disabled={!editing}
-                    className="input"
-                    min="0"
-                    style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
-                  />
-                  <small style={{ fontSize: 12, color: "#6b7280" }}>
-                    Mark products as expiring when within this many days
-                  </small>
-                </label>
               </div>
             </div>
 
@@ -1106,7 +1010,7 @@ export default function Profile() {
             </div>
 
             {/* Branch Management */}
-            {canManageBranches && (
+            {isAdmin && (
               <div
                 style={{
                   borderTop: "1px solid #e5e7eb",
@@ -1235,7 +1139,7 @@ export default function Profile() {
                     fontSize: 14,
                   }}
                   onClick={handleExportData}
-                  disabled={exportingData || importingData || clearingData}
+                  disabled={exportingData || importingData}
                 >
                   {exportingData ? "⏳ Exporting..." : "📥 Export Data"}
                 </button>
@@ -1246,7 +1150,7 @@ export default function Profile() {
                     fontSize: 14,
                   }}
                   onClick={handlePickImportFile}
-                  disabled={exportingData || importingData || clearingData}
+                  disabled={exportingData || importingData}
                 >
                   {importingData ? "⏳ Importing..." : "📤 Import Data"}
                 </button>
@@ -1256,10 +1160,13 @@ export default function Profile() {
                     background: "#ef4444",
                     fontSize: 14,
                   }}
-                  onClick={handleClearAllData}
-                  disabled={exportingData || importingData || clearingData}
+                  onClick={() => {
+                    if (confirm("Are you sure you want to clear all data? This cannot be undone!")) {
+                      // Clear data logic here
+                    }
+                  }}
                 >
-                  {clearingData ? "⏳ Clearing..." : "Clear All Data"}
+                  Clear All Data
                 </button>
               </div>
             </div>

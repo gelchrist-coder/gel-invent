@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_EFFECTIVE_CAPABILITIES, fetchSystemSettings, SystemSettings, type CapabilityKey, type CapabilityMap } from "./api";
+import { fetchSystemSettings, SystemSettings } from "./api";
 
 const DEFAULT_SETTINGS: SystemSettings = {
   low_stock_threshold: 10,
-  expiry_warning_days: 45,
+  expiry_warning_days: 180,
   uses_expiry_tracking: true,
-  capability_overrides: {},
-  effective_capabilities: { ...DEFAULT_EFFECTIVE_CAPABILITIES },
   currency_code: "GHS",
   auto_backup: true,
   email_notifications: false,
@@ -41,6 +39,12 @@ export const clearSettingsCache = () => {
   fetchPromise = null;
 };
 
+// Clear on logout so the next user doesn't briefly see stale settings.
+window.addEventListener("userChanged", (e) => {
+  const user = (e as CustomEvent<unknown>).detail;
+  if (!user) clearSettingsCache();
+});
+
 // Get settings synchronously if cached
 export const getCachedSettings = (): SystemSettings | null => cachedSettings;
 
@@ -72,16 +76,8 @@ export const useSystemSettings = (): SystemSettings => {
   return settings;
 };
 
-export const useCapabilities = (): CapabilityMap => {
-  const settings = useSystemSettings();
-  return settings.effective_capabilities ?? DEFAULT_EFFECTIVE_CAPABILITIES;
-};
-
-export const useCapability = (key: CapabilityKey): boolean => {
-  const capabilities = useCapabilities();
-  return Boolean(capabilities[key]);
-};
-
+// Convenience hook for just the expiry tracking setting
+// Always returns true now since expiry tracking is per-product (perishable vs non-perishable)
 export const useExpiryTracking = (): boolean => {
-  return useCapability("expiry_tracking");
+  return true;
 };

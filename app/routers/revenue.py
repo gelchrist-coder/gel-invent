@@ -1,14 +1,13 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
 from ..database import get_db
 from ..models import Sale, Product, StockMovement, User, CreditTransaction, Creditor, SaleReturn
-from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 
@@ -42,7 +41,12 @@ def get_revenue_analytics(
     
     (Owner/Admin only)
     """
-    ensure_permission(current_user, "view_revenue", "Only Admin and Manager can access revenue analytics")
+    # Restrict access to Admin/Owner only
+    if current_user.role != "Admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only business owners can access revenue analytics"
+        )
     
     # Get tenant user IDs for multi-tenant filtering
     tenant_user_ids = get_tenant_user_ids(current_user, db)

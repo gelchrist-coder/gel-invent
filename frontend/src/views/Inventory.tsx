@@ -1,56 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentProps } from "react";
-import { createBranchTransfer, createMovement, deleteProduct, fetchAllMovements, fetchBranchesCached, fetchInventoryAnalytics, fetchProductsCached, exportMovementsPdf, isTemporaryServerDelayError, warmBackend } from "../api";
+import { createBranchTransfer, createMovement, deleteProduct, fetchAllMovements, fetchBranchesCached, fetchInventoryAnalytics, fetchProductsCached, exportMovementsPdf } from "../api";
 import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
 import MovementHistory from "../components/MovementHistory";
-import PurchasingPanel from "../components/PurchasingPanel";
-import ProductSearchSelect from "../components/ProductSearchSelect";
-import { getProductBatchSummary, getProductVariantSummary } from "../product-display";
-import { useCapabilities, useExpiryTracking } from "../settings";
+import { useExpiryTracking } from "../settings";
 import type { Branch, Product } from "../types";
-import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
-type InventoryTab = "overview" | "alerts" | "actions" | "purchasing" | "returns" | "history";
-
-const normalizeQuantityStep = (value: number | null | undefined): number => {
-  const parsed = Number(value ?? 1);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 1;
-  }
-  return Number(parsed.toFixed(2));
-};
-
-const formatQuantityValue = (value: number): string => {
-  const rounded = Number(value.toFixed(2));
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.?0+$/, "");
-};
-
-const isStepAligned = (value: number, step: number): boolean => {
-  const rounded = Number((Math.round(value / step) * step).toFixed(2));
-  return Math.abs(value - rounded) < 0.0001;
-};
 
 export default function Inventory() {
-  const currentUser = readStoredUser();
-  const canManageCatalog = hasUserPermission("manage_catalog", currentUser);
-  const canManageInventory = hasUserPermission("manage_inventory", currentUser);
-  const canTransferBetweenBranches = hasUserPermission("transfer_stock_between_branches", currentUser);
-  const canViewProcurement = hasUserPermission("view_procurement", currentUser);
-  const canUseActionTab = canManageInventory || canManageCatalog || canTransferBetweenBranches;
-  const capabilities = useCapabilities();
+  // Check if current user is Admin
+  const currentUser = localStorage.getItem("user");
+  const userRole = currentUser ? JSON.parse(currentUser).role : null;
+  const isAdmin = userRole === "Admin";
   const usesExpiryTracking = useExpiryTracking();
 
   const [analytics, setAnalytics] = useState<InventoryAnalytics | null>(null);
   const [movements, setMovements] = useState<MovementHistoryRow[]>([]);
-  const [activeTab, setActiveTab] = useState<InventoryTab>("overview");
-  const [pendingSupplierReturnPurchaseId, setPendingSupplierReturnPurchaseId] = useState<number | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
-  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
   const [actionType, setActionType] = useState<"new_stock" | "damage" | "transfer" | "delete">("new_stock");
   const [quantity, setQuantity] = useState<string>("");
   const [stockReason, setStockReason] = useState<string>("New Stock");
@@ -62,7 +33,6 @@ export default function Inventory() {
   const [unitSellingPrice, setUnitSellingPrice] = useState<string>("");
   const [submittingAction, setSubmittingAction] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [warmingUp, setWarmingUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasLoadedOnce = useRef(false);
 
@@ -87,7 +57,7 @@ export default function Inventory() {
   const [exporting, setExporting] = useState(false);
   const [exportType, setExportType] = useState<string>("all");
 
-  const loadData = useCallback(async (allowWarmRetry = true) => {
+  const loadData = useCallback(async () => {
     if (!hasLoadedOnce.current) {
       setLoading(true);
     }
@@ -114,21 +84,8 @@ export default function Inventory() {
         setSelectedProductId(null);
       }
     } catch (err) {
-      if (allowWarmRetry && isTemporaryServerDelayError(err)) {
-        setWarmingUp(true);
-        const isReady = await warmBackend("/health/db", true, {
-          timeoutMs: 90000,
-          probeTimeoutMs: 35000,
-          retryIntervalMs: 2000,
-        });
-        if (isReady) {
-          await loadData(false);
-          return;
-        }
-      }
       setError(err instanceof Error ? err.message : "Failed to load inventory data");
     } finally {
-      setWarmingUp(false);
       setLoading(false);
       hasLoadedOnce.current = true;
     }
@@ -147,17 +104,6 @@ export default function Inventory() {
   }, [loadData]);
 
   const selectedProduct = products.find((p) => p.id === selectedProductId) ?? null;
-  const selectedProductVariants = useMemo(
-    () =>
-      [...(selectedProduct?.variants ?? [])].sort((left, right) => {
-        if (left.sort_order !== right.sort_order) {
-          return left.sort_order - right.sort_order;
-        }
-        return left.label.localeCompare(right.label);
-      }),
-    [selectedProduct],
-  );
-  const selectedVariant = selectedProductVariants.find((variant) => variant.id === selectedVariantId) ?? null;
   const selectedProductStock = selectedProduct ? Math.max(0, Number(selectedProduct.current_stock ?? 0)) : 0;
   const rawActiveBranchId = localStorage.getItem("activeBranchId");
   const activeBranchId = rawActiveBranchId ? Number(rawActiveBranchId) : null;
@@ -167,24 +113,7 @@ export default function Inventory() {
   const isDamageAction = actionType === "damage";
   const isTransferAction = actionType === "transfer";
   const isDeleteAction = actionType === "delete";
-  const selectedProductAllowsFractional = Boolean(capabilities.fractional_sales && selectedProduct?.allows_fractional_sales);
-  const selectedProductQuantityStep = selectedProductAllowsFractional
-    ? normalizeQuantityStep(Number(selectedProduct?.quantity_step ?? 1))
-    : 1;
-  const selectedProductVariantSummary = selectedProduct && (capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes)
-    ? getProductVariantSummary(selectedProduct)
-    : null;
-  const selectedProductBatchSummary = selectedProduct && capabilities.batch_tracking
-    ? getProductBatchSummary(selectedProduct, { includeNextExpiry: usesExpiryTracking })
-    : null;
   const isPerishableProduct = usesExpiryTracking && !!selectedProduct?.expiry_date;
-  const canSelectVariantForAction = !isTransferAction && !isDeleteAction && selectedProductVariants.length > 0;
-
-  useEffect(() => {
-    setSelectedVariantId((previous) => (
-      selectedProductVariants.some((variant) => variant.id === previous) ? previous : null
-    ));
-  }, [selectedProductVariants]);
 
   const resetActionForm = () => {
     setQuantity("");
@@ -203,8 +132,8 @@ export default function Inventory() {
     }
 
     if (actionType === "delete") {
-      if (!canManageCatalog) {
-        alert("You do not have permission to delete products");
+      if (!isAdmin) {
+        alert("Only Admin can delete products");
         return;
       }
 
@@ -225,24 +154,9 @@ export default function Inventory() {
       return;
     }
 
-    if (!canManageInventory && !isTransferAction) {
-      alert("You do not have permission to adjust inventory");
-      return;
-    }
-
     const qty = Number(quantity);
     if (!Number.isFinite(qty) || qty <= 0) {
       alert("Enter a valid quantity");
-      return;
-    }
-
-    if (!selectedProductAllowsFractional && !Number.isInteger(qty)) {
-      alert("This product only supports whole-number quantities");
-      return;
-    }
-
-    if (selectedProductAllowsFractional && !isStepAligned(qty, selectedProductQuantityStep)) {
-      alert(`Quantity must follow the configured step of ${formatQuantityValue(selectedProductQuantityStep)}`);
       return;
     }
 
@@ -252,8 +166,8 @@ export default function Inventory() {
     }
 
     if (isTransferAction) {
-      if (!canTransferBetweenBranches) {
-        alert("You do not have permission to transfer stock between branches");
+      if (!isAdmin) {
+        alert("Only Admin can transfer stock between branches");
         return;
       }
       if (!destinationBranchId) {
@@ -299,7 +213,6 @@ export default function Inventory() {
       await createMovement(selectedProductId, {
         change,
         reason,
-        variant_id: canSelectVariantForAction ? selectedVariantId : null,
         expiry_date: isNewStockAction && isPerishableProduct ? (expiryDate || null) : null,
         unit_cost_price: isNewStockAction && Number.isFinite(parsedCost) ? parsedCost : null,
         unit_selling_price: isNewStockAction && Number.isFinite(parsedSelling) ? parsedSelling : null,
@@ -332,70 +245,12 @@ export default function Inventory() {
     }
   };
 
-  const alertCount = analytics
-    ? analytics.low_stock_alerts.length + (usesExpiryTracking ? analytics.expiring_products.length : 0)
-    : 0;
-  const inventoryTabs = useMemo<Array<{ id: InventoryTab; label: string; description: string; count?: number }>>(
-    () => [
-      {
-        id: "overview",
-        label: "Overview",
-        description: "Track stock value, totals, and movement summaries at a glance.",
-      },
-      {
-        id: "alerts",
-        label: "Alerts",
-        description: "Review low-stock and expiring-product attention items.",
-        count: alertCount,
-      },
-      ...(canUseActionTab
-        ? [
-            {
-              id: "actions" as const,
-              label: "Quick Adjustments",
-              description: "Make manual stock corrections, record losses, transfer stock, or delete a product.",
-            },
-          ]
-        : []),
-      ...(canViewProcurement
-        ? [
-            {
-              id: "purchasing" as const,
-              label: "Purchasing",
-              description: "Use this for supplier-backed restocks, invoices, payments, and recent buying activity.",
-            },
-            {
-              id: "returns" as const,
-              label: "Supplier Returns",
-              description: "Handle stock sent back to suppliers without crowding the purchasing workflow.",
-            },
-          ]
-        : []),
-      {
-        id: "history",
-        label: "Movement History",
-        description: "Filter, export, and review inventory movement activity.",
-        count: movements.length,
-      },
-    ],
-    [alertCount, canUseActionTab, canViewProcurement, movements.length],
-  );
-  const activeTabMeta = inventoryTabs.find((tab) => tab.id === activeTab) ?? inventoryTabs[0];
-
-  useEffect(() => {
-    if (!inventoryTabs.some((tab) => tab.id === activeTab)) {
-      setActiveTab("overview");
-    }
-  }, [activeTab, inventoryTabs]);
-
   if (loading) {
     return (
       <div className="app-shell">
         <h1 className="page-title" style={{ marginBottom: 24 }}>Inventory Tracking</h1>
         <div className="card">
-          <p style={{ margin: 0, color: "#6b7280" }}>
-            {warmingUp ? "Server is warming up, retrying inventory load..." : "Loading inventory data..."}
-          </p>
+          <p style={{ margin: 0, color: "#6b7280" }}>Loading inventory data...</p>
         </div>
       </div>
     );
@@ -452,122 +307,28 @@ export default function Inventory() {
         </button>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16, padding: 6, border: "1px solid #dbe5f2", borderRadius: 14, background: "linear-gradient(180deg, #f8fbff, #f1f5fb)" }}>
-        {inventoryTabs.map((tab) => {
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 16px",
-                border: isActive ? "1px solid #2f66d0" : "1px solid transparent",
-                borderRadius: 10,
-                background: isActive ? "linear-gradient(120deg, #2f66d0, #4a82e8)" : "transparent",
-                cursor: "pointer",
-                fontWeight: 700,
-                fontSize: 14,
-                color: isActive ? "#ffffff" : "#475569",
-                boxShadow: isActive ? "0 8px 18px rgba(47, 102, 208, 0.28)" : "none",
-              }}
-            >
-              <span>{tab.label}</span>
-              {typeof tab.count === "number" ? (
-                <span
-                  style={{
-                    minWidth: 22,
-                    height: 22,
-                    padding: "0 6px",
-                    borderRadius: 999,
-                    background: isActive ? "rgba(255,255,255,0.18)" : "#e2e8f0",
-                    color: isActive ? "#ffffff" : "#334155",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 12,
-                    fontWeight: 700,
-                  }}
-                >
-                  {tab.count}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
+      {/* Overview Cards */}
+      <div style={{ marginBottom: 24 }}>
+        <InventoryOverview analytics={analytics} usesExpiryTracking={usesExpiryTracking} />
       </div>
 
-      <div style={{ marginBottom: 24, padding: "14px 16px", borderRadius: 12, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.04)" }}>
-        <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "#0f172a" }}>{activeTabMeta.label}</h2>
-        <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>{activeTabMeta.description}</p>
+      {/* Stock Alerts */}
+      <div style={{ marginBottom: 24 }}>
+        <StockAlerts
+          lowStock={analytics.low_stock_alerts}
+          expiring={usesExpiryTracking ? analytics.expiring_products : []}
+          hideExpiringSection={!usesExpiryTracking}
+        />
       </div>
 
-      {activeTab === "overview" ? (
-        <div style={{ marginBottom: 24 }}>
-          <InventoryOverview analytics={analytics} usesExpiryTracking={usesExpiryTracking} />
-        </div>
-      ) : null}
-
-      {activeTab === "alerts" ? (
-        <div style={{ marginBottom: 24 }}>
-          <StockAlerts
-            lowStock={analytics.low_stock_alerts}
-            expiring={usesExpiryTracking ? analytics.expiring_products : []}
-            hideExpiringSection={!usesExpiryTracking}
-          />
-        </div>
-      ) : null}
-
-      {activeTab === "actions" ? (
+      {/* Stock Actions */}
       <div className="card" style={{ marginBottom: 24 }}>
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Quick Stock Adjustments</h3>
+          <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Stock Actions</h3>
           <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
-            Use this for manual corrections and internal stock changes. For supplier-backed restocks, use Purchasing so supplier, invoice, and purchase history are captured.
+            Select a product, choose what you want to do, then save. Every action is recorded in movement history and reports.
           </p>
         </div>
-
-        {canViewProcurement ? (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              flexWrap: "wrap",
-              marginBottom: 16,
-              padding: 14,
-              borderRadius: 12,
-              border: "1px solid #bfdbfe",
-              background: "linear-gradient(180deg, #eff6ff, #dbeafe)",
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8", marginBottom: 4 }}>Restocking from a supplier?</div>
-              <p style={{ margin: 0, fontSize: 13, color: "#1e3a8a" }}>
-                Record supplier deliveries in Purchasing so the stock increase also keeps invoice, supplier, and cost details.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setActiveTab("purchasing")}
-              style={{
-                padding: "9px 14px",
-                borderRadius: 8,
-                border: "1px solid #2563eb",
-                background: "#2563eb",
-                color: "#ffffff",
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              Open Purchasing
-            </button>
-          </div>
-        ) : null}
 
         <div
           style={{
@@ -586,14 +347,6 @@ export default function Inventory() {
             <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
               {selectedProduct ? `${selectedProduct.name} (${selectedProduct.sku})` : "No product selected"}
             </div>
-            {selectedVariant ? (
-              <div style={{ fontSize: 12, color: "#1d4ed8", marginTop: 4, fontWeight: 600 }}>
-                Variant scope: {selectedVariant.label}
-              </div>
-            ) : null}
-            {selectedProductVariantSummary ? (
-              <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{selectedProductVariantSummary}</div>
-            ) : null}
           </div>
           <div>
             <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Current stock</div>
@@ -601,14 +354,6 @@ export default function Inventory() {
               {selectedProductStock}
             </div>
           </div>
-          {capabilities.batch_tracking ? (
-            <div>
-              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Batch tracking</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: selectedProductBatchSummary ? "#1d4ed8" : "#334155" }}>
-                {selectedProductBatchSummary || "No active tracked batches"}
-              </div>
-            </div>
-          ) : null}
           <div>
             <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Perishability</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: isPerishableProduct ? "#b45309" : "#334155" }}>
@@ -618,88 +363,61 @@ export default function Inventory() {
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-          <div style={{ gridColumn: "1 / -1", maxWidth: 720 }}>
-            <ProductSearchSelect
-              label="Product"
-              products={products}
-              selectedProductId={selectedProductId}
-              onChange={setSelectedProductId}
-              disabled={submittingAction}
-              searchPlaceholder="Search products for quick adjustments"
-              emptyLabel="No matching products found"
-            />
-          </div>
-
-          {canSelectVariantForAction ? (
-            <label>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Variant (Optional)</span>
-              <select
-                value={selectedVariantId ?? ""}
-                onChange={(e) => setSelectedVariantId(e.target.value ? Number(e.target.value) : null)}
-                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
-                disabled={submittingAction}
-              >
-                <option value="">Whole product / shared stock</option>
-                {selectedProductVariants.map((variant) => (
-                  <option key={variant.id} value={variant.id}>
-                    {variant.label}
-                  </option>
-                ))}
-              </select>
-              <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
-                Choose a variant to scope this adjustment. Leave blank to adjust stock recorded at the product level.
-              </small>
-            </label>
-          ) : null}
-
-          {selectedProductVariants.length > 0 && isTransferAction ? (
-            <div style={{ padding: 10, borderRadius: 8, border: "1px solid #dbeafe", background: "#eff6ff", color: "#1d4ed8", fontSize: 13 }}>
-              Branch transfers currently move the whole product. Variant-specific transfer routing has not been enabled in this workflow.
-            </div>
-          ) : null}
+          <label>
+            <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Product</span>
+            <select
+              value={selectedProductId ?? ""}
+              onChange={(e) => setSelectedProductId(e.target.value ? Number(e.target.value) : null)}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
+              disabled={submittingAction || products.length === 0}
+            >
+              {products.length === 0 ? <option value="">No products available</option> : null}
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.name} ({product.sku})
+                </option>
+              ))}
+            </select>
+          </label>
 
           <div>
             <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Action</span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {canManageInventory ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setActionType("new_stock")}
-                    disabled={submittingAction}
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: actionType === "new_stock" ? "#dcfce7" : "white",
-                      color: actionType === "new_stock" ? "#166534" : "#334155",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      cursor: submittingAction ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    Quick Add
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActionType("damage")}
-                    disabled={submittingAction}
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #d1d5db",
-                      background: actionType === "damage" ? "#fef3c7" : "white",
-                      color: actionType === "damage" ? "#92400e" : "#334155",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      cursor: submittingAction ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    Record Damage
-                  </button>
-                </>
-              ) : null}
-              {canTransferBetweenBranches ? (
+              <button
+                type="button"
+                onClick={() => setActionType("new_stock")}
+                disabled={submittingAction}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  background: actionType === "new_stock" ? "#dcfce7" : "white",
+                  color: actionType === "new_stock" ? "#166534" : "#334155",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: submittingAction ? "not-allowed" : "pointer",
+                }}
+              >
+                Add Stock
+              </button>
+              <button
+                type="button"
+                onClick={() => setActionType("damage")}
+                disabled={submittingAction}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d1d5db",
+                  background: actionType === "damage" ? "#fef3c7" : "white",
+                  color: actionType === "damage" ? "#92400e" : "#334155",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: submittingAction ? "not-allowed" : "pointer",
+                }}
+              >
+                Record Damage
+              </button>
+              {isAdmin ? (
                 <button
                   type="button"
                   onClick={() => setActionType("transfer")}
@@ -718,7 +436,7 @@ export default function Inventory() {
                   Transfer Stock
                 </button>
               ) : null}
-              {canManageCatalog ? (
+              {isAdmin ? (
                 <button
                   type="button"
                   onClick={() => setActionType("delete")}
@@ -743,23 +461,18 @@ export default function Inventory() {
           {!isDeleteAction ? (
             <label>
               <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>
-                {isTransferAction ? "Quantity to Transfer" : isDamageAction ? "Quantity Damaged" : "Quantity to Add"}
+                {isTransferAction ? "Quantity to Transfer" : isDamageAction ? "Quantity Damaged" : "Quantity Added"}
               </span>
               <input
                 type="number"
-                min={selectedProductAllowsFractional ? String(selectedProductQuantityStep) : "1"}
-                step={selectedProductAllowsFractional ? String(selectedProductQuantityStep) : "1"}
+                min="1"
+                step="1"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                placeholder={isTransferAction ? "Enter quantity to transfer" : isNewStockAction ? "Enter quantity to add" : "Enter quantity damaged"}
+                placeholder={isTransferAction ? "Enter quantity to transfer" : isNewStockAction ? "Enter stock added" : "Enter quantity damaged"}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
                 disabled={submittingAction}
               />
-              {selectedProductAllowsFractional ? (
-                <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
-                  This product accepts fractional quantities in steps of {formatQuantityValue(selectedProductQuantityStep)}.
-                </small>
-              ) : null}
               {isDamageAction || isTransferAction ? (
                 <small style={{ color: "#6b7280", fontSize: 12 }}>Available stock: {selectedProductStock}</small>
               ) : null}
@@ -790,7 +503,7 @@ export default function Inventory() {
 
           {isNewStockAction ? (
             <div>
-              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Adjustment Type</span>
+              <span style={{ display: "block", marginBottom: 6, fontSize: 13, color: "#374151", fontWeight: 600 }}>Stock Action</span>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
                   type="button"
@@ -807,7 +520,7 @@ export default function Inventory() {
                     cursor: submittingAction ? "not-allowed" : "pointer",
                   }}
                 >
-                  Opening Stock
+                  New Stock
                 </button>
                 <button
                   type="button"
@@ -824,17 +537,9 @@ export default function Inventory() {
                     cursor: submittingAction ? "not-allowed" : "pointer",
                   }}
                 >
-                  Manual Top-Up
+                  Restock
                 </button>
               </div>
-              <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 6 }}>
-                Use Purchasing instead when this stock came from a supplier delivery.
-              </small>
-              {capabilities.batch_tracking ? (
-                <small style={{ color: "#1d4ed8", fontSize: 12, display: "block", marginTop: 6 }}>
-                  Each stock-in creates a tracked batch automatically.
-                </small>
-              ) : null}
             </div>
           ) : null}
 
@@ -908,7 +613,7 @@ export default function Inventory() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={2}
-                placeholder={isTransferAction ? "Optional transfer note" : isNewStockAction ? "Optional adjustment note" : "Optional damage details"}
+                placeholder={isTransferAction ? "Optional transfer note" : isNewStockAction ? "Optional stock note" : "Optional damage details"}
                 style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14, resize: "vertical" }}
                 disabled={submittingAction}
               />
@@ -946,39 +651,12 @@ export default function Inventory() {
                   ? "Transfer Stock"
                 : isDamageAction
                   ? "Record Damage"
-                  : "Save Adjustment"}
+                  : "Add Stock"}
           </button>
         </div>
       </div>
-      ) : null}
 
-      {activeTab === "purchasing" ? (
-        <PurchasingPanel
-          products={products}
-          initialProductId={selectedProductId}
-          usesExpiryTracking={usesExpiryTracking}
-          onPurchaseRecorded={loadData}
-          mode="purchasing"
-          onOpenReturnsView={(purchaseId) => {
-            setPendingSupplierReturnPurchaseId(purchaseId ?? null);
-            setActiveTab("returns");
-          }}
-        />
-      ) : null}
-
-      {activeTab === "returns" ? (
-        <PurchasingPanel
-          products={products}
-          initialProductId={selectedProductId}
-          usesExpiryTracking={usesExpiryTracking}
-          onPurchaseRecorded={loadData}
-          mode="returns"
-          initialReturnPurchaseId={pendingSupplierReturnPurchaseId}
-          onInitialReturnPurchaseIdHandled={() => setPendingSupplierReturnPurchaseId(null)}
-        />
-      ) : null}
-
-      {activeTab === "history" ? (
+      {/* Movement History */}
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Movement History</h3>
@@ -1031,7 +709,7 @@ export default function Inventory() {
                 onClick={() => {
                   const now = new Date();
                   const day = now.getDay();
-                  const diffToMonday = (day + 6) % 7;
+                  const diffToMonday = (day + 6) % 7; // Mon=0 ... Sun=6
                   const monday = new Date(now);
                   monday.setDate(now.getDate() - diffToMonday);
                   const sunday = new Date(monday);
@@ -1090,7 +768,8 @@ export default function Inventory() {
                 Apply
               </button>
             </div>
-
+            
+            {/* Export to PDF */}
             <div style={{ display: "flex", gap: 8, alignItems: "center", borderLeft: "1px solid #e5e7eb", paddingLeft: 12 }}>
               <select
                 value={exportType}
@@ -1131,7 +810,6 @@ export default function Inventory() {
         </div>
         <MovementHistory movements={movements} />
       </div>
-      ) : null}
     </div>
   );
 }

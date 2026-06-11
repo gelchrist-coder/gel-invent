@@ -27,20 +27,6 @@ const uniqCaseInsensitive = (values: string[]): string[] => {
   return result;
 };
 
-const readStringListField = (record: Record<string, unknown>, fieldName: string): string[] => {
-  const value = record[fieldName];
-
-  if (Array.isArray(value)) {
-    return uniqCaseInsensitive(value.map((item) => String(item)));
-  }
-
-  if (typeof value === "string") {
-    return uniqCaseInsensitive(value.split(",").map((item) => item.trim()));
-  }
-
-  return [];
-};
-
 export const readUserCategories = (): string[] => {
   try {
     const raw = localStorage.getItem("user");
@@ -49,13 +35,18 @@ export const readUserCategories = (): string[] => {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
 
     const record = parsed as Record<string, unknown>;
-    const productCategories = readStringListField(record, "product_categories");
-    if (productCategories.length > 0) {
-      return productCategories;
+    const value = record.categories;
+
+    if (Array.isArray(value)) {
+      return uniqCaseInsensitive(value.map((c) => String(c)));
     }
 
-    // Fallback for legacy user payloads that still only expose `categories`.
-    return readStringListField(record, "categories");
+    // Fallback if older shape stored categories as a string
+    if (typeof value === "string") {
+      return uniqCaseInsensitive(value.split(",").map((c) => c.trim()));
+    }
+
+    return [];
   } catch {
     return [];
   }

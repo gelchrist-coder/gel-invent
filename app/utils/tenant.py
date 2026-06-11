@@ -9,7 +9,6 @@ In this system:
 
 from sqlalchemy.orm import Session
 from app import models
-from app.permissions import is_admin
 
 
 def get_tenant_user_ids(current_user: models.User, db: Session) -> list[int]:
@@ -26,7 +25,7 @@ def get_tenant_user_ids(current_user: models.User, db: Session) -> list[int]:
     Returns:
         List of user IDs that share the same tenant
     """
-    if is_admin(current_user):
+    if current_user.role == "Admin":
         # Admin sees their own data + their employees' data
         employee_ids = db.query(models.User.id).filter(
             models.User.created_by == current_user.id

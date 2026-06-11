@@ -1,58 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { fetchWithSameOriginApiFallback, warmBackend } from "../api";
+import { useEffect, useState } from "react";
+import { API_BASE } from "../api";
 import appLogo from "../asset/logo.png";
 import wareImage from "../asset/Ware.png";
-import { readStoredBusinessInfo, readStoredUser } from "../user-storage";
-
-function loadRecaptchaScript(): Promise<void> {
-  if (typeof window === "undefined") {
-    return Promise.resolve();
-  }
-
-  if (window.grecaptcha) {
-    return Promise.resolve();
-  }
-
-  if (window.__gelInventRecaptchaScriptPromise) {
-    return window.__gelInventRecaptchaScriptPromise;
-  }
-
-  window.__gelInventRecaptchaScriptPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Could not load reCAPTCHA"));
-    document.head.appendChild(script);
-  });
-
-  return window.__gelInventRecaptchaScriptPromise;
-}
 
 type LoginProps = {
   onLogin: (email: string, password: string) => void;
-};
-
-type CompleteAuthenticatedSessionOptions = {
-  beforeLogin?: () => Promise<void>;
-};
-
-type AuthResponse = {
-  access_token: string;
-  token_type: string;
-  user?: {
-    id?: number;
-    email?: string;
-    name?: string;
-    role?: string;
-    permissions?: string[] | null;
-    business_name?: string | null;
-    business_types?: string[] | null;
-    product_categories?: string[] | null;
-    categories?: string[] | null;
-    branch_id?: number | null;
-  } | null;
 };
 
 type PasswordInputProps = {
@@ -110,8 +62,6 @@ function PasswordInput({
 }
 
 export default function Login({ onLogin }: LoginProps) {
-  const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY?.trim() || import.meta.env.Site_key?.trim() || "";
-  const recaptchaEnabled = recaptchaSiteKey.length > 0;
   const [isSignUp, setIsSignUp] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [formPanelAnimation, setFormPanelAnimation] = useState<"" | "auth-panel-enter-signin" | "auth-panel-enter-signup">("");
@@ -122,11 +72,11 @@ export default function Login({ onLogin }: LoginProps) {
     password: "",
     confirmPassword: "",
     businessName: "",
-    businessLocation: "",
-    businessTypes: [] as string[],
+    categories: [] as string[],
     hasBranches: false,
     branches: [] as string[],
   });
+  const [categoryInput, setCategoryInput] = useState("");
   const [branchInput, setBranchInput] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -143,23 +93,6 @@ export default function Login({ onLogin }: LoginProps) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
-  const [recaptchaToken, setRecaptchaToken] = useState("");
-  const [recaptchaLoadError, setRecaptchaLoadError] = useState("");
-  const recaptchaContainerRef = useRef<HTMLDivElement | null>(null);
-  const recaptchaWidgetIdRef = useRef<number | null>(null);
-  const resetRecaptcha = () => {
-    setRecaptchaToken("");
-    if (window.grecaptcha && recaptchaWidgetIdRef.current !== null) {
-      window.grecaptcha.reset(recaptchaWidgetIdRef.current);
-    }
-  };
-
-  // Warm the backend process without triggering a noisy DB health probe on
-  // first page load. The actual login path still waits for /health/db if
-  // the server is starting up.
-  useEffect(() => {
-    void warmBackend("/health");
-  }, []);
 
   useEffect(() => {
     const onScroll = () => {
@@ -172,62 +105,9 @@ export default function Login({ onLogin }: LoginProps) {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  useEffect(() => {
-    if (!recaptchaEnabled || showReset) {
-      setRecaptchaToken("");
-      return;
-    }
-
-    let cancelled = false;
-
-    loadRecaptchaScript()
-      .then(() => {
-        if (cancelled || !window.grecaptcha || !recaptchaContainerRef.current) {
-          return;
-        }
-
-        window.grecaptcha.ready(() => {
-          if (cancelled || !window.grecaptcha || !recaptchaContainerRef.current) {
-            return;
-          }
-
-          setRecaptchaLoadError("");
-
-          if (recaptchaWidgetIdRef.current === null) {
-            recaptchaWidgetIdRef.current = window.grecaptcha.render(recaptchaContainerRef.current, {
-              sitekey: recaptchaSiteKey,
-              callback: (token: string) => {
-                setRecaptchaToken(token);
-                setRecaptchaLoadError("");
-              },
-              "expired-callback": () => setRecaptchaToken(""),
-              "error-callback": () => {
-                setRecaptchaToken("");
-                setRecaptchaLoadError("reCAPTCHA could not load. Use a reCAPTCHA v2 checkbox site key, not a v3 key.");
-              },
-            });
-            return;
-          }
-
-          window.grecaptcha.reset(recaptchaWidgetIdRef.current);
-          setRecaptchaToken("");
-        });
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRecaptchaLoadError("reCAPTCHA could not load. Use a reCAPTCHA v2 checkbox site key, not a v3 key.");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [recaptchaEnabled, recaptchaSiteKey, showReset]);
-
   const switchAuthMode = (nextIsSignUp: boolean) => {
     if (nextIsSignUp === isSignUp) return;
 
-    resetRecaptcha();
     setIsSignUp(nextIsSignUp);
     setShowReset(false);
     setError("");
@@ -237,13 +117,6 @@ export default function Login({ onLogin }: LoginProps) {
     window.setTimeout(() => {
       setFormPanelAnimation("");
     }, 380);
-  };
-
-  const scrollToAuthCard = (nextIsSignUp: boolean) => {
-    switchAuthMode(nextIsSignUp);
-    const target = document.querySelector<HTMLElement>(".auth-signin-zone");
-    if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -266,165 +139,67 @@ export default function Login({ onLogin }: LoginProps) {
     return null;
   };
 
-  const completeAuthenticatedSession = async (
-    authData: AuthResponse,
-    identifier: string,
-    password: string,
-    options?: CompleteAuthenticatedSessionOptions,
-  ) => {
-    const previousUser = readStoredUser();
-    const existingBusinessInfo = readStoredBusinessInfo();
-    localStorage.setItem("token", authData.access_token);
-    localStorage.setItem("lastSuccessfulLoginAt", String(Date.now()));
-
-    const userData = authData.user ?? null;
-    if (userData) {
-      localStorage.setItem("user", JSON.stringify(userData));
-
-      if (userData?.business_name || userData?.name || userData?.email) {
-        const isSameUser = previousUser?.id != null && userData?.id != null && previousUser.id === userData.id;
-        const nextBusinessInfo = {
-          name: userData.business_name || formData.businessName,
-          owner: userData.name,
-          phone: isSameUser ? existingBusinessInfo?.phone || "" : "",
-          email: userData.email,
-          address: isSameUser ? existingBusinessInfo?.address || "" : "",
-          taxId: isSameUser ? existingBusinessInfo?.taxId || "" : "",
-          currency: isSameUser ? existingBusinessInfo?.currency || "GHS" : "GHS",
-        };
-        localStorage.setItem(
-          "businessInfo",
-          JSON.stringify(nextBusinessInfo)
-        );
-        window.dispatchEvent(new CustomEvent("businessInfoChanged", { detail: nextBusinessInfo }));
-      }
-
-      window.dispatchEvent(new CustomEvent("userChanged", { detail: userData }));
-    } else {
-      // Fallback: fetch user data separately if not included in auth response
-      const userResponse = await fetchWithSameOriginApiFallback("/auth/me", {
-        headers: { Authorization: `Bearer ${authData.access_token}` },
-      });
-      if (userResponse.ok) {
-        const meData = await userResponse.json();
-        localStorage.setItem("user", JSON.stringify(meData));
-        window.dispatchEvent(new CustomEvent("userChanged", { detail: meData }));
-      }
-    }
-
-    if (options?.beforeLogin) {
-      await options.beforeLogin();
-    }
-
-    onLogin(identifier, password);
-  };
-
-  const attemptLoginRequest = async (
-    identifier: string,
-    password: string,
-    timeoutMs: number,
-    captchaToken?: string,
-  ): Promise<Response> => {
-    const loginFormData = new URLSearchParams();
+  const performLogin = async (identifier: string, password: string) => {
+    const loginFormData = new FormData();
     loginFormData.append("username", identifier);
     loginFormData.append("password", password);
-    if (captchaToken) {
-      loginFormData.append("recaptcha_token", captchaToken);
-    }
 
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      return await fetchWithSameOriginApiFallback("/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: loginFormData,
-        signal: controller.signal,
-      });
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        throw new Error("__timeout__");
-      }
-      throw err;
-    } finally {
-      window.clearTimeout(timeoutId);
-    }
-  };
-
-  const performLogin = async (identifier: string, password: string, captchaToken?: string) => {
-    let loginResponse: Response;
-    const retryAfterWarmup = async (): Promise<Response> => {
-      setInfo("Server is warming up — retrying…");
-      const isReady = await warmBackend("/health/db", true, {
-        timeoutMs: 90000,
-        probeTimeoutMs: 35000,
-        retryIntervalMs: 2000,
-      });
-
-      if (!isReady) {
-        setInfo("");
-        throw new Error("Login timed out. The server is still starting up — please try again in a moment.");
-      }
-
-      try {
-        return await attemptLoginRequest(identifier, password, 90000, captchaToken);
-      } catch (retryErr) {
-        if (retryErr instanceof Error && retryErr.message === "__timeout__") {
-          throw new Error("Login timed out. The server is still starting up — please try again in a moment.");
-        }
-        throw retryErr;
-      } finally {
-        setInfo("");
-      }
-    };
-
-    try {
-      loginResponse = await attemptLoginRequest(identifier, password, 45000, captchaToken);
-
-      // Retry once on server errors (cold-start 502/503/504)
-      if (loginResponse.status >= 500) {
-        loginResponse = await retryAfterWarmup();
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message === "__timeout__") {
-        // Cold-start timeout — warm the DB path, then retry once automatically.
-        loginResponse = await retryAfterWarmup();
-      } else {
-        throw err;
-      }
-    }
-
-    if (loginResponse.status >= 500) {
-      throw new Error("Login is temporarily unavailable while the server finishes starting up. Please try again in a moment.");
-    }
+    const loginResponse = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      body: loginFormData,
+    });
 
     if (!loginResponse.ok) {
-      if (recaptchaEnabled) {
-        resetRecaptcha();
-      }
       const errorData = await safeJson(loginResponse);
       const detail = isRecord(errorData) && typeof errorData.detail === "string" ? errorData.detail : null;
       setError(detail || "Invalid email/phone or password");
       return;
     }
 
-    const loginData = (await loginResponse.json().catch(() => {
-      throw new Error(`Server returned non-JSON response (status ${loginResponse.status}). The backend URL may be misconfigured.`);
-    })) as AuthResponse;
+    const loginData = await loginResponse.json();
+    localStorage.setItem("token", loginData.access_token);
 
-    await completeAuthenticatedSession(loginData, identifier, password);
+    const userResponse = await fetch(`${API_BASE}/auth/me`, {
+      headers: { Authorization: `Bearer ${loginData.access_token}` },
+    });
+
+    if (userResponse.ok) {
+      const userData = await userResponse.json();
+      localStorage.setItem("user", JSON.stringify(userData));
+
+      if (userData?.business_name || userData?.name || userData?.email) {
+        localStorage.setItem(
+          "businessInfo",
+          JSON.stringify({
+            name: userData.business_name || formData.businessName,
+            owner: userData.name,
+            phone: "",
+            email: userData.email,
+            address: "",
+            taxId: "",
+            currency: "GHS",
+            logo: "",
+          })
+        );
+      }
+
+      window.dispatchEvent(new CustomEvent("userChanged", { detail: userData }));
+    }
+
+    onLogin(identifier, password);
   };
 
-  const BUSINESS_TYPE_OPTIONS = [
-    "Pharmacy",
-    "Grocery",
+  const COMMON_CATEGORIES = [
+    "Beverages",
+    "Food",
+    "Groceries",
     "Cosmetics",
-    "Fashion",
-    "Hardware",
-    "Construction Materials",
-    "Agro",
+    "Pharmacy",
+    "Stationery",
     "Electronics",
+    "Household",
+    "Baby Products",
+    "Cleaning",
   ];
 
   const FEATURE_ITEMS = [
@@ -461,23 +236,27 @@ export default function Login({ onLogin }: LoginProps) {
     },
   ];
 
-  const toggleBusinessType = (value: string) => {
-    const exists = formData.businessTypes.some((businessType) => businessType.toLowerCase() === value.toLowerCase());
+  const addCategory = (raw: string) => {
+    const value = raw.trim();
+    if (!value) return;
+    if (formData.categories.some((c) => c.toLowerCase() === value.toLowerCase())) return;
     setFormData({
       ...formData,
-      businessTypes: exists
-        ? formData.businessTypes.filter((businessType) => businessType.toLowerCase() !== value.toLowerCase())
-        : [...formData.businessTypes, value],
+      categories: [...formData.categories, value],
+    });
+    setCategoryInput("");
+  };
+
+  const removeCategory = (value: string) => {
+    setFormData({
+      ...formData,
+      categories: formData.categories.filter((c) => c !== value),
     });
   };
 
   const addBranch = (raw: string) => {
     const value = raw.trim();
     if (!value) return;
-    if (formData.businessLocation.trim().toLowerCase() === value.toLowerCase()) {
-      setBranchInput("");
-      return;
-    }
     if (formData.branches.some((b) => b.toLowerCase() === value.toLowerCase())) return;
     setFormData({
       ...formData,
@@ -493,7 +272,7 @@ export default function Login({ onLogin }: LoginProps) {
       return false;
     }
 
-    const res = await fetchWithSameOriginApiFallback("/auth/password-reset/request", {
+    const res = await fetch(`${API_BASE}/auth/password-reset/request`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
@@ -561,7 +340,7 @@ export default function Login({ onLogin }: LoginProps) {
           return;
         }
 
-        const confirmRes = await fetchWithSameOriginApiFallback("/auth/password-reset/confirm", {
+        const confirmRes = await fetch(`${API_BASE}/auth/password-reset/confirm`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -609,16 +388,6 @@ export default function Login({ onLogin }: LoginProps) {
           setLoading(false);
           return;
         }
-        if (!formData.businessLocation.trim()) {
-          setError("Please enter your primary business location");
-          setLoading(false);
-          return;
-        }
-        if (formData.businessTypes.length === 0) {
-          setError("Please select at least one business type");
-          setLoading(false);
-          return;
-        }
         if (formData.password !== formData.confirmPassword) {
           setError("Passwords do not match");
           setLoading(false);
@@ -633,50 +402,35 @@ export default function Login({ onLogin }: LoginProps) {
 
         // Validate branches if user said they have branches
         if (formData.hasBranches && formData.branches.length === 0) {
-          setError("Please add at least one additional branch/location or uncheck 'I have multiple branches'");
-          setLoading(false);
-          return;
-        }
-        if (recaptchaEnabled && !recaptchaToken) {
-          setError("Please complete the reCAPTCHA checkbox");
+          setError("Please add at least one branch or uncheck 'I have multiple branches'");
           setLoading(false);
           return;
         }
 
-        // Use JSON for signup itself; upload the optional logo after the
-        // account is created so signup avoids multipart transport issues.
-        const signupPayload = {
-          email: formData.email.trim(),
-          phone: formData.phone.trim() || null,
-          name: formData.name.trim(),
-          password: formData.password,
-          business_name: formData.businessName.trim(),
-          business_location: formData.businessLocation.trim(),
-          business_types: formData.businessTypes,
-          branches: formData.hasBranches ? formData.branches : [],
-          ...(recaptchaEnabled ? { recaptcha_token: recaptchaToken } : {}),
-        };
-
-        const signupResponse = await fetchWithSameOriginApiFallback("/auth/signup", {
+        // Call signup API
+        const signupResponse = await fetch(`${API_BASE}/auth/signup`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(signupPayload),
+          body: JSON.stringify({
+            email: formData.email,
+            phone: formData.phone,
+            name: formData.name,
+            password: formData.password,
+            business_name: formData.businessName,
+            categories: formData.categories,
+            branches: formData.hasBranches ? formData.branches : [],
+          }),
         });
 
         if (!signupResponse.ok) {
-          const errorData = await safeJson(signupResponse);
-          const detail = isRecord(errorData) && typeof errorData.detail === "string" ? errorData.detail : null;
-          resetRecaptcha();
-          setError(detail || "Signup failed");
+          const errorData = await signupResponse.json();
+          setError(errorData.detail || "Signup failed");
           setLoading(false);
           return;
         }
 
         setInfo("Account created successfully.");
-        const signupData = (await signupResponse.json().catch(() => {
-          throw new Error(`Server returned non-JSON response (status ${signupResponse.status}). The backend URL may be misconfigured.`);
-        })) as AuthResponse;
-        await completeAuthenticatedSession(signupData, formData.email.trim(), formData.password);
+        await performLogin(formData.email, formData.password);
       } else {
         // Sign in validation
         if (!formData.email.trim() || !formData.password.trim()) {
@@ -684,26 +438,12 @@ export default function Login({ onLogin }: LoginProps) {
           setLoading(false);
           return;
         }
-        if (recaptchaEnabled && !recaptchaToken) {
-          setError("Please complete the reCAPTCHA checkbox");
-          setLoading(false);
-          return;
-        }
 
-        await performLogin(formData.email, formData.password, recaptchaToken);
+        await performLogin(formData.email, formData.password);
       }
       setLoading(false);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error("[Login] Unhandled error:", err);
-      if (recaptchaEnabled) {
-        resetRecaptcha();
-      }
-      if (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("fetch")) {
-        setError("Cannot reach the server. Check your internet connection and try again.");
-      } else {
-        setError(message || "An unexpected error occurred. Please try again.");
-      }
+      setError("Network error. Please try again.");
       setLoading(false);
     }
   };
@@ -744,14 +484,14 @@ export default function Login({ onLogin }: LoginProps) {
             <button
               type="button"
               className="auth-primary-cta"
-              onClick={() => scrollToAuthCard(true)}
+              onClick={() => switchAuthMode(true)}
             >
               Start Free
             </button>
             <button
               type="button"
               className="auth-secondary-cta"
-              onClick={() => scrollToAuthCard(false)}
+              onClick={() => switchAuthMode(false)}
             >
               Explore Sign In
             </button>
@@ -881,7 +621,6 @@ export default function Login({ onLogin }: LoginProps) {
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="John Doe"
                     required={isSignUp}
-                    autoComplete="name"
                     className="input"
                     style={{ padding: 12 }}
                   />
@@ -897,28 +636,9 @@ export default function Login({ onLogin }: LoginProps) {
                     onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
                     placeholder="My Business Ltd"
                     required={isSignUp}
-                    autoComplete="organization"
                     className="input"
                     style={{ padding: 12 }}
                   />
-                </label>
-
-                <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    Primary Business Location *
-                  </span>
-                  <input
-                    type="text"
-                    value={formData.businessLocation}
-                    onChange={(e) => setFormData({ ...formData, businessLocation: e.target.value })}
-                    placeholder="e.g., Accra Main Store"
-                    required={isSignUp}
-                    className="input"
-                    style={{ padding: 12 }}
-                  />
-                  <span style={{ fontSize: 12, color: "#6b7280" }}>
-                    This becomes your first branch name.
-                  </span>
                 </label>
 
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -930,7 +650,6 @@ export default function Login({ onLogin }: LoginProps) {
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     placeholder="e.g., 0241234567"
-                    autoComplete="tel"
                     className="input"
                     style={{ padding: 12 }}
                   />
@@ -938,42 +657,63 @@ export default function Login({ onLogin }: LoginProps) {
 
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
-                    Business Types *
+                    Business Categories
                   </span>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                    {BUSINESS_TYPE_OPTIONS.map((businessType) => {
-                      const isSelected = formData.businessTypes.some((value) => value === businessType);
-                      return (
-                        <button
-                          key={businessType}
-                          type="button"
-                          onClick={() => toggleBusinessType(businessType)}
-                          style={{
-                            padding: "12px 14px",
-                            borderRadius: 10,
-                            border: isSelected ? "1px solid #1d4ed8" : "1px solid #d1d5db",
-                            background: isSelected ? "#eff6ff" : "#ffffff",
-                            color: isSelected ? "#1d4ed8" : "#374151",
-                            fontSize: 14,
-                            fontWeight: 700,
-                            cursor: "pointer",
-                            textAlign: "left",
-                          }}
-                        >
-                          {businessType}
-                        </button>
-                      );
-                    })}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      type="text"
+                      value={categoryInput}
+                      onChange={(e) => setCategoryInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addCategory(categoryInput);
+                        }
+                      }}
+                      placeholder="Type a category and press Enter"
+                      list="category-suggestions"
+                      className="input"
+                      style={{ padding: 12, flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => addCategory(categoryInput)}
+                      className="button"
+                      style={{ padding: "12px 14px" }}
+                    >
+                      Add
+                    </button>
                   </div>
-                  <span style={{ fontSize: 12, color: "#6b7280" }}>
-                    Choose the type of business you run. Product categories can be managed separately after signup.
-                  </span>
+                  <datalist id="category-suggestions">
+                    {COMMON_CATEGORIES.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
 
-                  {formData.businessTypes.length > 0 && (
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      addCategory(e.target.value);
+                      e.currentTarget.value = "";
+                    }}
+                    className="input"
+                    style={{ padding: 12 }}
+                  >
+                    <option value="" disabled>
+                      Or select a common category
+                    </option>
+                    {COMMON_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+
+                  {formData.categories.length > 0 && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-                      {formData.businessTypes.map((businessType) => (
+                      {formData.categories.map((c) => (
                         <span
-                          key={businessType}
+                          key={c}
                           style={{
                             display: "inline-flex",
                             alignItems: "center",
@@ -987,10 +727,10 @@ export default function Login({ onLogin }: LoginProps) {
                             fontWeight: 600,
                           }}
                         >
-                          {businessType}
+                          {c}
                           <button
                             type="button"
-                            onClick={() => toggleBusinessType(businessType)}
+                            onClick={() => removeCategory(c)}
                             style={{
                               border: "none",
                               background: "transparent",
@@ -999,7 +739,7 @@ export default function Login({ onLogin }: LoginProps) {
                               fontWeight: 800,
                               lineHeight: 1,
                             }}
-                            aria-label={`Remove ${businessType}`}
+                            aria-label={`Remove ${c}`}
                           >
                             ×
                           </button>
@@ -1057,7 +797,7 @@ export default function Login({ onLogin }: LoginProps) {
                       </button>
                     </div>
                     <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-                      Add only the extra branch names. Your primary business location is used as the first branch automatically.
+                      Press Enter or click Add for each branch
                     </p>
 
                     {formData.branches.length > 0 && (
@@ -1131,7 +871,6 @@ export default function Login({ onLogin }: LoginProps) {
                     onChange={(e) => setResetEmail(e.target.value)}
                     placeholder="you@example.com"
                     required
-                    autoComplete="email"
                     className="input"
                     style={{ padding: 12 }}
                     readOnly={resetStep === "confirm"}
@@ -1149,7 +888,6 @@ export default function Login({ onLogin }: LoginProps) {
                         value={resetCode}
                         onChange={(e) => setResetCode(e.target.value)}
                         placeholder="Enter the 6-digit code"
-                        autoComplete="one-time-code"
                         className="input"
                         style={{ padding: 12 }}
                       />
@@ -1251,7 +989,6 @@ export default function Login({ onLogin }: LoginProps) {
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 placeholder={isSignUp ? "you@example.com" : "you@example.com or 0241234567"}
                 required
-                autoComplete={isSignUp ? "email" : "username"}
                 className="input"
                 style={{ padding: 12 }}
               />
@@ -1320,15 +1057,6 @@ export default function Login({ onLogin }: LoginProps) {
                 />
               </label>
             )}
-
-            {recaptchaEnabled && !showReset && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div ref={recaptchaContainerRef} />
-                {recaptchaLoadError && (
-                  <span style={{ fontSize: 12, color: "#b91c1c" }}>{recaptchaLoadError}</span>
-                )}
-              </div>
-            )}
           </div>
 
           <button
@@ -1384,24 +1112,10 @@ export default function Login({ onLogin }: LoginProps) {
           {!showReset && (
           <div style={{ marginTop: 24, textAlign: "center" }}>
             <span style={{ color: "#6b7280", fontSize: 14 }}>
-              {isSignUp ? "Already have an account? " : "Don't have an account? "}
+              {isSignUp
+                ? "Already have an account? Sign In"
+                : "Don't have an account? Sign Up"}
             </span>
-            <button
-              type="button"
-              onClick={() => switchAuthMode(!isSignUp)}
-              style={{
-                background: "none",
-                border: "none",
-                color: "#4f46e5",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-                padding: 0,
-                textDecoration: "underline",
-              }}
-            >
-              {isSignUp ? "Sign In" : "Sign Up"}
-            </button>
           </div>
           )}
           </div>

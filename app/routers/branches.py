@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from app import models
 from app.deps import get_db
 from app.auth import get_current_active_user
-from app.permissions import ensure_permission
 from app.utils.branch import get_owner_user_id
 
 router = APIRouter(prefix="/branches", tags=["branches"])
@@ -28,26 +27,6 @@ class BranchRead(BaseModel):
         from_attributes = True
 
 
-def _placeholder_names_for_user(current_user: models.User) -> set[str]:
-    names = {"main branch", "default branch"}
-    business_name = (current_user.business_name or "").strip().lower()
-    if business_name:
-        names.add(business_name)
-    return names
-
-
-def _branch_has_usage(db: Session, branch_id: int) -> bool:
-    return any([
-        db.query(models.Product.id).filter(models.Product.branch_id == branch_id).first() is not None,
-        db.query(models.Sale.id).filter(models.Sale.branch_id == branch_id).first() is not None,
-        db.query(models.StockMovement.id).filter(models.StockMovement.branch_id == branch_id).first() is not None,
-        db.query(models.Creditor.id).filter(models.Creditor.branch_id == branch_id).first() is not None,
-        db.query(models.CreditTransaction.id).filter(models.CreditTransaction.branch_id == branch_id).first() is not None,
-        db.query(models.SaleReturn.id).filter(models.SaleReturn.branch_id == branch_id).first() is not None,
-        db.query(models.User.id).filter(models.User.branch_id == branch_id).first() is not None,
-    ])
-
-
 @router.get("", response_model=list[BranchRead])
 def list_branches(
     db: Session = Depends(get_db),
@@ -63,14 +42,22 @@ def list_branches(
     )
 
     # Clean up legacy placeholder branches only when they are extra and truly unused.
-    placeholder_names = _placeholder_names_for_user(current_user)
+    placeholder_names = {"main branch", "default branch"}
     if len(branches) > 1:
         for branch in list(branches):
             normalized_name = (branch.name or "").strip().lower()
             if normalized_name not in placeholder_names:
                 continue
 
-            if not _branch_has_usage(db, branch.id):
+            has_products = db.query(models.Product.id).filter(models.Product.branch_id == branch.id).first() is not None
+            has_sales = db.query(models.Sale.id).filter(models.Sale.branch_id == branch.id).first() is not None
+            has_movements = db.query(models.StockMovement.id).filter(models.StockMovement.branch_id == branch.id).first() is not None
+            has_creditors = db.query(models.Creditor.id).filter(models.Creditor.branch_id == branch.id).first() is not None
+            has_credit_tx = db.query(models.CreditTransaction.id).filter(models.CreditTransaction.branch_id == branch.id).first() is not None
+            has_returns = db.query(models.SaleReturn.id).filter(models.SaleReturn.branch_id == branch.id).first() is not None
+            has_users = db.query(models.User.id).filter(models.User.branch_id == branch.id).first() is not None
+
+            if not any([has_products, has_sales, has_movements, has_creditors, has_credit_tx, has_returns, has_users]):
                 db.delete(branch)
 
         db.commit()
@@ -90,7 +77,8 @@ def create_branch(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    ensure_permission(current_user, "manage_branches", "Only Admin can create branches")
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Only Admin can create branches")
 
     owner_user_id = get_owner_user_id(current_user)
     branch_name = payload.name.strip()
@@ -107,21 +95,6 @@ def create_branch(
     )
     if existing:
         raise HTTPException(status_code=400, detail="Branch name already exists")
-
-    active_branches = (
-        db.query(models.Branch)
-        .filter(models.Branch.owner_user_id == owner_user_id, models.Branch.is_active.is_(True))
-        .order_by(models.Branch.created_at.asc(), models.Branch.id.asc())
-        .all()
-    )
-    if len(active_branches) == 1:
-        legacy_branch = active_branches[0]
-        legacy_name = (legacy_branch.name or "").strip().lower()
-        if legacy_name in _placeholder_names_for_user(current_user) and not _branch_has_usage(db, legacy_branch.id):
-            legacy_branch.name = branch_name
-            db.commit()
-            db.refresh(legacy_branch)
-            return legacy_branch
 
     branch = models.Branch(owner_user_id=owner_user_id, name=branch_name, is_active=True)
     db.add(branch)
@@ -141,7 +114,8 @@ def update_branch(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    ensure_permission(current_user, "manage_branches", "Only Admin can update branches")
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Only Admin can update branches")
 
     owner_user_id = get_owner_user_id(current_user)
 
@@ -182,7 +156,8 @@ def delete_branch(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    ensure_permission(current_user, "manage_branches", "Only Admin can delete branches")
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Only Admin can delete branches")
 
     owner_user_id = get_owner_user_id(current_user)
 

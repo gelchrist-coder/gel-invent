@@ -3,13 +3,12 @@ import { ReactNode, useState, useEffect } from "react";
 import TopBar from "./TopBar";
 import { Branch } from "../types";
 import appLogo from "../asset/logo.png";
-import { FrontendPermission, hasUserPermission } from "../user-storage";
 
 type NavItem = {
   id: string;
   label: string;
   icon: ReactNode;
-  requiredPermission?: FrontendPermission;
+  adminOnly?: boolean; // Only visible to Admin/Owner
 };
 
 // SVG Icons
@@ -35,16 +34,6 @@ const SalesIcon = () => (
     <circle cx="9" cy="21" r="1" />
     <circle cx="20" cy="21" r="1" />
     <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
-  </svg>
-);
-
-const InvoiceIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M6 2h9l3 3v17a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" />
-    <path d="M15 2v4h4" />
-    <line x1="8" y1="11" x2="16" y2="11" />
-    <line x1="8" y1="15" x2="16" y2="15" />
-    <line x1="8" y1="19" x2="13" y2="19" />
   </svg>
 );
 
@@ -90,12 +79,11 @@ const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: <DashboardIcon /> },
   { id: "products", label: "Products", icon: <ProductsIcon /> },
   { id: "sales", label: "Sales", icon: <SalesIcon /> },
-  { id: "invoice", label: "Invoice", icon: <InvoiceIcon /> },
   { id: "inventory", label: "Inventory", icon: <InventoryIcon /> },
-  { id: "reports", label: "Reports", icon: <ReportsIcon />, requiredPermission: "view_reports" },
+  { id: "reports", label: "Reports", icon: <ReportsIcon />, adminOnly: true },
   { id: "creditors", label: "Customers", icon: <CreditorsIcon /> },
   { id: "profile", label: "Settings", icon: <ProfileIcon /> },
-  { id: "users", label: "Users", icon: <UsersIcon />, requiredPermission: "manage_employees" },
+  { id: "users", label: "Users", icon: <UsersIcon />, adminOnly: true },
 ];
 
 const SIDEBAR_EXPANDED_WIDTH = 220;
@@ -109,12 +97,6 @@ type Props = {
   userName?: string;
   businessName?: string;
   userRole?: string;
-  userPermissions?: FrontendPermission[];
-  isOnline?: boolean;
-  outboxCount?: number;
-  isSyncingOutbox?: boolean;
-  canInstallApp?: boolean;
-  onInstallApp?: () => void;
   branches?: Branch[];
   activeBranchId?: number | null;
   onChangeBranch?: (branchId: number) => void;
@@ -128,12 +110,6 @@ export default function Layout({
   userName = "User",
   businessName = "Business",
   userRole = "Admin",
-  userPermissions,
-  isOnline = true,
-  outboxCount = 0,
-  isSyncingOutbox = false,
-  canInstallApp = false,
-  onInstallApp,
   branches,
   activeBranchId,
   onChangeBranch,
@@ -176,11 +152,7 @@ export default function Layout({
   };
 
   // Filter navigation items based on user role
-  const accessUser = { role: userRole, permissions: userPermissions };
-  const canManageBranches = hasUserPermission("manage_branches", accessUser);
-  const visibleNavItems = NAV_ITEMS.filter(
-    (item) => !item.requiredPermission || hasUserPermission(item.requiredPermission, accessUser),
-  );
+  const visibleNavItems = NAV_ITEMS.filter(item => !item.adminOnly || userRole === "Admin");
 
   const visibleBranches = branches;
 
@@ -296,7 +268,7 @@ export default function Layout({
           <div style={{ padding: "0 16px", marginBottom: 16 }}>
             <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 6, letterSpacing: 0.2 }}>Branch</div>
 
-            {canManageBranches && onChangeBranch && visibleBranches.length > 1 ? (
+            {userRole === "Admin" && onChangeBranch && visibleBranches.length > 1 ? (
               <select
                 value={activeBranchId ?? visibleBranches[0]?.id}
                 onChange={(e) => onChangeBranch?.(Number(e.target.value))}
@@ -409,11 +381,6 @@ export default function Layout({
           userName={userName}
           userRole={userRole}
           businessName={businessName}
-          isOnline={isOnline}
-          outboxCount={outboxCount}
-          isSyncingOutbox={isSyncingOutbox}
-          canInstallApp={canInstallApp}
-          onInstallApp={onInstallApp}
           onLogout={onLogout}
           onNavigate={onNavigate}
           branches={branches}

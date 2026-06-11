@@ -1,255 +1,22 @@
 from datetime import date
 from decimal import Decimal
 from html import escape
-import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
 from ..database import get_db
 from .. import models
-from ..schemas import SaleBatchOptionRead, SaleCreate, SaleRead
-from app.permissions import ensure_permission
+from ..schemas import SaleCreate, SaleRead
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.expiry import get_batch_balances, writeoff_expired_batches
 from app.utils.email import send_email, smtp_configured
 
 router = APIRouter(prefix="/sales", tags=["sales"])
-
-WALK_IN_CUSTOMER_NAMES = {
-    "walk in",
-    "walk in customer",
-    "walkin",
-    "guest",
-    "anonymous",
-}
-
-
-def _normalized_customer_name(name: str | None) -> str | None:
-    if name is None:
-        return None
-    cleaned = " ".join(str(name).strip().split())
-    return cleaned or None
-
-
-def _is_walk_in_customer_name(name: str | None) -> bool:
-    normalized = _normalized_customer_name(name)
-    if not normalized:
-        return False
-    lookup = normalized.lower().replace("-", " ").replace("_", " ")
-    lookup = " ".join(lookup.split())
-    return lookup in WALK_IN_CUSTOMER_NAMES
-
-
-def _extract_phone_from_notes(notes: str | None) -> str | None:
-    if not notes:
-        return None
-    phone_match = re.search(r"Phone:\s*([\d\s\-\+]+)", notes)
-    if not phone_match:
-        return None
-    value = phone_match.group(1).strip()
-    return value or None
-
-
-def _normalize_batch_number(value: str | None) -> str | None:
-    if value is None:
-        return None
-    normalized = " ".join(str(value).strip().split())
-    return normalized or None
-
-
-def _get_available_sale_batches(
-    *,
-    db: Session,
-    tenant_user_ids: list[int],
-    branch_id: int,
-    product_id: int,
-    variant_id: int | None = None,
-):
-    today = date.today()
-    available_batches = [
-        batch
-        for batch in get_batch_balances(
-            db=db,
-            tenant_user_ids=tenant_user_ids,
-            branch_id=branch_id,
-            product_id=product_id,
-            variant_id=variant_id,
-            include_null_expiry=True,
-        )
-        if batch.balance > 0 and (batch.expiry_date is None or batch.expiry_date >= today)
-    ]
-    available_batches.sort(
-        key=lambda batch: (
-            1 if batch.expiry_date is None else 0,
-            batch.expiry_date or date.max,
-            batch.first_seen or date.max,
-            batch.batch_number,
-        )
-    )
-    return available_batches
-
-
-def _load_unit_cost_by_batch(
-    *,
-    db: Session,
-    tenant_user_ids: list[int],
-    branch_id: int,
-    product_id: int,
-    variant_id: int | None = None,
-    batch_numbers: list[str],
-) -> dict[str, Decimal | None]:
-    if not batch_numbers:
-        return {}
-
-    rows = db.execute(
-        select(
-            models.StockMovement.batch_number,
-            models.StockMovement.unit_cost_price,
-            models.StockMovement.created_at,
-        )
-        .where(
-            models.StockMovement.product_id == product_id,
-            models.StockMovement.branch_id == branch_id,
-            models.StockMovement.user_id.in_(tenant_user_ids),
-            models.StockMovement.batch_number.in_(batch_numbers),
-            models.StockMovement.change > 0,
-        )
-        .order_by(models.StockMovement.batch_number.asc(), models.StockMovement.created_at.desc())
-    ).all()
-
-    unit_cost_by_batch: dict[str, Decimal | None] = {}
-    for batch_number, unit_cost, _created_at in rows:
-        normalized_batch_number = _normalize_batch_number(batch_number)
-        if not normalized_batch_number or normalized_batch_number in unit_cost_by_batch:
-            continue
-        unit_cost_by_batch[normalized_batch_number] = unit_cost
-    return unit_cost_by_batch
-
-
-def _resolve_sale_variant(
-    *,
-    db: Session,
-    tenant_user_ids: list[int],
-    branch_id: int,
-    product_id: int,
-    variant_id: int | None,
-) -> models.ProductVariant | None:
-    if variant_id is None:
-        return None
-
-    variant = db.scalar(
-        select(models.ProductVariant)
-        .join(models.Product)
-        .where(
-            models.ProductVariant.id == variant_id,
-            models.ProductVariant.product_id == product_id,
-            models.Product.branch_id == branch_id,
-            models.Product.user_id.in_(tenant_user_ids),
-        )
-    )
-    if not variant:
-        raise HTTPException(status_code=404, detail="Product variant not found")
-    return variant
-
-
-def _attach_deducted_batches(
-    *,
-    db: Session,
-    sales: list[models.Sale],
-    tenant_user_ids: list[int],
-    branch_id: int,
-) -> None:
-    sale_ids = sorted({int(sale.id) for sale in sales})
-    if not sale_ids:
-        return
-
-    rows = db.execute(
-        select(
-            models.StockMovement.sale_id,
-            models.StockMovement.batch_number,
-            models.StockMovement.expiry_date,
-            func.coalesce(func.sum(models.StockMovement.change), 0).label("total_change"),
-        )
-        .where(
-            models.StockMovement.sale_id.in_(sale_ids),
-            models.StockMovement.branch_id == branch_id,
-            models.StockMovement.user_id.in_(tenant_user_ids),
-            models.StockMovement.change < 0,
-        )
-        .group_by(
-            models.StockMovement.sale_id,
-            models.StockMovement.batch_number,
-            models.StockMovement.expiry_date,
-        )
-    ).all()
-
-    deductions_by_sale_id: dict[int, list[dict[str, object]]] = {sale_id: [] for sale_id in sale_ids}
-    for sale_id, batch_number, expiry_date, total_change in rows:
-        quantity = abs(Decimal(total_change or 0))
-        deductions_by_sale_id.setdefault(int(sale_id), []).append(
-            {
-                "batch_number": batch_number,
-                "expiry_date": expiry_date.isoformat() if expiry_date else None,
-                "quantity": float(quantity),
-            }
-        )
-
-    for sale in sales:
-        sale.deducted_batches = sorted(
-            deductions_by_sale_id.get(int(sale.id), []),
-            key=lambda item: (
-                1 if item["batch_number"] is None else 0,
-                item["expiry_date"] or "9999-12-31",
-                str(item["batch_number"] or ""),
-            ),
-        )
-
-
-def _get_or_create_creditor(
-    *,
-    db: Session,
-    tenant_user_ids: list[int],
-    active_branch_id: int,
-    actor_user_id: int,
-    customer_name: str,
-    phone: str | None = None,
-    email: str | None = None,
-) -> models.Creditor:
-    normalized_name = _normalized_customer_name(customer_name)
-    if not normalized_name:
-        raise HTTPException(status_code=400, detail="Customer name is required")
-
-    creditor = db.scalar(
-        select(models.Creditor).where(
-            func.lower(func.trim(models.Creditor.name)) == normalized_name.lower(),
-            models.Creditor.user_id.in_(tenant_user_ids),
-            models.Creditor.branch_id == active_branch_id,
-        )
-    )
-
-    if not creditor:
-        creditor = models.Creditor(
-            user_id=actor_user_id,
-            branch_id=active_branch_id,
-            name=normalized_name,
-            phone=phone,
-            email=email,
-            total_debt=Decimal("0.00"),
-        )
-        db.add(creditor)
-        db.flush()
-        return creditor
-
-    if phone and not creditor.phone:
-        creditor.phone = phone
-    if email and not creditor.email:
-        creditor.email = email
-    return creditor
 
 
 class SendReceiptEmailRequest(BaseModel):
@@ -260,13 +27,6 @@ class SendReceiptEmailRequest(BaseModel):
 
 class SendReceiptEmailResponse(BaseModel):
     message: str
-
-
-class SaleCustomerAssignRequest(BaseModel):
-    customer_name: str = Field(..., min_length=1, max_length=255)
-    phone: str | None = Field(default=None, max_length=50)
-    email: EmailStr | None = None
-    notes: str | None = None
 
 
 @router.post("", response_model=SaleRead, status_code=201)
@@ -281,7 +41,6 @@ def create_sale(
     If payment method is credit or partial, create a credit transaction.
     For partial payments, only the unpaid portion is recorded as credit.
     """
-    ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     # Auto-writeoff expired batches for this product before checking availability.
@@ -317,27 +76,13 @@ def create_sale(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    variant = _resolve_sale_variant(
-        db=db,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-        product_id=payload.product_id,
-        variant_id=payload.variant_id,
-    )
-
-    available_stock_query = select(func.coalesce(func.sum(models.StockMovement.change), 0)).where(
-        models.StockMovement.product_id == payload.product_id,
-        models.StockMovement.branch_id == active_branch_id,
-        models.StockMovement.user_id.in_(tenant_user_ids),
-    )
-    if variant is not None:
-        available_stock_query = available_stock_query.where(
-            or_(
-                models.StockMovement.variant_id == variant.id,
-                models.StockMovement.variant_id.is_(None),
-            )
+    available_stock = db.scalar(
+        select(func.coalesce(func.sum(models.StockMovement.change), 0)).where(
+            models.StockMovement.product_id == payload.product_id,
+            models.StockMovement.branch_id == active_branch_id,
+            models.StockMovement.user_id.in_(tenant_user_ids),
         )
-    available_stock = db.scalar(available_stock_query)
+    )
     if available_stock is None:
         available_stock = Decimal(0)
     if payload.quantity > available_stock:
@@ -346,23 +91,17 @@ def create_sale(
             detail=f"Insufficient stock. Available: {available_stock}",
         )
 
-    normalized_customer_name = _normalized_customer_name(payload.customer_name)
-    if _is_walk_in_customer_name(normalized_customer_name):
-        normalized_customer_name = None
-    customer_phone = _extract_phone_from_notes(payload.notes)
-
     # Create the sale
     sale = models.Sale(
         user_id=current_user.id,
         branch_id=active_branch_id,
         product_id=payload.product_id,
-        variant_id=variant.id if variant is not None else None,
         quantity=payload.quantity,
         sale_unit_type=(payload.sale_unit_type or "piece"),
         pack_quantity=payload.pack_quantity,
         unit_price=payload.unit_price,
         total_price=payload.total_price,
-        customer_name=normalized_customer_name,
+        customer_name=payload.customer_name,
         payment_method=payload.payment_method,
         amount_paid=payload.amount_paid,
         partial_payment_method=payload.partial_payment_method,
@@ -372,44 +111,55 @@ def create_sale(
     db.add(sale)
     db.flush()  # Flush to get sale.id
 
-    # Create or enrich customer profile for any named sale (cash/credit/partial).
-    customer_creditor: models.Creditor | None = None
-    if normalized_customer_name:
-        customer_creditor = _get_or_create_creditor(
-            db=db,
-            tenant_user_ids=tenant_user_ids,
-            active_branch_id=active_branch_id,
-            actor_user_id=current_user.id,
-            customer_name=normalized_customer_name,
-            phone=customer_phone,
+    # Deduct stock FIFO by earliest expiry date (non-expiring batches are sold last).
+    today = date.today()
+    balances = get_batch_balances(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=payload.product_id,
+        include_null_expiry=True,
+    )
+
+    # Only consider batches that have stock remaining and are not expired.
+    available_batches = [
+        b
+        for b in balances
+        if b.balance > 0 and (b.expiry_date is None or b.expiry_date >= today)
+    ]
+    available_batches.sort(
+        key=lambda b: (
+            1 if b.expiry_date is None else 0,
+            b.expiry_date or date.max,
         )
-
-    # Deduct stock FEFO by earliest expiry date (non-expiring batches are sold last),
-    # with an optional preferred batch moved to the front when the cashier selects one.
-    available_batches = _get_available_sale_batches(
-        db=db,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-        product_id=payload.product_id,
-        variant_id=variant.id if variant is not None else None,
     )
-    preferred_batch_number = _normalize_batch_number(payload.preferred_batch_number)
-    if preferred_batch_number:
-        preferred_batches = [batch for batch in available_batches if batch.batch_number == preferred_batch_number]
-        if not preferred_batches:
-            raise HTTPException(status_code=400, detail="Selected batch is no longer available for sale")
-        available_batches = preferred_batches + [
-            batch for batch in available_batches if batch.batch_number != preferred_batch_number
-        ]
 
-    unit_cost_by_batch = _load_unit_cost_by_batch(
-        db=db,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-        product_id=payload.product_id,
-        variant_id=variant.id if variant is not None else None,
-        batch_numbers=sorted({_normalize_batch_number(batch.batch_number) for batch in available_batches if batch.batch_number}),
-    )
+    # Build a map of batch_number -> latest known unit_cost_price for stock-in movements.
+    batch_numbers = sorted({b.batch_number for b in available_batches if b.batch_number})
+    unit_cost_by_batch: dict[str, Decimal | None] = {}
+    if batch_numbers:
+        rows = db.execute(
+            select(
+                models.StockMovement.batch_number,
+                models.StockMovement.unit_cost_price,
+                models.StockMovement.created_at,
+            )
+            .where(
+                models.StockMovement.product_id == payload.product_id,
+                models.StockMovement.branch_id == active_branch_id,
+                models.StockMovement.user_id.in_(tenant_user_ids),
+                models.StockMovement.batch_number.in_(batch_numbers),
+                models.StockMovement.change > 0,
+            )
+            .order_by(models.StockMovement.batch_number.asc(), models.StockMovement.created_at.desc())
+        ).all()
+
+        for bn, unit_cost, _created_at in rows:
+            if bn is None:
+                continue
+            bn_str = str(bn)
+            if bn_str not in unit_cost_by_batch:
+                unit_cost_by_batch[bn_str] = unit_cost
 
     remaining = payload.quantity
     deducted_batches: list[dict[str, object]] = []
@@ -426,13 +176,12 @@ def create_sale(
                 user_id=current_user.id,
                 branch_id=active_branch_id,
                 product_id=payload.product_id,
-                variant_id=variant.id if variant is not None else None,
                 sale_id=sale.id,
                 change=-take,
                 reason="Sale",
                 batch_number=b.batch_number,
                 expiry_date=b.expiry_date,
-                unit_cost_price=unit_cost_by_batch.get(_normalize_batch_number(b.batch_number) or "") if b.batch_number else (product.cost_price if product.cost_price is not None else None),
+                unit_cost_price=unit_cost_by_batch.get(b.batch_number) if b.batch_number else (product.cost_price if product.cost_price is not None else None),
                 unit_selling_price=sale.unit_price,
             )
         )
@@ -453,7 +202,6 @@ def create_sale(
                 user_id=current_user.id,
                 branch_id=active_branch_id,
                 product_id=payload.product_id,
-                variant_id=variant.id if variant is not None else None,
                 sale_id=sale.id,
                 change=-remaining,
                 reason="Sale",
@@ -493,16 +241,40 @@ def create_sale(
             )
     
     # Create creditor transaction if there's credit involved
-    if credit_amount > 0 and normalized_customer_name:
-        creditor = customer_creditor or _get_or_create_creditor(
-            db=db,
-            tenant_user_ids=tenant_user_ids,
-            active_branch_id=active_branch_id,
-            actor_user_id=current_user.id,
-            customer_name=normalized_customer_name,
-            phone=customer_phone,
+    if credit_amount > 0 and payload.customer_name:
+        # Extract phone number from notes if present
+        phone_number = None
+        if payload.notes:
+            import re
+            phone_match = re.search(r'Phone: ([\d\s\-\+]+)', payload.notes)
+            if phone_match:
+                phone_number = phone_match.group(1).strip()
+        
+        # Find or create creditor by name for current user's tenant
+        creditor = db.scalar(
+            select(models.Creditor).where(
+                models.Creditor.name == payload.customer_name,
+                models.Creditor.user_id.in_(tenant_user_ids),
+                models.Creditor.branch_id == active_branch_id,
+            )
         )
-        creditor.total_debt += credit_amount
+        
+        if not creditor:
+            # Create new creditor if doesn't exist
+            creditor = models.Creditor(
+                user_id=current_user.id,
+                branch_id=active_branch_id,
+                name=payload.customer_name,
+                phone=phone_number,
+                total_debt=credit_amount,
+            )
+            db.add(creditor)
+            db.flush()
+        else:
+            # Update existing creditor's debt and phone if provided
+            creditor.total_debt += credit_amount
+            if phone_number and not creditor.phone:
+                creditor.phone = phone_number
         
         # Build transaction notes
         if payload.payment_method == "partial":
@@ -578,63 +350,6 @@ def create_sales_bulk(
     return created
 
 
-@router.get("/products/{product_id}/batch-options", response_model=list[SaleBatchOptionRead])
-def list_sale_batch_options(
-    product_id: int,
-    variant_id: int | None = Query(default=None, gt=0),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
-):
-    """Return currently sellable tracked batches for a product in FEFO order."""
-    ensure_permission(current_user, "process_sales")
-    tenant_user_ids = get_tenant_user_ids(current_user, db)
-
-    product = db.scalar(
-        select(models.Product).where(
-            models.Product.id == product_id,
-            models.Product.user_id.in_(tenant_user_ids),
-            models.Product.branch_id == active_branch_id,
-        )
-    )
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-
-    variant = _resolve_sale_variant(
-        db=db,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-        product_id=product_id,
-        variant_id=variant_id,
-    )
-
-    writeoff_expired_batches(
-        db=db,
-        actor_user_id=current_user.id,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-        product_id=product_id,
-        variant_id=variant.id if variant is not None else None,
-    )
-    db.flush()
-
-    available_batches = _get_available_sale_batches(
-        db=db,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-        product_id=product_id,
-    )
-    return [
-        SaleBatchOptionRead(
-            batch_number=batch.batch_number,
-            expiry_date=batch.expiry_date,
-            available_quantity=batch.balance,
-            first_seen=batch.first_seen,
-        )
-        for batch in available_batches
-    ]
-
-
 @router.post("/send-receipt", response_model=SendReceiptEmailResponse)
 def send_sale_receipt_email(
     payload: SendReceiptEmailRequest,
@@ -644,9 +359,10 @@ def send_sale_receipt_email(
 ):
     """Email a receipt for one or more sales.
 
-    Allowed for roles that can send sale receipts.
+    Owner-only action to avoid staff sending customer emails without approval.
     """
-    ensure_permission(current_user, "send_sale_receipts", "You do not have permission to email receipts")
+    if current_user.role != "Admin":
+        raise HTTPException(status_code=403, detail="Only business owners can email receipts")
 
     if not smtp_configured():
         raise HTTPException(status_code=400, detail="Email service is not configured")
@@ -702,11 +418,6 @@ def send_sale_receipt_email(
         )
 
     business_name = (current_user.business_name or "Gel Invent Business").strip()
-    watermark_html = (
-        "<tr><td style='padding:0 24px'>"
-        "<div style='font-size:32px;opacity:.08;letter-spacing:4px;text-align:center;margin:6px 0 -6px'>Gel Invent</div>"
-        "</td></tr>"
-    )
     served_by = (current_user.name or "Owner").strip()
     receipt_datetime = sales_sorted[0].created_at.strftime("%Y-%m-%d %H:%M")
 
@@ -766,12 +477,10 @@ def send_sale_receipt_email(
             <tr>
                 <td style=\"padding:20px 24px;background:linear-gradient(120deg,#1f7aff,#2563eb);color:#ffffff\">
                     <div style=\"font-size:12px;letter-spacing:1px;opacity:.9\">OFFICIAL RECEIPT</div>
-                    {logo_html}
                     <div style=\"font-size:28px;font-weight:800;line-height:1.1;margin-top:6px\">{escape(business_name)}</div>
                     <div style=\"margin-top:8px;font-size:13px;opacity:.95\">Receipt #{escape(receipt_number)} • {escape(receipt_datetime)}</div>
                 </td>
             </tr>
-            {watermark_html}
             <tr>
                 <td style=\"padding:18px 24px\">
                     <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"font-size:14px\">
@@ -847,7 +556,6 @@ def list_sales(
     """
     Retrieve all sales for the current user's tenant.
     """
-    ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     sales = db.scalars(
         select(models.Sale)
@@ -863,13 +571,6 @@ def list_sales(
 
     for sale in sales:
         sale.created_by_name = creator_name_by_id.get(sale.user_id)
-
-    _attach_deducted_batches(
-        db=db,
-        sales=sales,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-    )
     
     return sales
 
@@ -884,7 +585,6 @@ def get_sale(
     """
     Retrieve a specific sale by ID for the current user's tenant.
     """
-    ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     sale = db.scalar(
         select(models.Sale).where(
@@ -899,128 +599,7 @@ def get_sale(
     # Add created_by_name
     creator = db.scalar(select(models.User).where(models.User.id == sale.user_id))
     sale.created_by_name = creator.name if creator else None
-    _attach_deducted_batches(
-        db=db,
-        sales=[sale],
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-    )
     
-    return sale
-
-
-@router.patch("/{sale_id}/customer", response_model=SaleRead)
-def assign_sale_customer(
-    sale_id: int,
-    payload: SaleCustomerAssignRequest,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
-):
-    """Attach a named customer to an existing sale (useful for converting rushed walk-in checkout)."""
-    ensure_permission(current_user, "process_sales")
-    tenant_user_ids = get_tenant_user_ids(current_user, db)
-    sale = db.scalar(
-        select(models.Sale).where(
-            models.Sale.id == sale_id,
-            models.Sale.user_id.in_(tenant_user_ids),
-            models.Sale.branch_id == active_branch_id,
-        )
-    )
-    if not sale:
-        raise HTTPException(status_code=404, detail="Sale not found")
-
-    transaction_token = ((sale.client_sale_id or "").strip().split(":")[0] if sale.client_sale_id else "")
-    related_sales = [sale]
-    if transaction_token:
-        grouped_sales = db.scalars(
-            select(models.Sale).where(
-                models.Sale.user_id.in_(tenant_user_ids),
-                models.Sale.branch_id == active_branch_id,
-                or_(
-                    models.Sale.client_sale_id == transaction_token,
-                    models.Sale.client_sale_id.like(f"{transaction_token}:%"),
-                ),
-            )
-        ).all()
-        if grouped_sales:
-            related_sales = grouped_sales
-
-    normalized_customer_name = _normalized_customer_name(payload.customer_name)
-    if not normalized_customer_name or _is_walk_in_customer_name(normalized_customer_name):
-        raise HTTPException(status_code=400, detail="Please provide a valid customer name")
-
-    normalized_phone = _normalized_customer_name(payload.phone) if payload.phone else None
-    normalized_email = str(payload.email).strip() if payload.email else None
-
-    creditor = _get_or_create_creditor(
-        db=db,
-        tenant_user_ids=tenant_user_ids,
-        active_branch_id=active_branch_id,
-        actor_user_id=current_user.id,
-        customer_name=normalized_customer_name,
-        phone=normalized_phone or _extract_phone_from_notes(sale.notes),
-        email=normalized_email,
-    )
-
-    for related_sale in related_sales:
-        if payload.notes and payload.notes.strip():
-            appended_note = payload.notes.strip()
-            related_sale.notes = f"{related_sale.notes} | {appended_note}" if related_sale.notes else appended_note
-
-        related_sale.customer_name = normalized_customer_name
-
-        # For legacy credit sales that were recorded as walk-in, create missing debt/payment ledger entries.
-        if related_sale.payment_method in {"credit", "partial"}:
-            existing_debt = db.scalar(
-                select(models.CreditTransaction).where(
-                    models.CreditTransaction.sale_id == related_sale.id,
-                    models.CreditTransaction.user_id.in_(tenant_user_ids),
-                    models.CreditTransaction.branch_id == active_branch_id,
-                    models.CreditTransaction.transaction_type == "debt",
-                )
-            )
-            if not existing_debt:
-                sale_total = Decimal(related_sale.total_price or 0)
-                amount_paid = Decimal(related_sale.amount_paid or 0)
-                if related_sale.payment_method == "partial":
-                    debt_amount = sale_total - amount_paid
-                else:
-                    debt_amount = sale_total
-
-                if debt_amount > 0:
-                    creditor.total_debt += debt_amount
-                    db.add(
-                        models.CreditTransaction(
-                            user_id=current_user.id,
-                            branch_id=active_branch_id,
-                            creditor_id=creditor.id,
-                            sale_id=related_sale.id,
-                            amount=debt_amount,
-                            transaction_type="debt",
-                            notes="Debt added after walk-in customer conversion",
-                        )
-                    )
-
-                if related_sale.payment_method == "credit" and amount_paid > 0:
-                    creditor.total_debt -= amount_paid
-                    db.add(
-                        models.CreditTransaction(
-                            user_id=current_user.id,
-                            branch_id=active_branch_id,
-                            creditor_id=creditor.id,
-                            sale_id=related_sale.id,
-                            amount=amount_paid,
-                            transaction_type="payment",
-                            notes="Initial payment recorded after walk-in customer conversion",
-                        )
-                    )
-
-    db.commit()
-    db.refresh(sale)
-
-    creator = db.scalar(select(models.User).where(models.User.id == sale.user_id))
-    sale.created_by_name = creator.name if creator else None
     return sale
 
 
@@ -1035,7 +614,6 @@ def delete_sale(
     Delete a sale and restore the stock.
     If the sale was on credit, reverse the credit transaction.
     """
-    ensure_permission(current_user, "delete_sales", "Only business owners can delete sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     sale = db.scalar(
         select(models.Sale).where(
