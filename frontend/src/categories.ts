@@ -127,7 +127,6 @@ export const userNeedsExpiryTracking = (): boolean => businessTypesNeedExpiry(re
 export const SUPPLY_TRACKING_BUSINESS_TYPES = new Set<string>([
   "Construction Materials",
   "Agro",
-  "Hardware",
 ]);
 
 // Whether the given business types call for supply / collect-later tracking.
