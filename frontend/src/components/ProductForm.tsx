@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { Branch, MeasurementType, NewProduct, Supplier } from "../types";
-import { useAppCategories } from "../categories";
+import { useAppCategories, userNeedsExpiryTracking } from "../categories";
 import { createSupplier, updateMyCategories } from "../api";
 import { startCameraBarcodeScan } from "../barcode-scanner";
 import { useCapabilities } from "../settings";
@@ -108,6 +108,9 @@ export default function ProductForm({
 }: Props) {
   const categoryOptions = useAppCategories();
   const capabilities = useCapabilities();
+  // Expiry only applies to businesses that actually sell perishable/dated stock
+  // (e.g. Pharmacy, Grocery) — not Construction, Hardware, Fashion, Electronics.
+  const expiryEnabled = capabilities.expiry_tracking && userNeedsExpiryTracking();
   const canConfigureMeasurement = capabilities.fractional_sales || capabilities.length_based_sales || capabilities.unit_conversions;
   const canConfigureVariants = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes;
   const measurementTypeOptions = useMemo<Array<{ value: MeasurementType; label: string }>>(() => {
@@ -323,7 +326,7 @@ export default function ProductForm({
   }, [cameraOpen]);
 
   useEffect(() => {
-    if (capabilities.expiry_tracking) {
+    if (expiryEnabled) {
       return;
     }
 
@@ -334,7 +337,7 @@ export default function ProductForm({
       }
       return { ...previousForm, expiry_date: null };
     });
-  }, [capabilities.expiry_tracking]);
+  }, [expiryEnabled]);
 
   useEffect(() => {
     setForm((previousForm) => {
@@ -381,7 +384,7 @@ export default function ProductForm({
       ? (form.measurement_type ?? "count")
       : "count";
 
-    if (capabilities.expiry_tracking && isPerishable && !form.expiry_date) {
+    if (expiryEnabled && isPerishable && !form.expiry_date) {
       setError("Expiry date is required for perishable goods");
       return;
     }
@@ -513,7 +516,7 @@ export default function ProductForm({
         pack_size: form.packSize ? parseInt(form.packSize) : undefined,
         category: form.category || undefined,
         supplier: normalizedSupplierName,
-        expiry_date: capabilities.expiry_tracking && isPerishable ? (form.expiry_date || undefined) : undefined,
+        expiry_date: expiryEnabled && isPerishable ? (form.expiry_date || undefined) : undefined,
         cost_price: form.costPrice ? parseFloat(form.costPrice) : undefined,
         pack_cost_price: form.packCostPrice ? parseFloat(form.packCostPrice) : undefined,
         selling_price: form.sellingPrice ? parseFloat(form.sellingPrice) : undefined,
@@ -795,12 +798,12 @@ export default function ProductForm({
           </div>
         </div>
 
-        {/* Expiry */}
+        {/* Expiry — only for businesses that sell perishable/dated stock */}
+        {expiryEnabled && (
         <div style={modalSectionStyle}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
             Expiry
           </h3>
-          {capabilities.expiry_tracking ? (
             <div className="grid" style={{ gap: 12 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
@@ -843,12 +846,8 @@ export default function ProductForm({
                 </small>
               </label>
             </div>
-          ) : (
-            <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>
-              Expiry tracking is currently disabled for this business type.
-            </p>
-          )}
         </div>
+        )}
 
         {/* Units */}
         <div style={modalSectionStyle}>

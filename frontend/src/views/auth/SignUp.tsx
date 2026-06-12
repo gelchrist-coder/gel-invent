@@ -4,12 +4,21 @@ import { Link } from "react-router-dom";
 import { fetchWithSameOriginApiFallback } from "../../api";
 import AuthShell from "./AuthShell";
 import {
+  ArrowRightIcon,
   AuthMessage,
   AuthResponse,
+  AUTH_PRIMARY,
   BUSINESS_TYPE_OPTIONS,
-  PasswordInput,
+  BuildingIcon,
+  FieldLabel,
+  IconInput,
+  IconPasswordInput,
+  MailIcon,
+  PhoneIcon,
+  PinIcon,
+  ShieldIcon,
+  UserIcon,
   completeAuthenticatedSession,
-  fieldLabelStyle,
   getPasswordRuleError,
   isRecord,
   linkButtonStyle,
@@ -169,8 +178,8 @@ export default function SignUp({ onLogin }: SignUpProps) {
 
   return (
     <AuthShell
-      title="Create your account"
-      subtitle="Set up your business and start managing inventory in minutes"
+      title="Create Account"
+      subtitle="Secure your supply chain with professional tools."
       footer={
         <>
           Already have an account?{" "}
@@ -183,64 +192,62 @@ export default function SignUp({ onLogin }: SignUpProps) {
       <form onSubmit={handleSubmit}>
         <AuthMessage error={error} info={info} />
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Full Name *</span>
-            <input
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div>
+            <FieldLabel>Full Name</FieldLabel>
+            <IconInput
+              icon={<UserIcon />}
               type="text"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               placeholder="John Doe"
               required
               autoComplete="name"
-              className="input"
-              style={{ padding: 12 }}
             />
-          </label>
+          </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Business Name *</span>
-            <input
+          <div>
+            <FieldLabel>Business Name</FieldLabel>
+            <IconInput
+              icon={<BuildingIcon />}
               type="text"
               value={formData.businessName}
               onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
               placeholder="My Business Ltd"
               required
               autoComplete="organization"
-              className="input"
-              style={{ padding: 12 }}
             />
-          </label>
+          </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Primary Business Location *</span>
-            <input
+          <div>
+            <FieldLabel>Primary Business Location</FieldLabel>
+            <IconInput
+              icon={<PinIcon />}
               type="text"
               value={formData.businessLocation}
               onChange={(e) => setFormData({ ...formData, businessLocation: e.target.value })}
               placeholder="e.g., Accra Main Store"
               required
-              className="input"
-              style={{ padding: 12 }}
             />
-            <span style={{ fontSize: 12, color: "#6b7280" }}>This becomes your first branch name.</span>
-          </label>
+            <span style={{ display: "block", marginTop: 6, fontSize: 12, color: "#94a3b8" }}>
+              This becomes your first branch name.
+            </span>
+          </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Phone Number</span>
-            <input
+          <div>
+            <FieldLabel>Phone Number</FieldLabel>
+            <IconInput
+              icon={<PhoneIcon />}
               type="tel"
               value={formData.phone}
               onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
               placeholder="e.g., 0241234567"
               autoComplete="tel"
-              className="input"
-              style={{ padding: 12 }}
             />
-          </label>
+          </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Business Types *</span>
+          <div>
+            <FieldLabel>Business Types</FieldLabel>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
               {BUSINESS_TYPE_OPTIONS.map((businessType) => {
                 const isSelected = formData.businessTypes.some((value) => value === businessType);
@@ -250,12 +257,12 @@ export default function SignUp({ onLogin }: SignUpProps) {
                     type="button"
                     onClick={() => toggleBusinessType(businessType)}
                     style={{
-                      padding: "12px 14px",
+                      padding: "11px 14px",
                       borderRadius: 10,
-                      border: isSelected ? "1px solid #1d4ed8" : "1px solid #d1d5db",
+                      border: isSelected ? `1px solid ${AUTH_PRIMARY}` : "1px solid #d1d5db",
                       background: isSelected ? "#eff6ff" : "#ffffff",
-                      color: isSelected ? "#1d4ed8" : "#374151",
-                      fontSize: 14,
+                      color: isSelected ? AUTH_PRIMARY : "#374151",
+                      fontSize: 13.5,
                       fontWeight: 700,
                       cursor: "pointer",
                       textAlign: "left",
@@ -266,12 +273,9 @@ export default function SignUp({ onLogin }: SignUpProps) {
                 );
               })}
             </div>
-            <span style={{ fontSize: 12, color: "#6b7280" }}>
-              Choose the type of business you run. Product categories can be managed separately after signup.
-            </span>
 
             {formData.businessTypes.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
                 {formData.businessTypes.map((businessType) => (
                   <span
                     key={businessType}
@@ -301,10 +305,10 @@ export default function SignUp({ onLogin }: SignUpProps) {
                 ))}
               </div>
             )}
-          </label>
+          </div>
 
-          {/* Branches Section */}
-          <div style={{ marginTop: 16, padding: 16, background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+          {/* Branches */}
+          <div style={{ padding: 16, background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
             <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
               <input
                 type="checkbox"
@@ -312,16 +316,16 @@ export default function SignUp({ onLogin }: SignUpProps) {
                 onChange={(e) => setFormData({ ...formData, hasBranches: e.target.checked, branches: e.target.checked ? formData.branches : [] })}
                 style={{ width: 18, height: 18 }}
               />
-              <span style={fieldLabelStyle}>I have multiple branches/locations</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>I have multiple branches/locations</span>
             </label>
-            <p style={{ margin: "8px 0 0", fontSize: 12, color: "#6b7280" }}>
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: "#94a3b8" }}>
               If you have multiple store locations, check this to add them now. You can also add branches later from Settings.
             </p>
           </div>
 
           {formData.hasBranches && (
-            <label style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 16 }}>
-              <span style={fieldLabelStyle}>Branch Names *</span>
+            <div>
+              <FieldLabel>Branch Names</FieldLabel>
               <div style={{ display: "flex", gap: 6 }}>
                 <input
                   type="text"
@@ -335,18 +339,18 @@ export default function SignUp({ onLogin }: SignUpProps) {
                   }}
                   placeholder="e.g., Main Store, Accra Branch"
                   className="input"
-                  style={{ padding: 12, flex: 1 }}
+                  style={{ padding: 12, flex: 1, background: "#ffffff" }}
                 />
                 <button type="button" onClick={() => addBranch(branchInput)} className="button" style={{ padding: "12px 14px" }}>
                   Add
                 </button>
               </div>
-              <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
+              <p style={{ margin: "6px 0 0", fontSize: 12, color: "#94a3b8" }}>
                 Add only the extra branch names. Your primary business location is used as the first branch automatically.
               </p>
 
               {formData.branches.length > 0 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
                   {formData.branches.map((b) => (
                     <span
                       key={b}
@@ -376,26 +380,25 @@ export default function SignUp({ onLogin }: SignUpProps) {
                   ))}
                 </div>
               )}
-            </label>
+            </div>
           )}
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Email Address *</span>
-            <input
+          <div>
+            <FieldLabel>Business Email</FieldLabel>
+            <IconInput
+              icon={<MailIcon />}
               type="email"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              placeholder="you@example.com"
+              placeholder="name@company.com"
               required
               autoComplete="email"
-              className="input"
-              style={{ padding: 12 }}
             />
-          </label>
+          </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Password *</span>
-            <PasswordInput
+          <div>
+            <FieldLabel>Password</FieldLabel>
+            <IconPasswordInput
               value={formData.password}
               onChange={(value) => setFormData({ ...formData, password: value })}
               placeholder="••••••••"
@@ -404,11 +407,12 @@ export default function SignUp({ onLogin }: SignUpProps) {
               onToggle={() => setShowPassword(!showPassword)}
               autoComplete="new-password"
             />
-          </label>
+          </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Confirm Password *</span>
-            <PasswordInput
+          <div>
+            <FieldLabel>Confirm Password</FieldLabel>
+            <IconPasswordInput
+              icon={<ShieldIcon />}
               value={formData.confirmPassword}
               onChange={(value) => setFormData({ ...formData, confirmPassword: value })}
               placeholder="••••••••"
@@ -417,7 +421,7 @@ export default function SignUp({ onLogin }: SignUpProps) {
               onToggle={() => setShowConfirmPassword(!showConfirmPassword)}
               autoComplete="new-password"
             />
-          </label>
+          </div>
 
           {recaptcha.enabled && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -427,8 +431,8 @@ export default function SignUp({ onLogin }: SignUpProps) {
           )}
         </div>
 
-        <button type="submit" disabled={loading} className="button" style={submitButtonStyle(loading)}>
-          {loading ? "Processing..." : "Sign Up"}
+        <button type="submit" disabled={loading} style={submitButtonStyle(loading)}>
+          {loading ? "Processing..." : <>Create Account <ArrowRightIcon size={17} /></>}
         </button>
       </form>
     </AuthShell>

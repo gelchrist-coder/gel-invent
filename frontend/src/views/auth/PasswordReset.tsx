@@ -4,9 +4,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { fetchWithSameOriginApiFallback } from "../../api";
 import AuthShell from "./AuthShell";
 import {
+  ArrowRightIcon,
   AuthMessage,
-  PasswordInput,
-  fieldLabelStyle,
+  FieldLabel,
+  IconInput,
+  IconPasswordInput,
+  KeyIcon,
+  MailIcon,
+  ShieldIcon,
   getPasswordRuleError,
   isRecord,
   linkButtonStyle,
@@ -104,7 +109,6 @@ export default function PasswordReset() {
         return;
       }
 
-      // Success — send the user to sign in with their new password.
       navigate("/login", {
         replace: true,
         state: { info: "Password updated. Please sign in with your new password." },
@@ -124,7 +128,7 @@ export default function PasswordReset() {
   return (
     <AuthShell
       title="Reset password"
-      subtitle={step === "request" ? "We'll email you a reset code" : "Enter the code and choose a new password"}
+      subtitle={step === "request" ? "We'll email you a reset code." : "Enter the code and choose a new password."}
       footer={
         <>
           Remembered it?{" "}
@@ -137,11 +141,11 @@ export default function PasswordReset() {
       <form onSubmit={handleSubmit}>
         <AuthMessage error={error} info={info} />
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           <div
             style={{
               padding: 12,
-              borderRadius: 8,
+              borderRadius: 10,
               border: "1px solid #dbeafe",
               background: "#eff6ff",
               color: "#1e3a8a",
@@ -152,39 +156,37 @@ export default function PasswordReset() {
             {step === "request" ? "Step 1 of 2: Request a reset code" : "Step 2 of 2: Enter code and create a new password"}
           </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Email Address *</span>
-            <input
+          <div>
+            <FieldLabel>Email Address</FieldLabel>
+            <IconInput
+              icon={<MailIcon />}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
+              placeholder="name@company.com"
               required
               autoComplete="email"
-              className="input"
-              style={{ padding: 12 }}
               readOnly={step === "confirm"}
             />
-          </label>
+          </div>
 
           {step === "confirm" && (
             <>
-              <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={fieldLabelStyle}>Reset Code</span>
-                <input
+              <div>
+                <FieldLabel>Reset Code</FieldLabel>
+                <IconInput
+                  icon={<KeyIcon />}
                   type="text"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                   placeholder="Enter the 6-digit code"
                   autoComplete="one-time-code"
-                  className="input"
-                  style={{ padding: 12 }}
                 />
-              </label>
+              </div>
 
-              <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={fieldLabelStyle}>New Password</span>
-                <PasswordInput
+              <div>
+                <FieldLabel>New Password</FieldLabel>
+                <IconPasswordInput
                   value={password}
                   onChange={setPassword}
                   placeholder="••••••••"
@@ -192,11 +194,12 @@ export default function PasswordReset() {
                   onToggle={() => setShowPassword(!showPassword)}
                   autoComplete="new-password"
                 />
-              </label>
+              </div>
 
-              <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={fieldLabelStyle}>Confirm New Password</span>
-                <PasswordInput
+              <div>
+                <FieldLabel>Confirm New Password</FieldLabel>
+                <IconPasswordInput
+                  icon={<ShieldIcon />}
                   value={confirmPassword}
                   onChange={setConfirmPassword}
                   placeholder="••••••••"
@@ -204,7 +207,7 @@ export default function PasswordReset() {
                   onToggle={() => setShowConfirmPassword(!showConfirmPassword)}
                   autoComplete="new-password"
                 />
-              </label>
+              </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <button
@@ -217,7 +220,7 @@ export default function PasswordReset() {
                     setError("");
                     setInfo("");
                   }}
-                  style={{ ...linkButtonStyle, color: "#1f7aff", fontSize: 13 }}
+                  style={{ ...linkButtonStyle, fontSize: 13, color: "#1f7aff" }}
                 >
                   Use another email
                 </button>
@@ -234,7 +237,7 @@ export default function PasswordReset() {
                     }
                   }}
                   disabled={loading}
-                  style={{ ...linkButtonStyle, color: "#1f7aff", fontSize: 13, opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer" }}
+                  style={{ ...linkButtonStyle, fontSize: 13, color: "#1f7aff", opacity: loading ? 0.6 : 1, cursor: loading ? "not-allowed" : "pointer" }}
                 >
                   Resend code
                 </button>
@@ -243,8 +246,8 @@ export default function PasswordReset() {
           )}
         </div>
 
-        <button type="submit" disabled={loading} className="button" style={submitButtonStyle(loading)}>
-          {loading ? "Processing..." : step === "request" ? "Send Reset Code" : "Reset Password"}
+        <button type="submit" disabled={loading} style={submitButtonStyle(loading)}>
+          {loading ? "Processing..." : <>{step === "request" ? "Send Reset Code" : "Reset Password"} <ArrowRightIcon size={17} /></>}
         </button>
       </form>
     </AuthShell>

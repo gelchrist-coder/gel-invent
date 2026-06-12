@@ -10,8 +10,11 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:8000',
+          // Point local dev at the deployed backend so /api/* works without a
+          // local server. Override with VITE_DEV_API_TARGET for true local dev.
+          target: env.VITE_DEV_API_TARGET || 'https://gel-invent.vercel.app',
           changeOrigin: true,
+          secure: true,
           rewrite: (path) => path.replace(/^\/api/, ''),
         },
       },

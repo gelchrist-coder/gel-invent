@@ -3,6 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchWithSameOriginApiFallback, warmBackend } from "../../api";
 import { readStoredBusinessInfo, readStoredUser } from "../../user-storage";
 
+// Brand palette — declared first so module-level style objects below can use it.
+export const AUTH_PRIMARY = "#1d4ed8";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -416,10 +419,17 @@ export const fieldLabelStyle: React.CSSProperties = { fontSize: 14, fontWeight: 
 export const submitButtonStyle = (loading: boolean): React.CSSProperties => ({
   width: "100%",
   marginTop: 24,
-  padding: 14,
-  fontSize: 16,
-  fontWeight: 600,
-  background: "linear-gradient(135deg, #1f7aff, #8246ff)",
+  padding: "13px 16px",
+  fontSize: 15,
+  fontWeight: 700,
+  color: "#ffffff",
+  background: AUTH_PRIMARY,
+  border: "none",
+  borderRadius: 10,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
   opacity: loading ? 0.7 : 1,
   cursor: loading ? "not-allowed" : "pointer",
 });
@@ -427,10 +437,201 @@ export const submitButtonStyle = (loading: boolean): React.CSSProperties => ({
 export const linkButtonStyle: React.CSSProperties = {
   background: "none",
   border: "none",
-  color: "#4f46e5",
+  color: AUTH_PRIMARY,
   fontSize: 14,
-  fontWeight: 600,
+  fontWeight: 700,
   cursor: "pointer",
   padding: 0,
-  textDecoration: "underline",
+  textDecoration: "none",
 };
+
+// ---------------------------------------------------------------------------
+// Inline SVG icons (enterprise look)
+// ---------------------------------------------------------------------------
+
+type IconProps = { size?: number; color?: string };
+
+const svgBase = (size: number) => ({
+  width: size,
+  height: size,
+  viewBox: "0 0 24 24",
+  fill: "none" as const,
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+});
+
+export const MailIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <rect x="2" y="4" width="20" height="16" rx="2" />
+    <path d="m22 7-10 6L2 7" />
+  </svg>
+);
+
+export const LockIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <rect x="3" y="11" width="18" height="11" rx="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+export const UserIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </svg>
+);
+
+export const ShieldIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
+
+export const BuildingIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <rect x="4" y="2" width="16" height="20" rx="2" />
+    <path d="M9 22v-4h6v4M9 6h.01M15 6h.01M9 10h.01M15 10h.01M9 14h.01M15 14h.01" />
+  </svg>
+);
+
+export const PinIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z" />
+    <circle cx="12" cy="10" r="3" />
+  </svg>
+);
+
+export const PhoneIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />
+  </svg>
+);
+
+export const KeyIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <circle cx="7.5" cy="15.5" r="5.5" />
+    <path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3" />
+  </svg>
+);
+
+export const EyeIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+export const EyeOffIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+    <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+    <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24M1 1l22 22" />
+  </svg>
+);
+
+export const ArrowRightIcon = ({ size = 18 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M5 12h14M12 5l7 7-7 7" />
+  </svg>
+);
+
+export const BoxIcon = ({ size = 20 }: IconProps) => (
+  <svg {...svgBase(size)}>
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    <path d="m3.27 6.96 8.73 5.05 8.73-5.05M12 22.08V12" />
+  </svg>
+);
+
+// ---------------------------------------------------------------------------
+// Uppercase field label (with optional right-side slot, e.g. "Forgot?")
+// ---------------------------------------------------------------------------
+
+export function FieldLabel({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
+      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#64748b" }}>
+        {children}
+      </span>
+      {right}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Input with a leading icon (and optional trailing slot)
+// ---------------------------------------------------------------------------
+
+type IconInputProps = {
+  icon: React.ReactNode;
+  trailing?: React.ReactNode;
+} & React.InputHTMLAttributes<HTMLInputElement>;
+
+export function IconInput({ icon, trailing, style, ...props }: IconInputProps) {
+  return (
+    <div style={{ position: "relative" }}>
+      <span
+        style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#94a3b8", display: "flex", pointerEvents: "none" }}
+      >
+        {icon}
+      </span>
+      <input
+        {...props}
+        className="input"
+        style={{ paddingLeft: 40, paddingRight: trailing ? 44 : 12, paddingTop: 12, paddingBottom: 12, width: "100%", background: "#ffffff", ...style }}
+      />
+      {trailing && (
+        <span style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", display: "flex" }}>{trailing}</span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Password input with lock icon + show/hide eye toggle
+// ---------------------------------------------------------------------------
+
+type IconPasswordInputProps = {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  required?: boolean;
+  show: boolean;
+  onToggle: () => void;
+  autoComplete?: string;
+  icon?: React.ReactNode;
+};
+
+export function IconPasswordInput({
+  value,
+  onChange,
+  placeholder,
+  required,
+  show,
+  onToggle,
+  autoComplete,
+  icon,
+}: IconPasswordInputProps) {
+  return (
+    <IconInput
+      icon={icon ?? <LockIcon />}
+      type={show ? "text" : "password"}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      required={required}
+      autoComplete={autoComplete}
+      trailing={
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={show ? "Hide password" : "Show password"}
+          style={{ border: "none", background: "transparent", cursor: "pointer", color: "#94a3b8", display: "flex", padding: 6 }}
+        >
+          {show ? <EyeOffIcon /> : <EyeIcon />}
+        </button>
+      }
+    />
+  );
+}

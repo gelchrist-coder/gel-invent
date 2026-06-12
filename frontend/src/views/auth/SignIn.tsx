@@ -4,12 +4,15 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { warmBackend } from "../../api";
 import AuthShell from "./AuthShell";
 import {
+  ArrowRightIcon,
   AuthMessage,
   AuthResponse,
-  PasswordInput,
+  FieldLabel,
+  IconInput,
+  IconPasswordInput,
+  MailIcon,
   attemptLoginRequest,
   completeAuthenticatedSession,
-  fieldLabelStyle,
   isRecord,
   linkButtonStyle,
   safeJson,
@@ -133,13 +136,13 @@ export default function SignIn({ onLogin }: SignInProps) {
 
   return (
     <AuthShell
-      title="Sign in"
-      subtitle="Access your Gel Invent workspace"
+      title="Welcome back"
+      subtitle="Please enter your details to sign in."
       footer={
         <>
-          Don&apos;t have an account?{" "}
+          New to Gel Invent?{" "}
           <Link to="/signup" style={linkButtonStyle}>
-            Sign Up
+            Create an Account
           </Link>
         </>
       }
@@ -147,24 +150,31 @@ export default function SignIn({ onLogin }: SignInProps) {
       <form onSubmit={handleSubmit}>
         <AuthMessage error={error} info={info} />
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Email or Phone Number *</span>
-            <input
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div>
+            <FieldLabel>Email or Phone</FieldLabel>
+            <IconInput
+              icon={<MailIcon />}
               type="text"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com or 0241234567"
+              placeholder="name@company.com"
               required
               autoComplete="username"
-              className="input"
-              style={{ padding: 12 }}
             />
-          </label>
+          </div>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={fieldLabelStyle}>Password *</span>
-            <PasswordInput
+          <div>
+            <FieldLabel
+              right={
+                <button type="button" onClick={() => navigate("/reset")} style={{ ...linkButtonStyle, fontSize: 12.5 }}>
+                  Forgot Password?
+                </button>
+              }
+            >
+              Password
+            </FieldLabel>
+            <IconPasswordInput
               value={password}
               onChange={setPassword}
               placeholder="••••••••"
@@ -173,12 +183,6 @@ export default function SignIn({ onLogin }: SignInProps) {
               onToggle={() => setShowPassword(!showPassword)}
               autoComplete="current-password"
             />
-          </label>
-
-          <div style={{ marginTop: -8, textAlign: "right" }}>
-            <button type="button" onClick={() => navigate("/reset")} style={{ ...linkButtonStyle, color: "#1f7aff" }}>
-              Forgot password?
-            </button>
           </div>
 
           {recaptcha.enabled && (
@@ -189,8 +193,8 @@ export default function SignIn({ onLogin }: SignInProps) {
           )}
         </div>
 
-        <button type="submit" disabled={loading} className="button" style={submitButtonStyle(loading)}>
-          {loading ? "Processing..." : "Sign In"}
+        <button type="submit" disabled={loading} style={submitButtonStyle(loading)}>
+          {loading ? "Processing..." : <>Sign In <ArrowRightIcon size={17} /></>}
         </button>
       </form>
     </AuthShell>
