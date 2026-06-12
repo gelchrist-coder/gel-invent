@@ -343,15 +343,14 @@ export default function ProductList({
     return Math.max(0, Number(product.current_stock ?? 0));
   };
 
-  // Reserved = paid-but-uncollected goods still physically in the store.
+  // Reserved = paid-but-uncollected goods. They stay in physical stock
+  // (current_stock) until collected, but are spoken for and can't be re-sold.
   const getProductReserved = (product: Product): number =>
     supplyTrackingEnabled ? Math.max(0, Number(product.reserved_stock ?? 0)) : 0;
 
-  // Physical in-store count = what can be sold now (available) + what's reserved.
-  // Stock-out / low-stock should be judged on this so reserved goods that are
-  // still on the shelf are never flagged as "out of stock".
-  const getProductPhysicalStock = (product: Product): number =>
-    getProductStock(product) + getProductReserved(product);
+  // What's actually free to sell = physical in-store stock minus reserved.
+  const getProductAvailable = (product: Product): number =>
+    Math.max(0, getProductStock(product) - getProductReserved(product));
 
   const getProductMargin = (product: Product): number => {
     if (!product.cost_price || !product.selling_price) {
@@ -393,9 +392,10 @@ export default function ProductList({
         new Date(effectiveExpiry) > new Date(Date.now() + expiryWindowMs);
     }
 
-    // Stock filter — judged on physical in-store count so reserved (paid but
-    // uncollected) goods that are still on the shelf aren't treated as out of stock.
-    const stock = getProductPhysicalStock(p);
+    // Stock filter — judged on physical in-store count (current_stock), which
+    // still includes reserved goods, so paid-but-uncollected goods on the shelf
+    // aren't treated as out of stock.
+    const stock = getProductStock(p);
     let matchesStock = true;
     if (filterStock === "in_stock") {
       matchesStock = stock > 5;
@@ -1009,8 +1009,8 @@ export default function ProductList({
                   </div>
                   {(() => {
                     const reserved = getProductReserved(p);
-                    const available = stockLoaded ? stock : 0;
-                    const physical = available + reserved;
+                    const physical = stockLoaded ? stock : 0;
+                    const available = Math.max(0, physical - reserved);
                     return (
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
                         <span
@@ -1205,8 +1205,8 @@ export default function ProductList({
                     <td style={{ padding: "12px", textAlign: "right", fontWeight: 500 }}>
                       {(() => {
                         const reserved = getProductReserved(p);
-                        const available = stockLoaded ? stock : 0;
-                        const physical = available + reserved;
+                        const physical = stockLoaded ? stock : 0;
+                        const available = Math.max(0, physical - reserved);
                         return (
                           <>
                             <span style={{

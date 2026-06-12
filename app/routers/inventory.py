@@ -1378,32 +1378,6 @@ def get_inventory_analytics(
         for pid, stock in stock_by_product_rows
     }
 
-    # Reserved (paid-but-uncollected) goods are deducted from movements at the
-    # point of sale but are still physically in the store. Add them back when
-    # judging stock-out / low-stock so reserved goods aren't flagged as missing.
-    reserved_by_product: dict[int, Decimal] = {}
-    if products:
-        reserved_rows = db.execute(
-            select(
-                Sale.product_id,
-                func.coalesce(
-                    func.sum(Sale.quantity - func.coalesce(Sale.supplied_quantity, 0)),
-                    0,
-                ).label("reserved"),
-            )
-            .where(
-                Sale.user_id.in_(tenant_user_ids),
-                Sale.branch_id == active_branch_id,
-                Sale.product_id.in_([p.id for p in products]),
-                func.coalesce(Sale.supplied_quantity, Sale.quantity) < Sale.quantity,
-            )
-            .group_by(Sale.product_id)
-        ).all()
-        reserved_by_product = {
-            int(pid): (reserved if isinstance(reserved, Decimal) else Decimal(str(reserved or 0)))
-            for pid, reserved in reserved_rows
-        }
-
     in_out_totals = db.execute(
         select(
             func.coalesce(
@@ -1489,17 +1463,14 @@ def get_inventory_analytics(
                 value += untracked * product_cost
             total_stock_value += value
         
-        # Low stock check — based on physical in-store count (available + reserved)
-        # so paid-but-uncollected goods on the shelf aren't reported as low/out.
-        reserved_stock = reserved_by_product.get(product.id, Decimal(0))
-        physical_stock = total_stock + reserved_stock
-        if physical_stock < low_stock_threshold:
-            suggested_reorder = max(float(low_stock_threshold * 2) - float(physical_stock), 1.0)
+        # Low stock check
+        if total_stock < low_stock_threshold:
+            suggested_reorder = max(float(low_stock_threshold * 2) - float(total_stock), 1.0)
             low_stock_products.append({
                 "id": product.id,
                 "name": product.name,
                 "sku": product.sku,
-                "current_stock": float(physical_stock),
+                "current_stock": float(total_stock),
                 "threshold": low_stock_threshold,
                 "category": product.category,
                 "recommended_reorder": round(suggested_reorder, 2),

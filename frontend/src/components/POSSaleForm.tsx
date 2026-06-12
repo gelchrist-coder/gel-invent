@@ -241,6 +241,18 @@ export default function POSSaleForm({
   // Only businesses that sell collect-later goods (cement, feed, etc.) see the
   // "leave in store" option, mirroring how expiry tracking is gated by type.
   const supplyTrackingEnabled = useMemo(() => userNeedsSupplyTracking(), []);
+
+  // Quantity actually free to sell. current_stock is the physical in-store count;
+  // reserved goods are physically present but already paid for, so they must be
+  // excluded so a clerk can't sell goods that belong to a collect-later customer.
+  const availableToSell = useCallback(
+    (product: Product): number => {
+      const physical = Number(product.current_stock ?? 0);
+      const reserved = supplyTrackingEnabled ? Number(product.reserved_stock ?? 0) : 0;
+      return Math.max(0, physical - reserved);
+    },
+    [supplyTrackingEnabled],
+  );
   const [amountReceived, setAmountReceived] = useState("");
   
   // Credit sale states
@@ -459,7 +471,7 @@ export default function POSSaleForm({
 
   // Add product to cart
   const addToCart = (product: Product, saleUnitType: string = "piece", selectedConversionId: number | null = null) => {
-    const availablePieces = Math.max(0, Number(product.current_stock ?? 0));
+    const availablePieces = availableToSell(product);
     if (availablePieces <= 0) {
       showMessage("Out of stock");
       return;
@@ -548,7 +560,7 @@ export default function POSSaleForm({
       }
     }
 
-    const availablePieces = Math.max(0, Number(line.product.current_stock ?? 0));
+    const availablePieces = availableToSell(line.product);
     if (availablePieces <= 0) {
       showMessage("Out of stock");
       removeFromCart(lineId);
@@ -851,7 +863,7 @@ export default function POSSaleForm({
         return;
       }
 
-      const availablePieces = Math.max(0, Number(item.product.current_stock ?? 0));
+      const availablePieces = availableToSell(item.product);
       const pieceQuantity = getCartItemBaseQuantity(item);
       const prev = byProduct.get(item.product.id) || { requiredPieces: 0, availablePieces };
       byProduct.set(item.product.id, {
@@ -1074,13 +1086,14 @@ export default function POSSaleForm({
             const batchSummary = capabilities.batch_tracking
               ? getProductBatchSummary(product, { includeNextExpiry: capabilities.expiry_tracking })
               : null;
+            const available = availableToSell(product);
 
             return (
               <button
                 key={product.id}
                 type="button"
                 onClick={() => addToCart(product, 'piece')}
-                disabled={Number(product.current_stock ?? 0) <= 0}
+                disabled={available <= 0}
                 style={{
                   padding: 0,
                   border: "1px solid #e5e7eb",
@@ -1088,8 +1101,8 @@ export default function POSSaleForm({
                   background: "white",
                   display: "flex",
                   flexDirection: "column",
-                  cursor: Number(product.current_stock ?? 0) <= 0 ? "not-allowed" : "pointer",
-                  opacity: Number(product.current_stock ?? 0) <= 0 ? 0.5 : 1,
+                  cursor: available <= 0 ? "not-allowed" : "pointer",
+                  opacity: available <= 0 ? 0.5 : 1,
                   overflow: "hidden",
                   textAlign: "left",
                 }}
@@ -1109,8 +1122,8 @@ export default function POSSaleForm({
                   {variantSummary ? (
                     <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>{variantSummary}</div>
                   ) : null}
-                  <div style={{ fontSize: 10, color: Number(product.current_stock ?? 0) <= 0 ? "#dc2626" : "#9ca3af" }}>
-                    {Number(product.current_stock ?? 0) <= 0 ? "Out of stock" : `${Math.max(0, Number(product.current_stock ?? 0))} in stock`}
+                  <div style={{ fontSize: 10, color: available <= 0 ? "#dc2626" : "#9ca3af" }}>
+                    {available <= 0 ? "Out of stock" : `${available} available`}
                   </div>
                   {batchSummary ? (
                     <div style={{ fontSize: 10, color: "#1d4ed8", marginTop: 4 }}>{batchSummary}</div>

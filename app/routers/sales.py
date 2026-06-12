@@ -269,6 +269,144 @@ class SaleCustomerAssignRequest(BaseModel):
     notes: str | None = None
 
 
+def _reserved_quantity_for_product(
+    *,
+    db: Session,
+    tenant_user_ids: list[int],
+    branch_id: int,
+    product_id: int,
+    variant: models.ProductVariant | None,
+) -> Decimal:
+    """Sum of paid-but-uncollected (reserved) quantity still physically in store.
+
+    Reserved goods are NOT deducted from stock until collected, so they must be
+    subtracted from physical stock to know how much is actually free to sell.
+    """
+    query = select(
+        func.coalesce(
+            func.sum(models.Sale.quantity - func.coalesce(models.Sale.supplied_quantity, 0)),
+            0,
+        )
+    ).where(
+        models.Sale.product_id == product_id,
+        models.Sale.branch_id == branch_id,
+        models.Sale.user_id.in_(tenant_user_ids),
+        func.coalesce(models.Sale.supplied_quantity, models.Sale.quantity) < models.Sale.quantity,
+    )
+    if variant is not None:
+        query = query.where(
+            or_(models.Sale.variant_id == variant.id, models.Sale.variant_id.is_(None))
+        )
+    reserved = db.scalar(query)
+    if reserved is None:
+        return Decimal(0)
+    return reserved if isinstance(reserved, Decimal) else Decimal(str(reserved))
+
+
+def _deduct_sale_stock(
+    *,
+    db: Session,
+    tenant_user_ids: list[int],
+    branch_id: int,
+    actor_user_id: int,
+    product: models.Product,
+    variant: models.ProductVariant | None,
+    quantity: Decimal,
+    preferred_batch_number: str | None,
+    unit_selling_price: Decimal,
+    sale_id: int,
+) -> list[dict[str, object]]:
+    """Deduct `quantity` from stock FEFO (earliest expiry first), recording one
+    StockMovement per batch. Returns the batches that were drawn down.
+
+    Used both for immediate sales and when reserved (collect-later) goods are
+    finally handed over — in both cases this is the moment stock leaves the store.
+    """
+    available_batches = _get_available_sale_batches(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=branch_id,
+        product_id=product.id,
+        variant_id=variant.id if variant is not None else None,
+    )
+    normalized_preferred = _normalize_batch_number(preferred_batch_number)
+    if normalized_preferred:
+        preferred_batches = [b for b in available_batches if b.batch_number == normalized_preferred]
+        if not preferred_batches:
+            raise HTTPException(status_code=400, detail="Selected batch is no longer available for sale")
+        available_batches = preferred_batches + [
+            b for b in available_batches if b.batch_number != normalized_preferred
+        ]
+
+    unit_cost_by_batch = _load_unit_cost_by_batch(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=branch_id,
+        product_id=product.id,
+        variant_id=variant.id if variant is not None else None,
+        batch_numbers=sorted({_normalize_batch_number(b.batch_number) for b in available_batches if b.batch_number}),
+    )
+
+    remaining = quantity
+    deducted_batches: list[dict[str, object]] = []
+
+    for b in available_batches:
+        if remaining <= 0:
+            break
+        take = b.balance if b.balance <= remaining else remaining
+        if take <= 0:
+            continue
+
+        db.add(
+            models.StockMovement(
+                user_id=actor_user_id,
+                branch_id=branch_id,
+                product_id=product.id,
+                variant_id=variant.id if variant is not None else None,
+                sale_id=sale_id,
+                change=-take,
+                reason="Sale",
+                batch_number=b.batch_number,
+                expiry_date=b.expiry_date,
+                unit_cost_price=unit_cost_by_batch.get(_normalize_batch_number(b.batch_number) or "") if b.batch_number else (product.cost_price if product.cost_price is not None else None),
+                unit_selling_price=unit_selling_price,
+            )
+        )
+        deducted_batches.append(
+            {
+                "batch_number": b.batch_number,
+                "expiry_date": b.expiry_date.isoformat() if b.expiry_date else None,
+                "quantity": float(take),
+            }
+        )
+        remaining = remaining - take
+
+    # Any remainder beyond tracked batches is historical untracked stock.
+    if remaining > 0:
+        db.add(
+            models.StockMovement(
+                user_id=actor_user_id,
+                branch_id=branch_id,
+                product_id=product.id,
+                variant_id=variant.id if variant is not None else None,
+                sale_id=sale_id,
+                change=-remaining,
+                reason="Sale",
+                unit_cost_price=product.cost_price if product.cost_price is not None else None,
+                unit_selling_price=unit_selling_price,
+            )
+        )
+        deducted_batches.append(
+            {
+                "batch_number": None,
+                "expiry_date": None,
+                "quantity": float(remaining),
+            }
+        )
+
+    return deducted_batches
+
+
 @router.post("", response_model=SaleRead, status_code=201)
 def create_sale(
     payload: SaleCreate,
@@ -337,13 +475,23 @@ def create_sale(
                 models.StockMovement.variant_id.is_(None),
             )
         )
-    available_stock = db.scalar(available_stock_query)
-    if available_stock is None:
-        available_stock = Decimal(0)
-    if payload.quantity > available_stock:
+    physical_stock = db.scalar(available_stock_query)
+    if physical_stock is None:
+        physical_stock = Decimal(0)
+    # Reserved (paid-but-uncollected) goods are still in physical stock but are
+    # spoken for, so they must be excluded from what is free to sell.
+    reserved_stock = _reserved_quantity_for_product(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_id=payload.product_id,
+        variant=variant,
+    )
+    available_to_sell = physical_stock - reserved_stock
+    if payload.quantity > available_to_sell:
         raise HTTPException(
             status_code=400,
-            detail=f"Insufficient stock. Available: {available_stock}",
+            detail=f"Insufficient stock. Available: {available_to_sell}",
         )
 
     normalized_customer_name = _normalized_customer_name(payload.customer_name)
@@ -392,91 +540,25 @@ def create_sale(
             phone=customer_phone,
         )
 
-    # Deduct stock FEFO by earliest expiry date (non-expiring batches are sold last),
-    # with an optional preferred batch moved to the front when the cashier selects one.
-    available_batches = _get_available_sale_batches(
-        db=db,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-        product_id=payload.product_id,
-        variant_id=variant.id if variant is not None else None,
-    )
-    preferred_batch_number = _normalize_batch_number(payload.preferred_batch_number)
-    if preferred_batch_number:
-        preferred_batches = [batch for batch in available_batches if batch.batch_number == preferred_batch_number]
-        if not preferred_batches:
-            raise HTTPException(status_code=400, detail="Selected batch is no longer available for sale")
-        available_batches = preferred_batches + [
-            batch for batch in available_batches if batch.batch_number != preferred_batch_number
-        ]
-
-    unit_cost_by_batch = _load_unit_cost_by_batch(
-        db=db,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-        product_id=payload.product_id,
-        variant_id=variant.id if variant is not None else None,
-        batch_numbers=sorted({_normalize_batch_number(batch.batch_number) for batch in available_batches if batch.batch_number}),
-    )
-
-    remaining = payload.quantity
-    deducted_batches: list[dict[str, object]] = []
-
-    for b in available_batches:
-        if remaining <= 0:
-            break
-        take = b.balance if b.balance <= remaining else remaining
-        if take <= 0:
-            continue
-
-        db.add(
-            models.StockMovement(
-                user_id=current_user.id,
-                branch_id=active_branch_id,
-                product_id=payload.product_id,
-                variant_id=variant.id if variant is not None else None,
-                sale_id=sale.id,
-                change=-take,
-                reason="Sale",
-                batch_number=b.batch_number,
-                expiry_date=b.expiry_date,
-                unit_cost_price=unit_cost_by_batch.get(_normalize_batch_number(b.batch_number) or "") if b.batch_number else (product.cost_price if product.cost_price is not None else None),
-                unit_selling_price=sale.unit_price,
-            )
+    # Deduct stock now for goods that leave immediately. "Collect later" goods
+    # stay physically in the store (reserved) and are only deducted when the
+    # customer actually picks them up (see supply_sale), so the app stock keeps
+    # matching the shop floor.
+    if payload.not_supplied:
+        deducted_batches: list[dict[str, object]] = []
+    else:
+        deducted_batches = _deduct_sale_stock(
+            db=db,
+            tenant_user_ids=tenant_user_ids,
+            branch_id=active_branch_id,
+            actor_user_id=current_user.id,
+            product=product,
+            variant=variant,
+            quantity=Decimal(payload.quantity),
+            preferred_batch_number=payload.preferred_batch_number,
+            unit_selling_price=sale.unit_price,
+            sale_id=sale.id,
         )
-        deducted_batches.append(
-            {
-                "batch_number": b.batch_number,
-                "expiry_date": b.expiry_date.isoformat() if b.expiry_date else None,
-                "quantity": float(take),
-            }
-        )
-        remaining = remaining - take
-
-    # If we still have remaining quantity, it means some historical stock was not batch-tracked.
-    # Deduct the remainder without batch attribution (keeps stock accurate, but won't show expiry).
-    if remaining > 0:
-        db.add(
-            models.StockMovement(
-                user_id=current_user.id,
-                branch_id=active_branch_id,
-                product_id=payload.product_id,
-                variant_id=variant.id if variant is not None else None,
-                sale_id=sale.id,
-                change=-remaining,
-                reason="Sale",
-                unit_cost_price=product.cost_price if product.cost_price is not None else None,
-                unit_selling_price=sale.unit_price,
-            )
-        )
-        deducted_batches.append(
-            {
-                "batch_number": None,
-                "expiry_date": None,
-                "quantity": float(remaining),
-            }
-        )
-        remaining = Decimal(0)
 
     # Handle credit transactions
     #
@@ -936,7 +1018,8 @@ def supply_sale(
     """
     Hand over (supply) goods that were paid for but left for later collection.
     Increases supplied_quantity by the requested amount (default: all remaining).
-    Stock is not re-deducted — it already left available stock at the sale.
+    This is the point the goods physically leave the store, so stock is deducted
+    FEFO now (reserved goods were intentionally NOT deducted at the sale).
     """
     ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
@@ -961,6 +1044,35 @@ def supply_sale(
         raise HTTPException(status_code=400, detail="Supply quantity must be greater than zero")
     if amount > remaining:
         raise HTTPException(status_code=400, detail=f"Only {remaining} remaining to supply")
+
+    product = db.scalar(
+        select(models.Product).where(
+            models.Product.id == sale.product_id,
+            models.Product.user_id.in_(tenant_user_ids),
+            models.Product.branch_id == active_branch_id,
+        )
+    )
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    variant = None
+    if sale.variant_id is not None:
+        variant = db.scalar(
+            select(models.ProductVariant).where(models.ProductVariant.id == sale.variant_id)
+        )
+
+    # The collected portion leaves the store now → deduct it from stock.
+    _deduct_sale_stock(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        actor_user_id=current_user.id,
+        product=product,
+        variant=variant,
+        quantity=amount,
+        preferred_batch_number=None,
+        unit_selling_price=Decimal(sale.unit_price),
+        sale_id=sale.id,
+    )
 
     sale.supplied_quantity = already + amount
     if sale.supplied_quantity >= total:
@@ -1126,17 +1238,24 @@ def delete_sale(
         for m in sale_movements:
             db.delete(m)
     else:
-        # Backwards-compatible for older sales (no sale_id links).
-        db.add(
-            models.StockMovement(
-                user_id=current_user.id,
-                branch_id=active_branch_id,
-                product_id=sale.product_id,
-                change=sale.quantity,
-                reason="Sale Reversal",
-                location="Main Store",
-            )
+        # Backwards-compatible for older sales (no sale_id links). Only restore
+        # the quantity that actually left stock: for collect-later sales that
+        # were never (fully) collected, the reserved portion was never deducted,
+        # so it must not be added back.
+        deducted_qty = (
+            Decimal(sale.supplied_quantity) if sale.supplied_quantity is not None else Decimal(sale.quantity)
         )
+        if deducted_qty > 0:
+            db.add(
+                models.StockMovement(
+                    user_id=current_user.id,
+                    branch_id=active_branch_id,
+                    product_id=sale.product_id,
+                    change=deducted_qty,
+                    reason="Sale Reversal",
+                    location="Main Store",
+                )
+            )
 
     # If the sale was on credit or partial, reverse the credit transaction
     if sale.payment_method in ["credit", "partial"]:
