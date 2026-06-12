@@ -11,14 +11,10 @@ from sqlalchemy.pool import NullPool
 load_dotenv()
 
 # DATABASE_URL for PostgreSQL (Supabase/Vercel/Railway/local)
-_raw_database_url = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Do NOT raise at import time — that crashes the whole Vercel function before
-# FastAPI (and its CORS middleware) can start, making every request return a
-# Vercel-level 500 with no CORS headers. Defer the error to actual DB usage.
-DATABASE_URL: str = _raw_database_url or "postgresql+psycopg2://missing:missing@localhost/missing"
-_DATABASE_URL_MISSING = not _raw_database_url
-
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
 
 def _is_supabase_host(database_url: str) -> bool:
     hostname = (urlparse(database_url).hostname or "").lower()
@@ -32,7 +28,7 @@ elif DATABASE_URL.startswith("postgresql://") and "+psycopg2" not in DATABASE_UR
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 # Supabase requires SSL. Support direct and pooled hostnames.
-if not _DATABASE_URL_MISSING and _is_supabase_host(DATABASE_URL) and "sslmode=" not in DATABASE_URL:
+if _is_supabase_host(DATABASE_URL) and "sslmode=" not in DATABASE_URL:
     separator = "&" if "?" in DATABASE_URL else "?"
     DATABASE_URL = f"{DATABASE_URL}{separator}sslmode=require"
 
@@ -105,12 +101,6 @@ def ensure_critical_schema() -> None:
 
 def get_db():
     """Dependency that yields a database session."""
-    if _DATABASE_URL_MISSING:
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=503,
-            detail="DATABASE_URL is not configured. Set it in your environment variables.",
-        )
     db = SessionLocal()
     try:
         yield db

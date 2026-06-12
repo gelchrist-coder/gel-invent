@@ -18,7 +18,7 @@ let fetchPromise: Promise<SystemSettings> | null = null;
 
 const loadSettings = async (): Promise<SystemSettings> => {
   if (cachedSettings) return cachedSettings;
-
+  
   if (!fetchPromise) {
     fetchPromise = fetchSystemSettings()
       .then((settings) => {
@@ -32,7 +32,7 @@ const loadSettings = async (): Promise<SystemSettings> => {
         fetchPromise = null;
       });
   }
-
+  
   return fetchPromise;
 };
 
@@ -40,12 +40,6 @@ export const clearSettingsCache = () => {
   cachedSettings = null;
   fetchPromise = null;
 };
-
-// Clear on logout so the next user doesn't briefly see stale settings.
-window.addEventListener("userChanged", (e) => {
-  const user = (e as CustomEvent<unknown>).detail;
-  if (!user) clearSettingsCache();
-});
 
 // Get settings synchronously if cached
 export const getCachedSettings = (): SystemSettings | null => cachedSettings;

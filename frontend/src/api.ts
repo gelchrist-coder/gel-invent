@@ -924,24 +924,23 @@ export async function fetchProducts(): Promise<Product[]> {
 
 // Fetch products with background refresh - returns cached immediately, refreshes in background
 export async function fetchProductsCached(onUpdate?: (products: Product[]) => void): Promise<Product[]> {
-  const branchIdAtCall = localStorage.getItem("activeBranchId");
   const cached = getCached<Product[]>("products");
-
+  
+  // If we have cached data, return it immediately and refresh in background
   if (cached) {
+    // Refresh in background
     jsonRequest<ProductResponse[]>("/products").then((fresh) => {
-      if (localStorage.getItem("activeBranchId") !== branchIdAtCall) return;
       const normalized = fresh.map(normalizeProduct);
       setCache("products", normalized);
       if (onUpdate) onUpdate(normalized);
-    }).catch(() => {});
+    }).catch(() => { /* ignore background refresh errors */ });
     return cached;
   }
-
+  
+  // No cache, fetch fresh
   const data = await jsonRequest<ProductResponse[]>("/products");
   const normalized = data.map(normalizeProduct);
-  if (localStorage.getItem("activeBranchId") === branchIdAtCall) {
-    setCache("products", normalized);
-  }
+  setCache("products", normalized);
   return normalized;
 }
 
@@ -1011,22 +1010,19 @@ export async function fetchSales(): Promise<Sale[]> {
 
 // Fetch sales with background refresh
 export async function fetchSalesCached(onUpdate?: (sales: Sale[]) => void): Promise<Sale[]> {
-  const branchIdAtCall = localStorage.getItem("activeBranchId");
   const cached = getCached<Sale[]>("sales");
-
+  
   if (cached) {
+    // Refresh in background
     jsonRequest<Sale[]>("/sales").then(fresh => {
-      if (localStorage.getItem("activeBranchId") !== branchIdAtCall) return;
       setCache("sales", fresh);
       if (onUpdate) onUpdate(fresh);
     }).catch(() => {});
     return cached;
   }
-
+  
   const data = await jsonRequest<Sale[]>("/sales");
-  if (localStorage.getItem("activeBranchId") === branchIdAtCall) {
-    setCache("sales", data);
-  }
+  setCache("sales", data);
   return data;
 }
 
@@ -1177,16 +1173,13 @@ export async function fetchReturnsSummary(): Promise<{
 // Inventory API
 
 export async function fetchInventoryAnalytics(): Promise<JsonObject> {
-  const branchIdAtCall = localStorage.getItem("activeBranchId");
   const cached = getCached<JsonObject>("inventoryAnalytics");
   if (cached && isCacheFresh("inventoryAnalytics")) {
     return cached;
   }
-
+  
   const data = await jsonRequest<JsonObject>("/inventory/analytics");
-  if (localStorage.getItem("activeBranchId") === branchIdAtCall) {
-    setCache("inventoryAnalytics", data);
-  }
+  setCache("inventoryAnalytics", data);
   return data;
 }
 

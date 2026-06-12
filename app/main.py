@@ -539,12 +539,6 @@ async def root() -> dict[str, str]:
 @app.get("/health/db")
 async def health_db() -> JSONResponse:
     """Database connectivity check."""
-    from .database import _DATABASE_URL_MISSING
-    if _DATABASE_URL_MISSING:
-        return JSONResponse(
-            status_code=503,
-            content={"status": "error", "detail": "DATABASE_URL environment variable is not set"},
-        )
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))

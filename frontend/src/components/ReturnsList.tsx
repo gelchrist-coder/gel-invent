@@ -13,18 +13,41 @@ export default function ReturnsList({ products }: ReturnsListProps) {
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    loadReturns();
+    void loadReturns();
+
+    const handleUserChanged = () => {
+      void loadReturns();
+    };
+
+    window.addEventListener("userChanged", handleUserChanged as EventListener);
+    return () => window.removeEventListener("userChanged", handleUserChanged as EventListener);
   }, []);
 
-  const loadReturns = async () => {
+  const loadReturns = async (attempt: number = 0) => {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setLoading(false);
+      setReturns([]);
+      setError(null);
+      return;
+    }
+
     try {
       setLoading(true);
       const data = await fetchReturns();
       setReturns(data);
       setError(null);
     } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (message.includes("Authentication is still initializing") && attempt < 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+        await loadReturns(attempt + 1);
+        return;
+      }
       setError("Failed to load returns");
-      console.error(err);
+      if (!message.includes("Authentication is still initializing")) {
+        console.error(err);
+      }
     } finally {
       setLoading(false);
     }

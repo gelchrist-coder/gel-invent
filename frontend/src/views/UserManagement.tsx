@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { API_BASE, buildAuthHeaders, createBranch, fetchBranches, resilientFetch } from "../api";
 import { Branch } from "../types";
+import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type Employee = {
   id: number;
@@ -22,9 +23,8 @@ export default function UserManagement() {
   const [branchError, setBranchError] = useState("");
   const visibleBranches = branches;
   
-  // Check if current user is Admin
-  const currentUser = localStorage.getItem("user");
-  const userRole = currentUser ? JSON.parse(currentUser).role : null;
+  const currentUser = readStoredUser();
+  const canManageEmployees = hasUserPermission("manage_employees", currentUser);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -37,8 +37,13 @@ export default function UserManagement() {
   const [success, setSuccess] = useState("");
 
   useEffect(() => {
+    if (!canManageEmployees) {
+      setLoading(false);
+      return;
+    }
+
     void Promise.all([loadEmployees(), loadBranches()]);
-  }, []);
+  }, [canManageEmployees]);
 
   const loadBranches = async () => {
     try {
@@ -57,18 +62,13 @@ export default function UserManagement() {
 
   const loadEmployees = async () => {
     try {
-      const response = await resilientFetch(`${API_BASE}/employees/`, {
+      const response = await resilientFetch(`${API_BASE}/employees`, {
         headers: buildAuthHeaders(),
       });
 
       if (response.ok) {
         const data = await response.json();
         setEmployees(data);
-      } else {
-        const body = await response.text().catch(() => "");
-        let msg = response.statusText;
-        try { msg = (JSON.parse(body) as { detail?: string })?.detail ?? (body || msg); } catch { msg = body || msg; }
-        setError(`Failed to load users: ${msg || response.status}`);
       }
     } catch (err) {
       console.error("Error loading employees:", err);
@@ -101,7 +101,7 @@ export default function UserManagement() {
       if (typeof formData.branch_id === "number") {
         payload.branch_id = formData.branch_id;
       }
-      const response = await resilientFetch(`${API_BASE}/employees/`, {
+      const response = await resilientFetch(`${API_BASE}/employees`, {
         method: "POST",
         headers: buildAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
@@ -116,7 +116,7 @@ export default function UserManagement() {
         const data = await response.json();
         setError(data.detail || "Failed to add employee");
       }
-    } catch (err) {
+    } catch {
       setError("Network error. Please try again.");
     }
   };
@@ -132,8 +132,8 @@ export default function UserManagement() {
       if (response.ok) {
         loadEmployees();
       }
-    } catch (err) {
-      console.error("Error updating employee:", err);
+    } catch {
+      console.error("Error updating employee");
     }
   };
 
@@ -171,8 +171,7 @@ export default function UserManagement() {
     }
   };
 
-  // Block access for non-Admin users
-  if (userRole !== "Admin") {
+  if (!canManageEmployees) {
     return (
       <div style={{ padding: 32 }}>
         <div
@@ -185,7 +184,7 @@ export default function UserManagement() {
           }}
         >
           <h2 style={{ color: "#c33", marginBottom: 8 }}>Access Denied</h2>
-          <p style={{ color: "#666" }}>Only business owners can manage employees.</p>
+          <p style={{ color: "#666" }}>Your account does not have access to user management.</p>
         </div>
       </div>
     );

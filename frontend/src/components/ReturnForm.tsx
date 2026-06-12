@@ -9,10 +9,12 @@ type ReturnFormProps = {
   onSuccess: () => void;
 };
 
+type RefundMethod = "cash" | "credit_to_account" | "store_credit" | "no_refund";
+
 export default function ReturnForm({ sale, product, onClose, onSuccess }: ReturnFormProps) {
   const [quantityReturned, setQuantityReturned] = useState(1);
   const [refundAmount, setRefundAmount] = useState(sale.unit_price);
-  const [refundMethod, setRefundMethod] = useState<"cash" | "credit_to_account" | "store_credit" | "no_refund">(
+  const [refundMethod, setRefundMethod] = useState<RefundMethod>(
     sale.payment_method === "credit" ? "credit_to_account" : "cash"
   );
   const [reasonCategory, setReasonCategory] = useState("");
@@ -124,8 +126,8 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
         restock: shouldRestock,
       });
       onSuccess();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to process return");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to process return");
       setLoading(false);
     }
   };
@@ -401,7 +403,7 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
             </label>
             <select
               value={refundMethod}
-              onChange={(e) => setRefundMethod(e.target.value as any)}
+              onChange={(e) => setRefundMethod(e.target.value as RefundMethod)}
               style={{
                 width: "100%",
                 padding: 10,

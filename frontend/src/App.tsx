@@ -124,7 +124,6 @@ class ViewErrorBoundary extends Component<ViewErrorBoundaryProps, ViewErrorBound
 
 const ProductForm = lazyWithRetry(() => import("./components/ProductForm"));
 const ProductList = lazyWithRetry(() => import("./components/ProductList"));
-const PurchasingPanel = lazyWithRetry(() => import("./components/PurchasingPanel"));
 const Creditors = lazyWithRetry(() => import("./views/Creditors"));
 const Dashboard = lazyWithRetry(() => import("./views/Dashboard"));
 const Inventory = lazyWithRetry(() => import("./views/Inventory"));
@@ -1270,8 +1269,6 @@ export default function App() {
       }
       case "inventory":
         return <Inventory />;
-      case "purchasing":
-        return <PurchasingPanel products={products} usesExpiryTracking={usesExpiryTracking} onPurchaseRecorded={async () => { clearDataCache(); await fetchProductsCached(); }} />;
       case "sales":
         return <Sales />;
       case "invoice":
