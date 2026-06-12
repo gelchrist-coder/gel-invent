@@ -1,4 +1,5 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ErrorInfo, type ReactNode } from "react";
+import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 
 import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, updateProduct, getCachedProducts, clearDataCache, isTemporaryServerDelayError, warmBackend } from "./api";
 import Layout from "./components/Layout";
@@ -128,7 +129,10 @@ const Creditors = lazyWithRetry(() => import("./views/Creditors"));
 const Dashboard = lazyWithRetry(() => import("./views/Dashboard"));
 const Inventory = lazyWithRetry(() => import("./views/Inventory"));
 const Invoice = lazyWithRetry(() => import("./views/Invoice"));
-const Login = lazyWithRetry(() => import("./views/Login"));
+const LandingPage = lazyWithRetry(() => import("./views/auth/LandingPage"));
+const SignIn = lazyWithRetry(() => import("./views/auth/SignIn"));
+const SignUp = lazyWithRetry(() => import("./views/auth/SignUp"));
+const PasswordReset = lazyWithRetry(() => import("./views/auth/PasswordReset"));
 const Profile = lazyWithRetry(() => import("./views/Profile"));
 const Reports = lazyWithRetry(() => import("./views/Reports"));
 const RevenueAnalysis = lazyWithRetry(() => import("./views/RevenueAnalysis"));
@@ -144,6 +148,7 @@ function LazyViewFallback() {
 }
 
 export default function App() {
+  const navigate = useNavigate();
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("token"));
   const [viewRetryNonce, setViewRetryNonce] = useState(0);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
@@ -753,6 +758,8 @@ export default function App() {
     // Always start authenticated users on dashboard.
     setActiveView("dashboard");
     setIsAuthenticated(true);
+    // Leave the public auth route (e.g. /login, /signup) for the app shell.
+    navigate("/", { replace: true });
   };
 
   const handleLogout = () => {
@@ -809,7 +816,13 @@ export default function App() {
   if (!isAuthenticated) {
     return (
       <Suspense fallback={<LazyViewFallback />}>
-        <Login onLogin={handleLogin} />
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<SignIn onLogin={handleLogin} />} />
+          <Route path="/signup" element={<SignUp onLogin={handleLogin} />} />
+          <Route path="/reset" element={<PasswordReset />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </Suspense>
     );
   }
