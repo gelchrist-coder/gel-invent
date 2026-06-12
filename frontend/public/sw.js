@@ -1,5 +1,5 @@
-const SHELL_CACHE = "gel-invent-shell-v9";
-const ASSET_CACHE = "gel-invent-assets-v9";
+const SHELL_CACHE = "gel-invent-shell-v10";
+const ASSET_CACHE = "gel-invent-assets-v10";
 const APP_SHELL_URLS = [
   "/offline.html",
   "/manifest.webmanifest",
