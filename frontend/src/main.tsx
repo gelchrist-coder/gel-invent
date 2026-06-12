@@ -14,7 +14,7 @@ if (typeof window !== "undefined" && navigator.onLine) {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    const swVersion = "20260606-3";
+    const swVersion = "20260612-1";
     const hadController = Boolean(navigator.serviceWorker.controller);
     let refreshing = false;
 
@@ -53,7 +53,7 @@ if ("serviceWorker" in navigator) {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <App />
     </BrowserRouter>
   </React.StrictMode>,

@@ -147,6 +147,42 @@ function LazyViewFallback() {
   );
 }
 
+// Top-level boundary so a failed lazy chunk (e.g. after a deploy) shows a
+// recoverable message instead of a silent blank "loading forever" screen.
+class RootErrorBoundary extends Component<{ children: ReactNode }, { errorMessage: string | null }> {
+  state: { errorMessage: string | null } = { errorMessage: null };
+
+  static getDerivedStateFromError(error: unknown): { errorMessage: string } {
+    return {
+      errorMessage: error instanceof Error ? error.message : "Something went wrong while loading the app.",
+    };
+  }
+
+  render() {
+    if (!this.state.errorMessage) {
+      return this.props.children;
+    }
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, fontFamily: "system-ui, sans-serif" }}>
+        <div style={{ maxWidth: 440, textAlign: "center", display: "grid", gap: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#0f172a" }}>Couldn&rsquo;t load the app</h2>
+          <p style={{ margin: 0, color: "#475569", lineHeight: 1.5 }}>
+            A page failed to load. This is usually a stale cache right after an update.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{ justifySelf: "center", padding: "10px 18px", borderRadius: 10, border: "none", background: "#1d4ed8", color: "white", fontWeight: 700, cursor: "pointer" }}
+          >
+            Reload
+          </button>
+          <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>{this.state.errorMessage}</p>
+        </div>
+      </div>
+    );
+  }
+}
+
 export default function App() {
   const navigate = useNavigate();
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("token"));
@@ -815,15 +851,17 @@ export default function App() {
   // Show login page if not authenticated
   if (!isAuthenticated) {
     return (
-      <Suspense fallback={<LazyViewFallback />}>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<SignIn onLogin={handleLogin} />} />
-          <Route path="/signup" element={<SignUp onLogin={handleLogin} />} />
-          <Route path="/reset" element={<PasswordReset />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
+      <RootErrorBoundary>
+        <Suspense fallback={<LazyViewFallback />}>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<SignIn onLogin={handleLogin} />} />
+            <Route path="/signup" element={<SignUp onLogin={handleLogin} />} />
+            <Route path="/reset" element={<PasswordReset />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </RootErrorBoundary>
     );
   }
 
