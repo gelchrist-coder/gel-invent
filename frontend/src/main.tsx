@@ -12,7 +12,20 @@ if (typeof window !== "undefined" && navigator.onLine) {
   });
 }
 
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && !import.meta.env.PROD) {
+  // The PWA service worker must never run during `npm run dev`: a worker left
+  // over from a previous `npm run preview`/build will intercept navigations and
+  // serve a stale shell, which shows up as the app being stuck on "Loading..."
+  // with no error. Tear down any existing worker + caches in dev.
+  void navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((registration) => void registration.unregister());
+  });
+  if (typeof caches !== "undefined") {
+    void caches.keys().then((keys) => keys.forEach((key) => void caches.delete(key)));
+  }
+}
+
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     const swVersion = "20260612-1";
     const hadController = Boolean(navigator.serviceWorker.controller);
