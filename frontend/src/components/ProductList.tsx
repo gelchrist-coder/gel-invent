@@ -343,6 +343,16 @@ export default function ProductList({
     return Math.max(0, Number(product.current_stock ?? 0));
   };
 
+  // Reserved = paid-but-uncollected goods still physically in the store.
+  const getProductReserved = (product: Product): number =>
+    supplyTrackingEnabled ? Math.max(0, Number(product.reserved_stock ?? 0)) : 0;
+
+  // Physical in-store count = what can be sold now (available) + what's reserved.
+  // Stock-out / low-stock should be judged on this so reserved goods that are
+  // still on the shelf are never flagged as "out of stock".
+  const getProductPhysicalStock = (product: Product): number =>
+    getProductStock(product) + getProductReserved(product);
+
   const getProductMargin = (product: Product): number => {
     if (!product.cost_price || !product.selling_price) {
       return Number.NEGATIVE_INFINITY;
@@ -383,8 +393,9 @@ export default function ProductList({
         new Date(effectiveExpiry) > new Date(Date.now() + expiryWindowMs);
     }
 
-    // Stock filter
-    const stock = getProductStock(p);
+    // Stock filter — judged on physical in-store count so reserved (paid but
+    // uncollected) goods that are still on the shelf aren't treated as out of stock.
+    const stock = getProductPhysicalStock(p);
     let matchesStock = true;
     if (filterStock === "in_stock") {
       matchesStock = stock > 5;
@@ -996,35 +1007,42 @@ export default function ProductList({
                       <div style={{ fontSize: 12, color: "#1d4ed8", marginTop: 4 }}>{batchSummary}</div>
                     ) : null}
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-                    <span
-                      style={{
-                        color: !stockLoaded ? "#6b7280" : stock > 0 ? "#059669" : "#dc2626",
-                        background: !stockLoaded ? "#f3f4f6" : stock > 0 ? "#d1fae5" : "#fee2e2",
-                        padding: "4px 8px",
-                        borderRadius: 999,
-                        fontSize: 12,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {stockLoaded ? `${stock} available` : "Loading..."}
-                    </span>
-                    {supplyTrackingEnabled && Number(p.reserved_stock ?? 0) > 0 ? (
-                      <span
-                        style={{
-                          color: "#92400e",
-                          background: "#fffbeb",
-                          border: "1px solid #fde68a",
-                          padding: "3px 8px",
-                          borderRadius: 999,
-                          fontSize: 11,
-                          fontWeight: 700,
-                        }}
-                      >
-                        {Number(p.reserved_stock)} reserved
-                      </span>
-                    ) : null}
-                  </div>
+                  {(() => {
+                    const reserved = getProductReserved(p);
+                    const available = stockLoaded ? stock : 0;
+                    const physical = available + reserved;
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                        <span
+                          style={{
+                            color: !stockLoaded ? "#6b7280" : physical > 0 ? "#059669" : "#dc2626",
+                            background: !stockLoaded ? "#f3f4f6" : physical > 0 ? "#d1fae5" : "#fee2e2",
+                            padding: "4px 8px",
+                            borderRadius: 999,
+                            fontSize: 12,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {stockLoaded ? `${physical} in stock` : "Loading..."}
+                        </span>
+                        {reserved > 0 ? (
+                          <span
+                            style={{
+                              color: "#92400e",
+                              background: "#fffbeb",
+                              border: "1px solid #fde68a",
+                              padding: "3px 8px",
+                              borderRadius: 999,
+                              fontSize: 11,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {available} available · {reserved} reserved
+                          </span>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginBottom: 8 }}>
@@ -1185,28 +1203,29 @@ export default function ProductList({
                       </span>
                     </td>
                     <td style={{ padding: "12px", textAlign: "right", fontWeight: 500 }}>
-                      <span style={{ 
-                        color: !stockLoaded
-                          ? "#6b7280"
-                          : stock > 0
-                            ? "#059669"
-                            : "#dc2626",
-                        background: !stockLoaded
-                          ? "#f3f4f6"
-                          : stock > 0
-                            ? "#d1fae5"
-                            : "#fee2e2",
-                        padding: "4px 8px",
-                        borderRadius: 4,
-                        fontSize: 13,
-                      }}>
-                        {stockLoaded ? stock : "..."}
-                      </span>
-                      {supplyTrackingEnabled && Number(p.reserved_stock ?? 0) > 0 ? (
-                        <div style={{ fontSize: 11, color: "#92400e", fontWeight: 700, marginTop: 4 }}>
-                          {Number(p.reserved_stock)} reserved
-                        </div>
-                      ) : null}
+                      {(() => {
+                        const reserved = getProductReserved(p);
+                        const available = stockLoaded ? stock : 0;
+                        const physical = available + reserved;
+                        return (
+                          <>
+                            <span style={{
+                              color: !stockLoaded ? "#6b7280" : physical > 0 ? "#059669" : "#dc2626",
+                              background: !stockLoaded ? "#f3f4f6" : physical > 0 ? "#d1fae5" : "#fee2e2",
+                              padding: "4px 8px",
+                              borderRadius: 4,
+                              fontSize: 13,
+                            }}>
+                              {stockLoaded ? physical : "..."}
+                            </span>
+                            {reserved > 0 ? (
+                              <div style={{ fontSize: 11, color: "#92400e", fontWeight: 700, marginTop: 4 }}>
+                                {available} available · {reserved} reserved
+                              </div>
+                            ) : null}
+                          </>
+                        );
+                      })()}
                     </td>
                     <td style={{ padding: "12px", textAlign: "right", color: "#374151" }}>
                       {p.cost_price ? `₵${Number(p.cost_price).toFixed(2)}` : "-"}
