@@ -1378,6 +1378,32 @@ def get_inventory_analytics(
         for pid, stock in stock_by_product_rows
     }
 
+    # Reserved (paid-but-uncollected) goods are still physically in stock — they
+    # are only deducted at collection. We surface them as a dedicated audit
+    # figure rather than touching stock-out / low-stock numbers.
+    reserved_by_product: dict[int, Decimal] = {}
+    if products:
+        reserved_rows = db.execute(
+            select(
+                Sale.product_id,
+                func.coalesce(
+                    func.sum(Sale.quantity - func.coalesce(Sale.supplied_quantity, 0)),
+                    0,
+                ).label("reserved"),
+            )
+            .where(
+                Sale.user_id.in_(tenant_user_ids),
+                Sale.branch_id == active_branch_id,
+                Sale.product_id.in_([p.id for p in products]),
+                func.coalesce(Sale.supplied_quantity, Sale.quantity) < Sale.quantity,
+            )
+            .group_by(Sale.product_id)
+        ).all()
+        reserved_by_product = {
+            int(pid): (reserved if isinstance(reserved, Decimal) else Decimal(str(reserved or 0)))
+            for pid, reserved in reserved_rows
+        }
+
     in_out_totals = db.execute(
         select(
             func.coalesce(
@@ -1399,6 +1425,9 @@ def get_inventory_analytics(
     expiring_batches = []
     total_stock_value = Decimal(0)
     total_stock_left = Decimal(0)
+    total_reserved = Decimal(0)
+    reserved_value = Decimal(0)
+    reserved_product_count = 0
     all_time_stock_in = in_out_totals.stock_in if isinstance(in_out_totals.stock_in, Decimal) else Decimal(str(in_out_totals.stock_in or 0))
     all_time_stock_out = in_out_totals.stock_out if isinstance(in_out_totals.stock_out, Decimal) else Decimal(str(in_out_totals.stock_out or 0))
     
@@ -1409,6 +1438,14 @@ def get_inventory_analytics(
         total_stock_raw = stock_by_product.get(product.id, Decimal(0))
         total_stock = total_stock_raw if total_stock_raw > 0 else Decimal(0)
         total_stock_left += total_stock
+
+        # Reserved (collect-later) tally for the audit card.
+        reserved_qty = reserved_by_product.get(product.id, Decimal(0))
+        if reserved_qty > 0:
+            total_reserved += reserved_qty
+            reserved_product_count += 1
+            if product.cost_price is not None:
+                reserved_value += reserved_qty * Decimal(product.cost_price)
         
         # Stock value (prefer per-batch unit cost; fallback to product cost)
         if total_stock > 0:
@@ -1570,6 +1607,9 @@ def get_inventory_analytics(
         },
         "total_stock_value": float(total_stock_value),
         "total_products": len(products),
+        "total_reserved": float(total_reserved),
+        "reserved_value": float(reserved_value),
+        "reserved_product_count": reserved_product_count,
     }
 
 

@@ -30,6 +30,12 @@ const ClockIcon = () => (
   </svg>
 );
 
+const BookmarkIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+  </svg>
+);
+
 type InventoryAnalytics = {
   stock_by_location: never[];
   low_stock_alerts: {
@@ -67,6 +73,9 @@ type InventoryAnalytics = {
   };
   total_stock_value: number;
   total_products: number;
+  total_reserved?: number;
+  reserved_value?: number;
+  reserved_product_count?: number;
 };
 
 type Props = {
@@ -182,6 +191,47 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
           </div>
         </div>
       </div>
+
+      {/* Reserved (collect-later) — paid goods still physically in store.
+          Only shows when there is reserved stock, keeping the product list clean
+          and putting the audit figure in one place. */}
+      {(analytics.total_reserved ?? 0) > 0 && (
+        <div
+          style={{
+            backgroundColor: "white",
+            borderRadius: 8,
+            border: "1px solid #fde68a",
+            padding: 20,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 8,
+                backgroundColor: "#fffbeb",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#b45309",
+              }}
+            >
+              <BookmarkIcon />
+            </div>
+            <div>
+              <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Reserved (collect later)</p>
+              <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#b45309" }}>
+                {formatQty(analytics.total_reserved ?? 0)}
+              </p>
+              <p style={{ margin: "2px 0 0", fontSize: 12, color: "#92400e" }}>
+                {(analytics.reserved_product_count ?? 0)} product{(analytics.reserved_product_count ?? 0) === 1 ? "" : "s"}
+                {(analytics.reserved_value ?? 0) > 0 ? ` · ${formatCurrency(analytics.reserved_value ?? 0)}` : ""}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stock In */}
       <div

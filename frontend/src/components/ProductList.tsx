@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NewProductUnitConversion, NewProductVariant, Product, ProductUpdate } from "../types";
 import { updateMyCategories } from "../api";
-import { useAppCategories, userNeedsSupplyTracking } from "../categories";
+import { useAppCategories } from "../categories";
 import { getProductBatchSummary, getProductSearchText, getProductUnitConversionSummary, getProductVariantSummary } from "../product-display";
 import { useCapabilities, useExpiryTracking, useSystemSettings } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
@@ -104,8 +104,6 @@ export default function ProductList({
   const categoryOptions = useAppCategories();
   const capabilities = useCapabilities();
   const usesExpiryTracking = useExpiryTracking();
-  // Reserved (collect-later) stock is only meaningful for businesses that use it.
-  const supplyTrackingEnabled = userNeedsSupplyTracking();
   const systemSettings = useSystemSettings();
   const showVariantMetadata = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes;
   const showBatchMetadata = capabilities.batch_tracking;
@@ -342,15 +340,6 @@ export default function ProductList({
     }
     return Math.max(0, Number(product.current_stock ?? 0));
   };
-
-  // Reserved = paid-but-uncollected goods. They stay in physical stock
-  // (current_stock) until collected, but are spoken for and can't be re-sold.
-  const getProductReserved = (product: Product): number =>
-    supplyTrackingEnabled ? Math.max(0, Number(product.reserved_stock ?? 0)) : 0;
-
-  // What's actually free to sell = physical in-store stock minus reserved.
-  const getProductAvailable = (product: Product): number =>
-    Math.max(0, getProductStock(product) - getProductReserved(product));
 
   const getProductMargin = (product: Product): number => {
     if (!product.cost_price || !product.selling_price) {
@@ -1007,42 +996,19 @@ export default function ProductList({
                       <div style={{ fontSize: 12, color: "#1d4ed8", marginTop: 4 }}>{batchSummary}</div>
                     ) : null}
                   </div>
-                  {(() => {
-                    const reserved = getProductReserved(p);
-                    const physical = stockLoaded ? stock : 0;
-                    const available = Math.max(0, physical - reserved);
-                    return (
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-                        <span
-                          style={{
-                            color: !stockLoaded ? "#6b7280" : physical > 0 ? "#059669" : "#dc2626",
-                            background: !stockLoaded ? "#f3f4f6" : physical > 0 ? "#d1fae5" : "#fee2e2",
-                            padding: "4px 8px",
-                            borderRadius: 999,
-                            fontSize: 12,
-                            fontWeight: 700,
-                          }}
-                        >
-                          {stockLoaded ? `${physical} in stock` : "Loading..."}
-                        </span>
-                        {reserved > 0 ? (
-                          <span
-                            style={{
-                              color: "#92400e",
-                              background: "#fffbeb",
-                              border: "1px solid #fde68a",
-                              padding: "3px 8px",
-                              borderRadius: 999,
-                              fontSize: 11,
-                              fontWeight: 700,
-                            }}
-                          >
-                            {available} available · {reserved} reserved
-                          </span>
-                        ) : null}
-                      </div>
-                    );
-                  })()}
+                  <span
+                    style={{
+                      color: !stockLoaded ? "#6b7280" : stock > 0 ? "#059669" : "#dc2626",
+                      background: !stockLoaded ? "#f3f4f6" : stock > 0 ? "#d1fae5" : "#fee2e2",
+                      padding: "4px 8px",
+                      borderRadius: 999,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {stockLoaded ? `${stock} in stock` : "Loading..."}
+                  </span>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginBottom: 8 }}>
@@ -1203,29 +1169,15 @@ export default function ProductList({
                       </span>
                     </td>
                     <td style={{ padding: "12px", textAlign: "right", fontWeight: 500 }}>
-                      {(() => {
-                        const reserved = getProductReserved(p);
-                        const physical = stockLoaded ? stock : 0;
-                        const available = Math.max(0, physical - reserved);
-                        return (
-                          <>
-                            <span style={{
-                              color: !stockLoaded ? "#6b7280" : physical > 0 ? "#059669" : "#dc2626",
-                              background: !stockLoaded ? "#f3f4f6" : physical > 0 ? "#d1fae5" : "#fee2e2",
-                              padding: "4px 8px",
-                              borderRadius: 4,
-                              fontSize: 13,
-                            }}>
-                              {stockLoaded ? physical : "..."}
-                            </span>
-                            {reserved > 0 ? (
-                              <div style={{ fontSize: 11, color: "#92400e", fontWeight: 700, marginTop: 4 }}>
-                                {available} available · {reserved} reserved
-                              </div>
-                            ) : null}
-                          </>
-                        );
-                      })()}
+                      <span style={{
+                        color: !stockLoaded ? "#6b7280" : stock > 0 ? "#059669" : "#dc2626",
+                        background: !stockLoaded ? "#f3f4f6" : stock > 0 ? "#d1fae5" : "#fee2e2",
+                        padding: "4px 8px",
+                        borderRadius: 4,
+                        fontSize: 13,
+                      }}>
+                        {stockLoaded ? stock : "..."}
+                      </span>
                     </td>
                     <td style={{ padding: "12px", textAlign: "right", color: "#374151" }}>
                       {p.cost_price ? `₵${Number(p.cost_price).toFixed(2)}` : "-"}
