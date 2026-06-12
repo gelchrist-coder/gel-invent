@@ -1,12 +1,17 @@
 import { useState, useRef, useEffect } from "react";
 
 import { Branch } from "../types";
-import appLogo from "../asset/logo.png";
+
 
 type Props = {
   userName?: string;
   userRole?: string;
   businessName?: string;
+  isOnline?: boolean;
+  outboxCount?: number;
+  isSyncingOutbox?: boolean;
+  canInstallApp?: boolean;
+  onInstallApp?: () => void;
   onLogout?: () => void;
   onNavigate?: (view: string) => void;
   branches?: Branch[];
@@ -20,6 +25,11 @@ export default function TopBar({
   userName = "User",
   userRole = "Admin",
   businessName = "Gel Invent",
+  isOnline = true,
+  outboxCount = 0,
+  isSyncingOutbox = false,
+  canInstallApp = false,
+  onInstallApp,
   onLogout,
   onNavigate,
   branches,
@@ -59,6 +69,16 @@ export default function TopBar({
 
   const businessLabel = String(businessName || "Gel Invent").trim();
   const initial = userName.charAt(0).toUpperCase();
+  const statusPillStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    padding: isMobile ? "5px 9px" : "6px 10px",
+    fontSize: isMobile ? 11 : 12,
+    fontWeight: 700,
+    whiteSpace: "nowrap" as const,
+  };
 
   return (
     <header
@@ -112,19 +132,24 @@ export default function TopBar({
           gap: isMobile ? 8 : 12,
         }}
       >
-        <img
-          src={appLogo}
-          alt="Gel Invent"
+        <div
           style={{
             width: isMobile ? 30 : 36,
             height: isMobile ? 30 : 36,
             borderRadius: 10,
-            objectFit: "cover",
-            background: "#fff",
-            boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
+            background: "#1e3a8a",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: 800,
+            fontSize: isMobile ? 14 : 17,
             flexShrink: 0,
+            boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
           }}
-        />
+        >
+          {businessLabel.charAt(0).toUpperCase()}
+        </div>
         <div style={{ minWidth: 0 }}>
           <h1
             style={{
@@ -162,7 +187,52 @@ export default function TopBar({
       </div>
 
       {/* Right - User Info */}
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: isMobile ? 8 : 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div
+            style={{
+              ...statusPillStyle,
+              background: isOnline ? "#ecfdf5" : "#fff7ed",
+              border: `1px solid ${isOnline ? "#a7f3d0" : "#fed7aa"}`,
+              color: isOnline ? "#065f46" : "#9a3412",
+            }}
+            title={isOnline ? "Connected to the internet" : "Offline - using cached data where available"}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: isOnline ? "#10b981" : "#f97316" }} />
+            {isOnline ? "Online" : "Offline"}
+          </div>
+
+          {(outboxCount > 0 || isSyncingOutbox) && (
+            <div
+              style={{
+                ...statusPillStyle,
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                color: "#1d4ed8",
+              }}
+              title={isSyncingOutbox ? "Syncing queued offline sales" : "Queued offline sales waiting to sync"}
+            >
+              {isSyncingOutbox ? "Syncing sales..." : `${outboxCount} queued`}
+            </div>
+          )}
+
+          {canInstallApp && onInstallApp && (
+            <button
+              type="button"
+              onClick={onInstallApp}
+              style={{
+                ...statusPillStyle,
+                border: "1px solid #c7d2fe",
+                background: "#eef2ff",
+                color: "#3730a3",
+                cursor: "pointer",
+              }}
+            >
+              Install app
+            </button>
+          )}
+        </div>
+
         <div style={{ position: "relative" }} ref={dropdownRef}>
           <div
             onClick={() => setShowDropdown(!showDropdown)}

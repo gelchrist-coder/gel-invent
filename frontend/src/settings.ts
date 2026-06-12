@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { fetchSystemSettings, SystemSettings } from "./api";
+import { DEFAULT_EFFECTIVE_CAPABILITIES, fetchSystemSettings, SystemSettings, type CapabilityKey, type CapabilityMap } from "./api";
 
 const DEFAULT_SETTINGS: SystemSettings = {
   low_stock_threshold: 10,
-  expiry_warning_days: 180,
+  expiry_warning_days: 45,
   uses_expiry_tracking: true,
+  capability_overrides: {},
+  effective_capabilities: { ...DEFAULT_EFFECTIVE_CAPABILITIES },
   currency_code: "GHS",
   auto_backup: true,
   email_notifications: false,
@@ -16,7 +18,7 @@ let fetchPromise: Promise<SystemSettings> | null = null;
 
 const loadSettings = async (): Promise<SystemSettings> => {
   if (cachedSettings) return cachedSettings;
-  
+
   if (!fetchPromise) {
     fetchPromise = fetchSystemSettings()
       .then((settings) => {
@@ -30,7 +32,7 @@ const loadSettings = async (): Promise<SystemSettings> => {
         fetchPromise = null;
       });
   }
-  
+
   return fetchPromise;
 };
 
@@ -76,8 +78,16 @@ export const useSystemSettings = (): SystemSettings => {
   return settings;
 };
 
-// Convenience hook for just the expiry tracking setting
-// Always returns true now since expiry tracking is per-product (perishable vs non-perishable)
+export const useCapabilities = (): CapabilityMap => {
+  const settings = useSystemSettings();
+  return settings.effective_capabilities ?? DEFAULT_EFFECTIVE_CAPABILITIES;
+};
+
+export const useCapability = (key: CapabilityKey): boolean => {
+  const capabilities = useCapabilities();
+  return Boolean(capabilities[key]);
+};
+
 export const useExpiryTracking = (): boolean => {
-  return true;
+  return useCapability("expiry_tracking");
 };

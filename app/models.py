@@ -1,8 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Date, Integer, func, Text, Enum as SQLEnum, Boolean
+from sqlalchemy import JSON, DateTime, ForeignKey, Numeric, String, Date, Integer, func, Text, Enum as SQLEnum, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -22,8 +22,14 @@ class User(Base):
     # Branch assignment for employees (Admin users can access all branches)
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), index=True, default=None)
     business_name: Mapped[str | None] = mapped_column(String(255), default=None)
-    # JSON string (list of categories). Kept as Text for portability.
+    # Legacy JSON string used for business/profile categories and later reused
+    # as the product category library. Kept for compatibility during the
+    # business_types/product_categories migration.
     categories: Mapped[str | None] = mapped_column(Text, default=None)
+    # JSON string (list of business types such as pharmacy, grocery, fashion).
+    business_types: Mapped[str | None] = mapped_column(Text, default=None)
+    # JSON string (list of product categories for catalog organization).
+    product_categories: Mapped[str | None] = mapped_column(Text, default=None)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -63,11 +69,22 @@ class Product(Base):
     # Separate product lists per branch
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
     sku: Mapped[str] = mapped_column(String(64), index=True)
+    barcode: Mapped[str | None] = mapped_column(String(128), index=True, default=None)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(String(1024), default=None)
     unit: Mapped[str] = mapped_column(String(32), default="unit")
+    measurement_type: Mapped[str] = mapped_column(String(32), default="count")
+    allows_fractional_sales: Mapped[bool] = mapped_column(Boolean, default=False)
+    quantity_step: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("1"))
+    variant_group: Mapped[str | None] = mapped_column(String(120), default=None)
+    variant_label: Mapped[str | None] = mapped_column(String(120), default=None)
+    brand: Mapped[str | None] = mapped_column(String(100), default=None)
+    size: Mapped[str | None] = mapped_column(String(64), default=None)
+    color: Mapped[str | None] = mapped_column(String(64), default=None)
+    shade: Mapped[str | None] = mapped_column(String(64), default=None)
     pack_size: Mapped[int | None] = mapped_column(Integer, default=None)
     category: Mapped[str | None] = mapped_column(String(100), default=None)
+    supplier: Mapped[str | None] = mapped_column(String(255), default=None)
     expiry_date: Mapped[datetime | None] = mapped_column(Date, default=None)
     cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     pack_cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
@@ -83,6 +100,65 @@ class Product(Base):
     movements: Mapped[list["StockMovement"]] = relationship(
         back_populates="product", cascade="all, delete-orphan"
     )
+    variants: Mapped[list["ProductVariant"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan", order_by="ProductVariant.sort_order"
+    )
+    unit_conversions: Mapped[list["ProductUnitConversion"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan", order_by="ProductUnitConversion.sort_order"
+    )
+
+
+class ProductVariant(Base):
+    __tablename__ = "product_variants"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    label: Mapped[str] = mapped_column(String(120))
+    attributes_json: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    product: Mapped[Product] = relationship(back_populates="variants")
+
+
+class ProductUnitConversion(Base):
+    __tablename__ = "product_unit_conversions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    unit_name: Mapped[str] = mapped_column(String(64))
+    base_quantity: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    is_sale_unit: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_purchase_unit: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    product: Mapped[Product] = relationship(back_populates="unit_conversions")
+
+
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    contact_person: Mapped[str | None] = mapped_column(String(255), default=None)
+    phone: Mapped[str | None] = mapped_column(String(50), default=None)
+    email: Mapped[str | None] = mapped_column(String(255), default=None)
+    address: Mapped[str | None] = mapped_column(Text, default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class StockMovement(Base):
@@ -93,6 +169,9 @@ class StockMovement(Base):
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
     product_id: Mapped[int] = mapped_column(
         ForeignKey("products.id", ondelete="CASCADE"), index=True
+    )
+    variant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_variants.id", ondelete="SET NULL"), index=True, default=None
     )
     sale_id: Mapped[int | None] = mapped_column(
         ForeignKey("sales.id", ondelete="SET NULL"), index=True, default=None
@@ -110,7 +189,90 @@ class StockMovement(Base):
     )
 
     product: Mapped[Product] = relationship(back_populates="movements")
+    variant: Mapped[ProductVariant | None] = relationship()
     sale: Mapped["Sale | None"] = relationship()
+
+
+class Purchase(Base):
+    __tablename__ = "purchases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True, default=None)
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), index=True, default=None)
+    variant_id: Mapped[int | None] = mapped_column(ForeignKey("product_variants.id", ondelete="SET NULL"), index=True, default=None)
+    stock_movement_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stock_movements.id", ondelete="SET NULL"), index=True, default=None
+    )
+    order_number: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
+    supplier_name: Mapped[str] = mapped_column(String(255))
+    product_name: Mapped[str] = mapped_column(String(255))
+    product_sku: Mapped[str] = mapped_column(String(64))
+    invoice_number: Mapped[str | None] = mapped_column(String(100), default=None)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    unit_cost_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    unit_selling_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    payment_status: Mapped[str] = mapped_column(String(20), default="unpaid")
+    amount_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    amount_due: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    payment_method: Mapped[str | None] = mapped_column(String(50), default=None)
+    purchase_date: Mapped[datetime | None] = mapped_column(Date, default=None)
+    due_date: Mapped[datetime | None] = mapped_column(Date, default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    product: Mapped[Product | None] = relationship()
+    variant: Mapped[ProductVariant | None] = relationship()
+    supplier: Mapped[Supplier | None] = relationship()
+    stock_movement: Mapped[StockMovement | None] = relationship()
+
+
+class SupplierPayment(Base):
+    __tablename__ = "supplier_payments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True, default=None)
+    purchase_id: Mapped[int | None] = mapped_column(ForeignKey("purchases.id", ondelete="SET NULL"), index=True, default=None)
+    order_number: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    payment_method: Mapped[str] = mapped_column(String(50), default="cash")
+    payment_date: Mapped[datetime | None] = mapped_column(Date, default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    supplier: Mapped[Supplier | None] = relationship()
+    purchase: Mapped[Purchase | None] = relationship()
+
+
+class PurchaseReturn(Base):
+    __tablename__ = "purchase_returns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True, default=None)
+    purchase_id: Mapped[int] = mapped_column(ForeignKey("purchases.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), index=True, default=None)
+    stock_movement_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stock_movements.id", ondelete="SET NULL"), index=True, default=None
+    )
+    order_number: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
+    quantity_returned: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    unit_cost_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    total_cost_returned: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    return_date: Mapped[date | None] = mapped_column(Date, default=None)
+    reason: Mapped[str | None] = mapped_column(String(255), default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    supplier: Mapped[Supplier | None] = relationship()
+    purchase: Mapped[Purchase] = relationship()
+    product: Mapped[Product | None] = relationship()
+    stock_movement: Mapped[StockMovement | None] = relationship()
 
 
 class Sale(Base):
@@ -122,9 +284,12 @@ class Sale(Base):
     product_id: Mapped[int] = mapped_column(
         ForeignKey("products.id", ondelete="CASCADE"), index=True
     )
+    variant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_variants.id", ondelete="SET NULL"), index=True, default=None
+    )
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     # How the customer bought this item (POS can sell by pack, but quantity is stored in pieces).
-    sale_unit_type: Mapped[str] = mapped_column(String(10), default="piece")
+    sale_unit_type: Mapped[str] = mapped_column(String(64), default="piece")
     pack_quantity: Mapped[int | None] = mapped_column(Integer, default=None)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
@@ -140,6 +305,7 @@ class Sale(Base):
     )
 
     product: Mapped[Product] = relationship()
+    variant: Mapped[ProductVariant | None] = relationship()
 
 
 class TransactionType(str, Enum):
@@ -157,6 +323,7 @@ class Creditor(Base):
     name: Mapped[str] = mapped_column(String(255))
     phone: Mapped[str | None] = mapped_column(String(50), default=None)
     email: Mapped[str | None] = mapped_column(String(255), default=None)
+    birthday: Mapped[date | None] = mapped_column(Date, default=None)
     total_debt: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     notes: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(
@@ -204,8 +371,9 @@ class SystemSettings(Base):
         ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True
     )
     low_stock_threshold: Mapped[int] = mapped_column(Integer, default=10)
-    expiry_warning_days: Mapped[int] = mapped_column(Integer, default=180)
+    expiry_warning_days: Mapped[int] = mapped_column(Integer, default=45)
     uses_expiry_tracking: Mapped[bool] = mapped_column(Boolean, default=True)
+    capability_overrides: Mapped[str | None] = mapped_column(Text, default=None)
     currency_code: Mapped[str] = mapped_column(String(3), default="GHS")
     auto_backup: Mapped[bool] = mapped_column(Boolean, default=True)
     email_notifications: Mapped[bool] = mapped_column(Boolean, default=False)

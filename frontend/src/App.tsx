@@ -1,55 +1,172 @@
-import { useEffect, useRef, useState } from "react";
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ErrorInfo, type ReactNode } from "react";
 
-import { createMovement, createProduct, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, updateProduct, getCachedProducts, clearDataCache } from "./api";
+import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, updateProduct, getCachedProducts, clearDataCache, isTemporaryServerDelayError, warmBackend } from "./api";
 import Layout from "./components/Layout";
-import ProductForm from "./components/ProductForm";
-import ProductList from "./components/ProductList";
+import { getSalesOutboxCount } from "./offline/storage";
+import { syncSalesOutboxOnce } from "./offline/sync";
 import { useAppCategories } from "./categories";
 import { updateMyCategories } from "./api";
-import { Branch, NewProduct, Product } from "./types";
-import Creditors from "./views/Creditors";
-import Dashboard from "./views/Dashboard";
-import Inventory from "./views/Inventory";
-import Login from "./views/Login";
-import Profile from "./views/Profile";
-import Reports from "./views/Reports";
-import RevenueAnalysis from "./views/RevenueAnalysis";
-import Sales from "./views/Sales";
-import UserManagement from "./views/UserManagement";
+import { Branch, NewProduct, Product, ProductUpdate, Supplier } from "./types";
 import { useExpiryTracking } from "./settings";
+import { getDisplayBusinessName, getEffectiveUserRole, hasUserPermission, readStoredUser } from "./user-storage";
 
-type StoredUser = {
-  id?: number;
-  name?: string;
-  business_name?: string;
-  role?: string;
-  branch_id?: number | null;
+const LAZY_IMPORT_RETRY_KEY = "gel-invent:lazy-import-retry";
+
+function isRecoverableLazyLoadError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("failed to fetch dynamically imported module")
+    || message.includes("importing a module script failed")
+    || message.includes("chunkloaderror")
+    || message.includes("loading chunk")
+    || message.includes("failed to load module script")
+  );
+}
+
+function lazyWithRetry<T extends ComponentType<object>>(
+  loader: () => Promise<{ default: T }>,
+) {
+  return lazy(async () => {
+    try {
+      const module = await loader();
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem(LAZY_IMPORT_RETRY_KEY);
+      }
+      return module;
+    } catch (error) {
+      if (typeof window !== "undefined" && isRecoverableLazyLoadError(error)) {
+        const alreadyRetried = sessionStorage.getItem(LAZY_IMPORT_RETRY_KEY) === "1";
+        if (!alreadyRetried) {
+          sessionStorage.setItem(LAZY_IMPORT_RETRY_KEY, "1");
+          window.location.reload();
+          return new Promise<never>(() => {});
+        }
+
+        sessionStorage.removeItem(LAZY_IMPORT_RETRY_KEY);
+      }
+
+      throw error;
+    }
+  });
+}
+
+type ViewErrorBoundaryProps = {
+  activeView: string;
+  onRetry: () => void;
+  onNavigate: (view: string) => void;
+  children: ReactNode;
 };
 
-function readStoredUser(): StoredUser | null {
-  const raw = localStorage.getItem("user");
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as StoredUser;
-  } catch {
-    return null;
+type ViewErrorBoundaryState = {
+  errorMessage: string | null;
+};
+
+class ViewErrorBoundary extends Component<ViewErrorBoundaryProps, ViewErrorBoundaryState> {
+  state: ViewErrorBoundaryState = {
+    errorMessage: null,
+  };
+
+  static getDerivedStateFromError(error: unknown): ViewErrorBoundaryState {
+    return {
+      errorMessage: error instanceof Error
+        ? error.message
+        : "An unexpected error occurred while loading this view.",
+    };
   }
+
+  componentDidCatch(error: unknown, errorInfo: ErrorInfo) {
+    if (import.meta.env.DEV) {
+      console.error(`View '${this.props.activeView}' crashed`, error, errorInfo);
+    }
+  }
+
+  render() {
+    if (!this.state.errorMessage) {
+      return this.props.children;
+    }
+
+    const isDashboardView = this.props.activeView === "dashboard";
+
+    return (
+      <div className="card" style={{ margin: 16, padding: 20, display: "grid", gap: 12 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#0f172a" }}>
+            {isDashboardView ? "Dashboard load interrupted" : "Page load interrupted"}
+          </h2>
+          <p style={{ margin: "6px 0 0", color: "#475569", lineHeight: 1.5 }}>
+            The current view hit an unexpected loading problem, but the rest of the app is still available.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button className="button" type="button" onClick={this.props.onRetry}>
+            Retry View
+          </button>
+          <button className="button secondary" type="button" onClick={() => this.props.onNavigate("profile")}>
+            Open Profile
+          </button>
+          <button className="button secondary" type="button" onClick={() => window.location.reload()}>
+            Reload App
+          </button>
+        </div>
+        {this.state.errorMessage ? (
+          <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>
+            Details: {this.state.errorMessage}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+}
+
+const ProductForm = lazyWithRetry(() => import("./components/ProductForm"));
+const ProductList = lazyWithRetry(() => import("./components/ProductList"));
+const PurchasingPanel = lazyWithRetry(() => import("./components/PurchasingPanel"));
+const Creditors = lazyWithRetry(() => import("./views/Creditors"));
+const Dashboard = lazyWithRetry(() => import("./views/Dashboard"));
+const Inventory = lazyWithRetry(() => import("./views/Inventory"));
+const Invoice = lazyWithRetry(() => import("./views/Invoice"));
+const Login = lazyWithRetry(() => import("./views/Login"));
+const Profile = lazyWithRetry(() => import("./views/Profile"));
+const Reports = lazyWithRetry(() => import("./views/Reports"));
+const RevenueAnalysis = lazyWithRetry(() => import("./views/RevenueAnalysis"));
+const Sales = lazyWithRetry(() => import("./views/Sales"));
+const UserManagement = lazyWithRetry(() => import("./views/UserManagement"));
+
+function LazyViewFallback() {
+  return (
+    <div className="card" style={{ margin: 16, padding: 18, color: "#64748b" }}>
+      Loading...
+    </div>
+  );
 }
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => !!localStorage.getItem("token"));
+  const [viewRetryNonce, setViewRetryNonce] = useState(0);
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  const [outboxCount, setOutboxCount] = useState(() => getSalesOutboxCount());
+  const [isSyncingOutbox, setIsSyncingOutbox] = useState(false);
+  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [activeView, setActiveView] = useState("dashboard");
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterExpiry, setFilterExpiry] = useState("all");
+  const [filterStock, setFilterStock] = useState("all");
+  const [filterSupplier, setFilterSupplier] = useState("all");
+  const [sortBy, setSortBy] = useState("name_asc");
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [userName, setUserName] = useState(() => readStoredUser()?.name || "User");
-  const [businessName, setBusinessName] = useState(() => readStoredUser()?.business_name || "Business");
+  const [businessName, setBusinessName] = useState(() => getDisplayBusinessName());
   const [userRole, setUserRole] = useState(() => readStoredUser()?.role || "Admin");
   const [currentUserId, setCurrentUserId] = useState<number | null>(() => readStoredUser()?.id ?? null);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [supplierDirectory, setSupplierDirectory] = useState<Supplier[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<number | null>(() => {
     const raw = localStorage.getItem("activeBranchId");
     if (!raw) return null;
@@ -62,14 +179,141 @@ export default function App() {
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const prefetchedBranchRef = useRef<number | null>(null);
+  const syncInFlightRef = useRef(false);
+  const supplierSyncInFlightRef = useRef(false);
+  const storedUser = readStoredUser();
+  const accessUser = storedUser ?? { role: userRole };
+  const userPermissions = storedUser?.permissions ?? [];
+  const canManageBranches = hasUserPermission("manage_branches", accessUser);
+  const canManageCatalog = hasUserPermission("manage_catalog", accessUser);
+  const canManageEmployees = hasUserPermission("manage_employees", accessUser);
+  const canManageProcurement = hasUserPermission("manage_procurement", accessUser);
+  const canViewProcurement = hasUserPermission("view_procurement", accessUser);
+  const canViewReports = hasUserPermission("view_reports", accessUser);
+  const canViewRevenue = hasUserPermission("view_revenue", accessUser);
 
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
+
+  const supplierOptions = useMemo(() => {
+    const uniqueSuppliers = new Set<string>();
+    products.forEach((product) => {
+      const supplierName = product.supplier?.trim();
+      if (supplierName) {
+        uniqueSuppliers.add(supplierName);
+      }
+    });
+    return Array.from(uniqueSuppliers).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  const productKpis = useMemo(() => {
+    let lowStockCount = 0;
+    let outOfStockCount = 0;
+    let inventoryValue = 0;
+    let marginSum = 0;
+    let marginCount = 0;
+
+    products.forEach((product) => {
+      const stock = Math.max(0, Number(product.current_stock ?? 0));
+      const costPrice = Number(product.cost_price ?? 0);
+      const sellingPrice = Number(product.selling_price ?? 0);
+
+      if (stock === 0) {
+        outOfStockCount += 1;
+      } else if (stock <= 5) {
+        lowStockCount += 1;
+      }
+
+      if (stock > 0 && Number.isFinite(costPrice) && costPrice > 0) {
+        inventoryValue += stock * costPrice;
+      }
+
+      if (Number.isFinite(costPrice) && Number.isFinite(sellingPrice) && costPrice > 0 && sellingPrice > 0) {
+        marginSum += ((sellingPrice - costPrice) / costPrice) * 100;
+        marginCount += 1;
+      }
+    });
+
+    return {
+      totalSkus: products.length,
+      lowStockCount,
+      outOfStockCount,
+      inventoryValue,
+      averageMarginPercent: marginCount > 0 ? marginSum / marginCount : 0,
+    };
+  }, [products]);
 
   useEffect(() => {
     if (!showExpiryStatusFilter && filterExpiry !== "all") {
       setFilterExpiry("all");
     }
   }, [showExpiryStatusFilter, filterExpiry]);
+
+  useEffect(() => {
+    if (filterSupplier === "all") {
+      return;
+    }
+    if (!supplierOptions.includes(filterSupplier)) {
+      setFilterSupplier("all");
+    }
+  }, [filterSupplier, supplierOptions]);
+
+  useEffect(() => {
+    const autoSupplierSyncEnabled = localStorage.getItem("enableSupplierAutoSync") === "1";
+    if (!autoSupplierSyncEnabled) {
+      return;
+    }
+
+    if (!isAuthenticated) {
+      return;
+    }
+
+    if (!canManageProcurement) {
+      return;
+    }
+
+    if (supplierSyncInFlightRef.current) {
+      return;
+    }
+
+    if (supplierOptions.length === 0) {
+      return;
+    }
+
+    const supplierDirectorySet = new Set(
+      supplierDirectory
+        .map((supplier) => supplier.name.trim().toLowerCase())
+        .filter((name) => name.length > 0),
+    );
+    const missingSupplierNames = supplierOptions.filter(
+      (supplierName) => !supplierDirectorySet.has(supplierName.trim().toLowerCase()),
+    );
+
+    if (missingSupplierNames.length === 0) {
+      return;
+    }
+
+    supplierSyncInFlightRef.current = true;
+
+    void (async () => {
+      try {
+        for (const supplierName of missingSupplierNames) {
+          try {
+            await createSupplier({ name: supplierName });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "";
+            if (!/already exists/i.test(message) && import.meta.env.DEV) {
+              console.warn(`Failed to sync supplier '${supplierName}' from products:`, error);
+            }
+          }
+        }
+
+        const refreshedSuppliers = await fetchSuppliersCached((fresh) => setSupplierDirectory(fresh));
+        setSupplierDirectory(refreshedSuppliers);
+      } finally {
+        supplierSyncInFlightRef.current = false;
+      }
+    })();
+  }, [canManageProcurement, isAuthenticated, supplierDirectory, supplierOptions]);
 
   const logoutAndReset = () => {
     setIsAuthenticated(false);
@@ -81,28 +325,50 @@ export default function App() {
     setUserRole("Admin");
     setCurrentUserId(null);
     setBranches([]);
+    setSupplierDirectory([]);
     setActiveBranchId(null);
+    setOutboxCount(0);
   };
+
+  const syncQueuedSales = useCallback(async () => {
+    if (!isAuthenticated || !navigator.onLine || syncInFlightRef.current || getSalesOutboxCount() === 0) {
+      setOutboxCount(getSalesOutboxCount());
+      return;
+    }
+
+    syncInFlightRef.current = true;
+    setIsSyncingOutbox(true);
+    try {
+      const result = await syncSalesOutboxOnce();
+      setOutboxCount(result.remainingCount);
+
+      if (result.syncedCount > 0) {
+        fetchProductsCached((fresh) => setProducts(fresh)).catch(() => {});
+        fetchSalesCached().catch(() => {});
+        if (canViewReports) {
+          fetchSalesDashboard().catch(() => {});
+        }
+      }
+    } finally {
+      syncInFlightRef.current = false;
+      setIsSyncingOutbox(false);
+    }
+  }, [canViewReports, isAuthenticated]);
 
   // Check if user is authenticated on mount
   useEffect(() => {
-    const userStr = localStorage.getItem("user");
+    const initialUser = readStoredUser();
     const token = localStorage.getItem("token");
-    if (userStr) {
+    if (initialUser) {
       setIsAuthenticated(true);
-      try {
-        const user = JSON.parse(userStr);
-        setUserName(user.name || "User");
-        setBusinessName(user.business_name || "Business");
-        setUserRole(user.role || "Admin");
-        setCurrentUserId(user.id || null);
-        if (user.role && user.role !== "Admin") {
-          const bid = typeof user.branch_id === "number" ? user.branch_id : null;
-          setActiveBranchId(bid);
-          if (bid != null) localStorage.setItem("activeBranchId", String(bid));
-        }
-      } catch (error) {
-        console.error("Error parsing user data:", error);
+      setUserName(initialUser.name || "User");
+      setBusinessName(getDisplayBusinessName(initialUser));
+      setUserRole(initialUser.role || "Admin");
+      setCurrentUserId(initialUser.id || null);
+      if (!hasUserPermission("manage_branches", initialUser)) {
+        const bid = typeof initialUser.branch_id === "number" ? initialUser.branch_id : null;
+        setActiveBranchId(bid);
+        if (bid != null) localStorage.setItem("activeBranchId", String(bid));
       }
     }
 
@@ -114,12 +380,12 @@ export default function App() {
           localStorage.setItem("user", JSON.stringify(me));
           setIsAuthenticated(true);
           setUserName(me.name || "User");
-          setBusinessName(me.business_name || "Business");
-          setUserRole(me.role || "Admin");
+          setBusinessName(getDisplayBusinessName(me));
+          setUserRole(getEffectiveUserRole(me));
           setCurrentUserId(me.id || null);
 
           // Employees are locked to their assigned branch.
-          if (me.role !== "Admin") {
+          if (!hasUserPermission("manage_branches", me)) {
             const bid = typeof me.branch_id === "number" ? me.branch_id : null;
             setActiveBranchId(bid);
             if (bid != null) localStorage.setItem("activeBranchId", String(bid));
@@ -138,7 +404,9 @@ export default function App() {
             return;
           }
 
-          console.warn("Session revalidation skipped due to temporary error:", err);
+          if (import.meta.env.DEV) {
+            console.warn("Session revalidation skipped due to temporary error:", err);
+          }
         });
     }
   }, []);
@@ -169,9 +437,44 @@ export default function App() {
         } else {
           localStorage.removeItem("activeBranchId");
         }
-      } catch {
-        // Branches are optional UI; backend may deny for some roles.
-        setBranches([]);
+      } catch (error) {
+        if (isTemporaryServerDelayError(error)) {
+          const isReady = await warmBackend("/health/db", true, {
+            timeoutMs: 90000,
+            probeTimeoutMs: 35000,
+            retryIntervalMs: 2000,
+          });
+
+          if (isReady) {
+            try {
+              const data = await fetchBranchesCached((fresh) => setBranches(fresh));
+              setBranches(data);
+
+              const existing = activeBranchId;
+              const existingBranch = existing != null ? data.find((b) => b.id === existing) : undefined;
+              if (existingBranch) {
+                return;
+              }
+
+              const nextId = data[0]?.id ?? null;
+              setActiveBranchId(nextId);
+              if (nextId != null) {
+                localStorage.setItem("activeBranchId", String(nextId));
+              } else {
+                localStorage.removeItem("activeBranchId");
+              }
+              return;
+            } catch {
+              // Fall through to stale-branch cleanup below.
+            }
+          }
+        }
+
+        // Keep existing branch context on transient failures to avoid blanking
+        // authenticated views during cold starts or mobile network hiccups.
+        if (import.meta.env.DEV) {
+          console.warn("Branch load failed; preserving previous branch context.", error);
+        }
       }
     };
 
@@ -198,7 +501,9 @@ export default function App() {
           else localStorage.removeItem("activeBranchId");
         })
         .catch(() => {
-          setBranches([]);
+          if (import.meta.env.DEV) {
+            console.warn("Branches refresh failed; keeping previous branch context.");
+          }
         });
     };
 
@@ -210,20 +515,81 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
+    // Warm the backend DB path in the background so first authenticated data
+    // fan-out is less likely to hit cold-start timeout edges.
+    void warmBackend("/health/db", true, {
+      timeoutMs: 90000,
+      probeTimeoutMs: 35000,
+      retryIntervalMs: 2000,
+    }).catch(() => {
+      // Keep startup non-blocking; regular fetch retries still handle failures.
+    });
+
     if (prefetchedBranchRef.current === activeBranchId) return;
     prefetchedBranchRef.current = activeBranchId;
 
     fetchSalesCached().catch(() => {});
     fetchInventoryAnalytics().catch(() => {});
 
-    if (userRole === "Admin") {
+    if (canViewReports) {
       fetchSalesDashboard().catch(() => {});
     }
-  }, [isAuthenticated, activeBranchId, userRole]);
+  }, [canViewReports, isAuthenticated, activeBranchId]);
+
+  useEffect(() => {
+    const handleOutboxChanged = () => {
+      setOutboxCount(getSalesOutboxCount());
+      if (navigator.onLine) {
+        void syncQueuedSales();
+      }
+    };
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      void syncQueuedSales();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    const handleBeforeInstallPrompt = (event: BeforeInstallPromptEvent) => {
+      event.preventDefault();
+      setInstallPromptEvent(event);
+    };
+
+    const handleAppInstalled = () => {
+      setInstallPromptEvent(null);
+    };
+
+    window.addEventListener("offlineOutboxChanged", handleOutboxChanged);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt as EventListener);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    setOutboxCount(getSalesOutboxCount());
+    if (navigator.onLine) {
+      void syncQueuedSales();
+    }
+
+    return () => {
+      window.removeEventListener("offlineOutboxChanged", handleOutboxChanged);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt as EventListener);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, [syncQueuedSales]);
 
   // Auto-refresh when another user signs in
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "businessInfo") {
+        setBusinessName(getDisplayBusinessName());
+        return;
+      }
+
       // Detect when user data changes in localStorage
       if (e.key === "user" && e.newValue) {
         try {
@@ -232,7 +598,12 @@ export default function App() {
           if (newUser.id && newUser.id !== currentUserId) {
             console.log("Different user detected, refreshing...");
             window.location.reload();
+            return;
           }
+
+          setUserName(newUser.name || "User");
+          setBusinessName(getDisplayBusinessName(newUser));
+          setUserRole(newUser.role || "Admin");
         } catch (error) {
           console.error("Error parsing user change:", error);
         }
@@ -244,22 +615,46 @@ export default function App() {
 
     // Also listen for custom event in the same tab
     const handleCustomUserChange = (e: CustomEvent) => {
-      const newUser = e.detail;
-      if (!newUser) {
+      const changedUser = e.detail as { id?: number } | null;
+      if (!changedUser) {
         logoutAndReset();
         return;
       }
-      if (newUser?.id && newUser.id !== currentUserId) {
+      // Only reload when switching between two different logged-in users (not for initial login).
+      if (currentUserId !== null && changedUser?.id && changedUser.id !== currentUserId) {
         console.log("Different user detected in same tab, refreshing...");
         window.location.reload();
+        return;
       }
+
+      const nextUser = readStoredUser();
+      if (!nextUser) {
+        logoutAndReset();
+        return;
+      }
+
+      setUserName(nextUser.name || "User");
+      setBusinessName(getDisplayBusinessName(nextUser));
+      setUserRole(nextUser.role || "Admin");
     };
 
     window.addEventListener("userChanged", handleCustomUserChange as EventListener);
 
+    const handleBusinessInfoChange = () => {
+      setBusinessName(getDisplayBusinessName());
+    };
+    window.addEventListener("businessInfoChanged", handleBusinessInfoChange as EventListener);
+
+    const handleProductsUpdated = () => {
+      fetchProductsCached((fresh) => setProducts(fresh)).catch(() => {});
+    };
+    window.addEventListener("productsUpdated", handleProductsUpdated);
+
     return () => {
       window.removeEventListener("storage", handleStorageChange);
       window.removeEventListener("userChanged", handleCustomUserChange as EventListener);
+      window.removeEventListener("businessInfoChanged", handleBusinessInfoChange as EventListener);
+      window.removeEventListener("productsUpdated", handleProductsUpdated);
     };
   }, [currentUserId]);
 
@@ -278,24 +673,78 @@ export default function App() {
         setProducts([]);
         setSelectedId(null);
       }
-      
-      // Fetch fresh data in background
-      const data = await fetchProductsCached((fresh) => setProducts(fresh));
-      setProducts(data);
-      setSelectedId((prev) => prev ?? (data[0]?.id ?? null));
+
+      try {
+        // Refresh in the background, but keep startup resilient to cold-start timeouts.
+        const data = await fetchProductsCached((fresh) => setProducts(fresh));
+        setProducts(data);
+        setSelectedId((prev) => prev ?? (data[0]?.id ?? null));
+      } catch {
+        // Keep whatever cached shell state we already had.
+      }
     };
-    run();
+
+    void run();
   }, [isAuthenticated, activeBranchId]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    if (!canViewProcurement) {
+      setSupplierDirectory([]);
+      return;
+    }
+
+    let isMounted = true;
+
+    fetchSuppliersCached((fresh) => {
+      if (isMounted) {
+        setSupplierDirectory(fresh);
+      }
+    })
+      .then((data) => {
+        if (isMounted) {
+          setSupplierDirectory(data);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setSupplierDirectory([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [canViewProcurement, isAuthenticated, activeBranchId]);
+
+  useEffect(() => {
+    if (!showAddProduct || !isAuthenticated || !canViewProcurement) {
+      return;
+    }
+
+    fetchSuppliersCached((fresh) => setSupplierDirectory(fresh))
+      .then((data) => setSupplierDirectory(data))
+      .catch(() => {});
+  }, [showAddProduct, canViewProcurement, isAuthenticated, activeBranchId]);
+
+  useEffect(() => {
+    if (showAddProduct && !canManageCatalog) {
+      setShowAddProduct(false);
+    }
+  }, [canManageCatalog, showAddProduct]);
 
   const handleLogin = (_email: string, _password: string) => {
     const user = readStoredUser();
     if (user) {
       setUserName(user.name || "User");
-      setBusinessName(user.business_name || "Business");
+      setBusinessName(getDisplayBusinessName(user));
       setUserRole(user.role || "Admin");
       setCurrentUserId(user.id ?? null);
 
-      if (user.role && user.role !== "Admin") {
+      if (!hasUserPermission("manage_branches", user)) {
         const bid = typeof user.branch_id === "number" ? user.branch_id : null;
         setActiveBranchId(bid);
         if (bid != null) localStorage.setItem("activeBranchId", String(bid));
@@ -311,6 +760,17 @@ export default function App() {
     logoutAndReset();
   };
 
+  const handleRetryCurrentView = useCallback(() => {
+    setViewRetryNonce((current) => current + 1);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!installPromptEvent) return;
+    await installPromptEvent.prompt();
+    await installPromptEvent.userChoice.catch(() => undefined);
+    setInstallPromptEvent(null);
+  };
+
   const handleChangeBranch = (branchId: number) => {
     if (branchId === activeBranchId) return;
     setActiveBranchId(branchId);
@@ -319,22 +779,47 @@ export default function App() {
     // Clear cached branch-scoped responses and reset product selection immediately.
     clearDataCache();
     setProducts([]);
+    setSupplierDirectory([]);
     setSelectedId(null);
 
     // Notify other components that the active branch changed
     window.dispatchEvent(new CustomEvent("activeBranchChanged", { detail: branchId }));
   };
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    if (activeView === "reports" && !canViewReports) {
+      setActiveView("dashboard");
+      return;
+    }
+
+    if (activeView === "revenue" && !canViewRevenue) {
+      setActiveView("dashboard");
+      return;
+    }
+
+    if (activeView === "users" && !canManageEmployees) {
+      setActiveView("dashboard");
+    }
+  }, [activeView, canManageEmployees, canViewReports, canViewRevenue, isAuthenticated]);
+
   // Show login page if not authenticated
   if (!isAuthenticated) {
-    return <Login onLogin={handleLogin} />;
+    return (
+      <Suspense fallback={<LazyViewFallback />}>
+        <Login onLogin={handleLogin} />
+      </Suspense>
+    );
   }
 
   const handleCreateProduct = async (payload: NewProduct, branchIdOverride?: number | null) => {
     const created = await createProduct(payload, branchIdOverride);
 
     // If admin created into a different branch, switch to it so the list matches.
-    if (userRole === "Admin" && branchIdOverride != null && branchIdOverride !== activeBranchId) {
+    if (canManageBranches && branchIdOverride != null && branchIdOverride !== activeBranchId) {
       setActiveBranchId(branchIdOverride);
       localStorage.setItem("activeBranchId", String(branchIdOverride));
       return;
@@ -348,7 +833,7 @@ export default function App() {
     setSelectedId(created.id);
   };
 
-  const handleEditProduct = async (id: number, updates: Partial<Product>) => {
+  const handleEditProduct = async (id: number, updates: ProductUpdate) => {
     const updated = await updateProduct(id, updates);
     setProducts((prev) => prev.map((p) => (p.id === id ? updated : p)));
   };
@@ -361,51 +846,82 @@ export default function App() {
     }
   };
 
-  const handleStockAdjustment = async (
-    productId: number,
-    change: number,
-    reason: string,
-    expiry_date?: string,
-    unit_cost_price?: number | null,
-    unit_selling_price?: number | null,
-  ) => {
-    await createMovement(productId, {
-      change,
-      reason,
-      expiry_date: expiry_date || null,
-      unit_cost_price: unit_cost_price ?? null,
-      unit_selling_price: unit_selling_price ?? null,
-    });
-  };
-
   const renderView = (view: string) => {
     switch (view) {
       case "dashboard":
         return <Dashboard onNavigate={setActiveView} />;
-      case "products":
+      case "products": {
+        const stockFilterLabels: Record<string, string> = {
+          in_stock: "In stock",
+          low_stock: "Low stock",
+          out_of_stock: "Out of stock",
+        };
+        const expiryFilterLabels: Record<string, string> = {
+          expired: "Expired only",
+          expiring: "Expiring soon",
+          fresh: "Fresh items",
+        };
+        const sortLabels: Record<string, string> = {
+          name_asc: "Name A-Z",
+          name_desc: "Name Z-A",
+          stock_desc: "Stock high-low",
+          stock_asc: "Stock low-high",
+          margin_desc: "Margin high-low",
+          newest: "Newest first",
+        };
+
+        const activeFilterChips: Array<{ key: string; label: string; onClear: () => void }> = [];
+        if (searchTerm.trim()) {
+          activeFilterChips.push({ key: "search", label: `Search: ${searchTerm.trim()}`, onClear: () => setSearchTerm("") });
+        }
+        if (filterCategory !== "all") {
+          activeFilterChips.push({ key: "category", label: `Category: ${filterCategory}`, onClear: () => setFilterCategory("all") });
+        }
+        if (showExpiryStatusFilter && filterExpiry !== "all") {
+          activeFilterChips.push({ key: "expiry", label: `Expiry: ${expiryFilterLabels[filterExpiry] ?? filterExpiry}`, onClear: () => setFilterExpiry("all") });
+        }
+        if (filterStock !== "all") {
+          activeFilterChips.push({ key: "stock", label: `Stock: ${stockFilterLabels[filterStock] ?? filterStock}`, onClear: () => setFilterStock("all") });
+        }
+        if (filterSupplier !== "all") {
+          activeFilterChips.push({ key: "supplier", label: `Supplier: ${filterSupplier}`, onClear: () => setFilterSupplier("all") });
+        }
+        if (sortBy !== "name_asc") {
+          activeFilterChips.push({ key: "sort", label: `Sort: ${sortLabels[sortBy] ?? sortBy}`, onClear: () => setSortBy("name_asc") });
+        }
+
+        const hasActiveFilters = activeFilterChips.length > 0;
+
         return (
           <div className="app-shell">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
-              <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>Products</h1>
-              <button
-                className="button"
-                onClick={() => setShowAddProduct(true)}
-                style={{
-                  background: "#1f7aff",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "12px 20px",
-                  fontSize: 15,
-                  fontWeight: 600,
-                }}
-              >
-                <span>Add New Product</span>
-              </button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
+              <div>
+                <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0, letterSpacing: -0.3 }}>Products</h1>
+                <p style={{ margin: "4px 0 0", fontSize: 13, color: "#64748b" }}>Manage catalog pricing, stock health, and product quality in one place.</p>
+              </div>
+              {canManageCatalog ? (
+                <button
+                  className="button"
+                  onClick={() => setShowAddProduct(true)}
+                  style={{
+                    background: "linear-gradient(135deg, #1f7aff, #2563eb)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "11px 18px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    borderRadius: 12,
+                    boxShadow: "0 10px 20px rgba(37, 99, 235, 0.24)",
+                  }}
+                >
+                  <span>Add New Product</span>
+                </button>
+              ) : null}
             </div>
             
             {/* Add Product Modal */}
-            {showAddProduct && (
+            {showAddProduct && canManageCatalog && (
               <div
                 style={{
                   position: "fixed",
@@ -413,66 +929,115 @@ export default function App() {
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  background: "rgba(0, 0, 0, 0.5)",
+                  background: "rgba(15, 23, 42, 0.55)",
+                  backdropFilter: "blur(2px)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   zIndex: 1000,
-                  padding: 20,
+                  padding: 16,
                 }}
                 onClick={() => setShowAddProduct(false)}
               >
                 <div
                   style={{
                     background: "white",
-                    borderRadius: 12,
-                    maxWidth: 600,
+                      borderRadius: 20,
+                      maxWidth: 860,
                     width: "100%",
                     maxHeight: "90vh",
                     overflow: "auto",
-                    padding: 24,
+                      padding: 20,
+                      position: "relative",
+                      border: "1px solid #dbe5f2",
+                      boxShadow: "0 24px 44px rgba(15, 23, 42, 0.28)",
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                    <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Add New Product</h2>
                     <button
+                      type="button"
                       onClick={() => setShowAddProduct(false)}
                       style={{
-                        background: "transparent",
-                        border: "none",
-                        fontSize: 24,
+                        position: "absolute",
+                        top: 12,
+                        right: 12,
+                        background: "#f8fafc",
+                        border: "1px solid #dbe5f2",
+                        fontSize: 12,
                         cursor: "pointer",
-                        color: "#6b7280",
-                        padding: 4,
+                        color: "#475569",
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                        fontWeight: 700,
+                        zIndex: 3,
                       }}
                     >
-                      X
+                      Close
                     </button>
-                  </div>
                   <ProductForm
                     onCreate={handleCreateProduct}
                     onCancel={() => setShowAddProduct(false)}
+                    onSupplierDirectoryChanged={async () => {
+                      try {
+                        const data = await fetchSuppliersCached((fresh) => setSupplierDirectory(fresh));
+                        setSupplierDirectory(data);
+                      } catch {
+                        // Supplier refresh is best-effort for the product form.
+                      }
+                    }}
                     userRole={userRole}
                     branches={branches}
                     activeBranchId={activeBranchId}
+                    existingSuppliers={supplierDirectory}
+                    layoutMode="modal"
                   />
                 </div>
               </div>
             )}
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(176px, 1fr))",
+                gap: 12,
+                marginBottom: 14,
+              }}
+            >
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #dbe5f2", borderRadius: 14, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Total SKUs</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", lineHeight: 1 }}>{productKpis.totalSkus}</div>
+              </div>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #fde68a", borderRadius: 14, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Low Stock</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#b45309", lineHeight: 1 }}>{productKpis.lowStockCount}</div>
+              </div>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #fecaca", borderRadius: 14, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#991b1b", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Out of Stock</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#dc2626", lineHeight: 1 }}>{productKpis.outOfStockCount}</div>
+              </div>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #bfdbfe", borderRadius: 14, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Inventory Value</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#1e40af", lineHeight: 1 }}>₵{productKpis.inventoryValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
+              </div>
+              <div className="card" style={{ margin: 0, padding: 14, border: "1px solid #bbf7d0", borderRadius: 14, boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#166534", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Avg Margin</div>
+                <div style={{ fontSize: 24, fontWeight: 800, color: "#15803d", lineHeight: 1 }}>{productKpis.averageMarginPercent.toFixed(1)}%</div>
+              </div>
+            </div>
             
             {/* Search and Filter Bar */}
             <div
               className="card"
               style={{
-                marginBottom: 16,
-                padding: 16,
+                marginBottom: 14,
+                padding: 14,
                 border: "1px solid #dbe5f2",
                 background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
                 boxShadow: "0 8px 22px rgba(15, 23, 42, 0.06)",
+                borderRadius: 14,
               }}
             >
-              <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, alignItems: "end" }}>
+              <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, alignItems: "end" }}>
                 <label style={{ margin: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                     Search Products
@@ -485,6 +1050,22 @@ export default function App() {
                     onChange={(e) => setSearchTerm(e.target.value)}
                     style={{ padding: 10 }}
                   />
+                </label>
+                <label style={{ margin: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                    Stock Status
+                  </span>
+                  <select
+                    className="input"
+                    value={filterStock}
+                    onChange={(e) => setFilterStock(e.target.value)}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="all">All Stock Levels</option>
+                    <option value="in_stock">In Stock</option>
+                    <option value="low_stock">Low Stock (1-5)</option>
+                    <option value="out_of_stock">Out of Stock</option>
+                  </select>
                 </label>
                 <label style={{ margin: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
@@ -511,6 +1092,24 @@ export default function App() {
                       </option>
                     ))}
                     <option value="__add_new__">+ Add new category…</option>
+                  </select>
+                </label>
+                <label style={{ margin: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                    Supplier
+                  </span>
+                  <select
+                    className="input"
+                    value={filterSupplier}
+                    onChange={(e) => setFilterSupplier(e.target.value)}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="all">All Suppliers</option>
+                    {supplierOptions.map((supplier) => (
+                      <option key={supplier} value={supplier}>
+                        {supplier}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 {addingCategory && (
@@ -578,29 +1177,75 @@ export default function App() {
                     </select>
                   </label>
                 ) : null}
+                <label style={{ margin: 0 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                    Sort By
+                  </span>
+                  <select
+                    className="input"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    style={{ padding: 10 }}
+                  >
+                    <option value="name_asc">Name (A-Z)</option>
+                    <option value="name_desc">Name (Z-A)</option>
+                    <option value="stock_desc">Stock (High-Low)</option>
+                    <option value="stock_asc">Stock (Low-High)</option>
+                    <option value="margin_desc">Margin (High-Low)</option>
+                    <option value="newest">Newest First</option>
+                  </select>
+                </label>
               </div>
-              {(searchTerm || filterCategory !== "all" || filterExpiry !== "all") && (
-                <button
-                  onClick={() => {
-                    setSearchTerm("");
-                    setFilterCategory("all");
-                    setFilterExpiry("all");
-                  }}
-                  style={{
-                    marginTop: 12,
-                    padding: "6px 12px",
-                    background: "transparent",
-                    border: "1px solid #d8dce8",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#4a5368",
-                  }}
-                >
-                  Clear Filters
-                </button>
-              )}
+              {hasActiveFilters ? (
+                <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                  {activeFilterChips.map((chip) => (
+                    <button
+                      key={chip.key}
+                      type="button"
+                      onClick={chip.onClear}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "5px 11px",
+                        borderRadius: 999,
+                        border: "1px solid #cbd5e1",
+                        background: "#f8fafc",
+                        color: "#334155",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span>{chip.label}</span>
+                      <span style={{ color: "#64748b", fontWeight: 900 }}>x</span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm("");
+                      setFilterCategory("all");
+                      setFilterExpiry("all");
+                      setFilterStock("all");
+                      setFilterSupplier("all");
+                      setSortBy("name_asc");
+                    }}
+                    style={{
+                      padding: "6px 12px",
+                      background: "#ffffff",
+                      border: "1px solid #d8dce8",
+                      borderRadius: 999,
+                      cursor: "pointer",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "#4a5368",
+                    }}
+                  >
+                    Clear All
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             <div className="grid" style={{ gap: 16 }}>
@@ -610,24 +1255,31 @@ export default function App() {
                 onSelect={(id: number) => setSelectedId(id)}
                 onEdit={handleEditProduct}
                 onDelete={handleDeleteProduct}
-                onStockAdjust={handleStockAdjustment}
                 onOpenInventory={() => setActiveView("inventory")}
                 searchTerm={searchTerm}
                 filterCategory={filterCategory}
                 filterExpiry={filterExpiry}
+                filterStock={filterStock}
+                filterSupplier={filterSupplier}
+                sortBy={sortBy}
                 userRole={userRole}
               />
             </div>
           </div>
         );
+      }
       case "inventory":
         return <Inventory />;
+      case "purchasing":
+        return <PurchasingPanel products={products} usesExpiryTracking={usesExpiryTracking} onPurchaseRecorded={async () => { clearDataCache(); await fetchProductsCached(); }} />;
       case "sales":
         return <Sales />;
+      case "invoice":
+        return <Invoice />;
       case "revenue":
         return <RevenueAnalysis />;
       case "reports":
-        return <Reports />;
+        return <Reports onNavigate={setActiveView} />;
       case "creditors":
         return <Creditors />;
       case "profile":
@@ -640,18 +1292,33 @@ export default function App() {
   };
 
   return (
-    <Layout
+    <ViewErrorBoundary
+      key={`${activeView}:${viewRetryNonce}`}
       activeView={activeView}
+      onRetry={handleRetryCurrentView}
       onNavigate={setActiveView}
-      onLogout={handleLogout}
-      userName={userName}
-      businessName={businessName}
-      userRole={userRole}
-      branches={branches}
-      activeBranchId={activeBranchId}
-      onChangeBranch={userRole === "Admin" ? handleChangeBranch : undefined}
     >
-      {renderView(activeView)}
-    </Layout>
+      <Layout
+        activeView={activeView}
+        onNavigate={setActiveView}
+        onLogout={handleLogout}
+        userName={userName}
+        businessName={businessName}
+        userRole={userRole}
+        userPermissions={userPermissions}
+        isOnline={isOnline}
+        outboxCount={outboxCount}
+        isSyncingOutbox={isSyncingOutbox}
+        canInstallApp={installPromptEvent !== null}
+        onInstallApp={handleInstallApp}
+        branches={branches}
+        activeBranchId={activeBranchId}
+        onChangeBranch={canManageBranches ? handleChangeBranch : undefined}
+      >
+        <Suspense fallback={<LazyViewFallback />}>
+          {renderView(activeView)}
+        </Suspense>
+      </Layout>
+    </ViewErrorBoundary>
   );
 }
