@@ -435,7 +435,26 @@ def list_products(
             .all()
         )
         stocks = {int(pid): (total if isinstance(total, Decimal) else Decimal(str(total))) for pid, total in stock_rows}
-    
+
+    # Reserved = paid-for goods left in the shop for later collection (not yet supplied).
+    reserved: dict[int, Decimal] = {}
+    if product_ids:
+        reserved_rows = (
+            db.query(
+                models.Sale.product_id,
+                func.coalesce(func.sum(models.Sale.quantity - func.coalesce(models.Sale.supplied_quantity, 0)), 0),
+            )
+            .filter(
+                models.Sale.product_id.in_(product_ids),
+                models.Sale.user_id.in_(tenant_user_ids),
+                models.Sale.branch_id == active_branch_id,
+                func.coalesce(models.Sale.supplied_quantity, models.Sale.quantity) < models.Sale.quantity,
+            )
+            .group_by(models.Sale.product_id)
+            .all()
+        )
+        reserved = {int(pid): (total if isinstance(total, Decimal) else Decimal(str(total))) for pid, total in reserved_rows}
+
     creator_ids = sorted({p.user_id for p in products})
     creators = (
         db.query(models.User.id, models.User.name)
@@ -456,6 +475,8 @@ def list_products(
         product.created_by_name = creator_name_by_id.get(product.user_id)
         raw_stock = stocks.get(product.id, Decimal(0))
         product.current_stock = raw_stock if raw_stock > 0 else Decimal(0)
+        reserved_qty = reserved.get(product.id, Decimal(0))
+        product.reserved_stock = reserved_qty if reserved_qty > 0 else Decimal(0)
     _apply_batch_metadata(products, batch_metadata_by_product_id)
     
     return products

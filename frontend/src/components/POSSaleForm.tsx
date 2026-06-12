@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchSaleBatchOptions } from "../api";
 import { NewSale, Product, SaleBatchOption } from "../types";
-import { useAppCategories } from "../categories";
+import { useAppCategories, userNeedsSupplyTracking } from "../categories";
 import { startCameraBarcodeScan } from "../barcode-scanner";
 import { getProductBatchSummary, getProductSearchText, getProductVariantSummary } from "../product-display";
 import { useCapabilities } from "../settings";
@@ -209,6 +209,8 @@ export default function POSSaleForm({
   const [searchTerm, setSearchTerm] = useState("");
   const [scanInput, setScanInput] = useState("");
   const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [collectLater, setCollectLater] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [notes, setNotes] = useState("");
   const [uiMessage, setUiMessage] = useState<{ type: "error" | "info"; text: string } | null>(null);
@@ -236,6 +238,9 @@ export default function POSSaleForm({
   const userCategories = useAppCategories();
   const capabilities = useCapabilities();
   const fractionalSalesEnabled = capabilities.fractional_sales;
+  // Only businesses that sell collect-later goods (cement, feed, etc.) see the
+  // "leave in store" option, mirroring how expiry tracking is gated by type.
+  const supplyTrackingEnabled = useMemo(() => userNeedsSupplyTracking(), []);
   const [amountReceived, setAmountReceived] = useState("");
   
   // Credit sale states
@@ -605,6 +610,8 @@ export default function POSSaleForm({
   const clearCart = () => {
     setCart([]);
     setCustomerName("");
+    setCustomerPhone("");
+    setCollectLater(false);
     setPaymentMethod("cash");
     setNotes("");
     setScanInput("");
@@ -917,10 +924,12 @@ export default function POSSaleForm({
         unit_price: unitPrice,
         total_price: lineTotal,
         customer_name: paymentMethod === "credit" ? creditorName : (customerName || null),
+        customer_phone: paymentMethod === "credit" ? (creditorPhone || null) : (customerPhone.trim() || null),
         payment_method: paymentMethod,
         notes: saleNotes,
         amount_paid: paymentMethod === "credit" && appliedPayment > 0 ? appliedPayment : undefined,
         partial_payment_method: paymentMethod === "credit" && appliedPayment > 0 ? "cash" : undefined,
+        not_supplied: supplyTrackingEnabled && collectLater ? true : undefined,
       });
     }
 
@@ -1671,6 +1680,60 @@ export default function POSSaleForm({
                     </div>
                   )}
                 </div>
+
+                {supplyTrackingEnabled && (
+                  <div
+                    style={{
+                      marginBottom: 10,
+                      padding: "10px 12px",
+                      border: `1px solid ${collectLater ? "#fbbf24" : "#e5e7eb"}`,
+                      borderRadius: 6,
+                      background: collectLater ? "#fffbeb" : "#f8fafc",
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 8,
+                        cursor: "pointer",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: "#111827",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={collectLater}
+                        onChange={(e) => setCollectLater(e.target.checked)}
+                        style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer" }}
+                      />
+                      <span>
+                        Leave in store — collect later
+                        <span style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#92400e", marginTop: 2 }}>
+                          Paid in full but goods stay in the shop. Stock is reserved until the customer picks it up.
+                        </span>
+                      </span>
+                    </label>
+                    {collectLater && (
+                      <input
+                        type="tel"
+                        value={customerPhone}
+                        onChange={(e) => setCustomerPhone(e.target.value)}
+                        placeholder="Customer phone (optional)"
+                        style={{
+                          width: "100%",
+                          marginTop: 10,
+                          padding: "9px 12px",
+                          border: "1px solid #fbbf24",
+                          borderRadius: 4,
+                          fontSize: 13,
+                          background: "white",
+                        }}
+                      />
+                    )}
+                  </div>
+                )}
 
                 {paymentMethod === "cash" && (
                   <div

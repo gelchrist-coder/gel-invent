@@ -437,6 +437,7 @@ type ProductResponse = Omit<
   | "selling_price"
   | "pack_selling_price"
   | "current_stock"
+  | "reserved_stock"
   | "variants"
   | "unit_conversions"
 > & {
@@ -446,6 +447,7 @@ type ProductResponse = Omit<
   selling_price?: string | number | null;
   pack_selling_price?: string | number | null;
   current_stock?: string | number | null;
+  reserved_stock?: string | number | null;
   variants?: Product["variants"];
   unit_conversions?: Array<
     Omit<NonNullable<Product["unit_conversions"]>[number], "base_quantity"> & {
@@ -469,6 +471,7 @@ function normalizeProduct(product: ProductResponse): Product {
     selling_price: toOptionalNumber(product.selling_price),
     pack_selling_price: toOptionalNumber(product.pack_selling_price),
     current_stock: toOptionalNumber(product.current_stock),
+    reserved_stock: toOptionalNumber(product.reserved_stock),
     variants: (product.variants ?? []).map((variant) => ({
       ...variant,
       attributes_json: variant.attributes_json ?? {},
@@ -1114,6 +1117,25 @@ export async function deleteSale(saleId: number): Promise<void> {
   dataCache.delete(getCacheKey("sales"));
   dataCache.delete(getCacheKey("products"));
   dataCache.delete(getCacheKey("salesDashboard"));
+}
+
+// Sales that were paid in full but not yet fully handed over to the customer
+// (collect-later goods still physically reserved in the store).
+export async function fetchAwaitingSupply(): Promise<Sale[]> {
+  return jsonRequest<Sale[]>("/sales?awaiting_supply=true");
+}
+
+// Record that some/all of a reserved sale's goods have been handed over. When
+// `quantity` is omitted the whole remaining balance is marked supplied.
+export async function supplySale(saleId: number, quantity?: number): Promise<Sale> {
+  const result = await jsonRequest<Sale>(`/sales/${saleId}/supply`, {
+    method: "POST",
+    body: JSON.stringify(quantity != null ? { quantity } : {}),
+  });
+  dataCache.delete(getCacheKey("sales"));
+  dataCache.delete(getCacheKey("products"));
+  dataCache.delete(getCacheKey("salesDashboard"));
+  return result;
 }
 
 // ============ Sale Returns API ============

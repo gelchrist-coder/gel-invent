@@ -121,6 +121,26 @@ export const businessTypesNeedExpiry = (types: string[]): boolean => {
 
 export const userNeedsExpiryTracking = (): boolean => businessTypesNeedExpiry(readUserBusinessTypes());
 
+// Business types where customers commonly pay in full but leave goods in the
+// store to collect later (e.g. bags of cement, animal feed). These need supply
+// tracking so the app stock and the physical store stock can be reconciled.
+export const SUPPLY_TRACKING_BUSINESS_TYPES = new Set<string>([
+  "Construction Materials",
+  "Agro",
+  "Hardware",
+]);
+
+// Whether the given business types call for supply / collect-later tracking.
+// Unlike expiry, this defaults OFF for accounts with no business type set so
+// the toggle/tab stay hidden unless a relevant business type is chosen.
+export const businessTypesNeedSupplyTracking = (types: string[]): boolean => {
+  if (types.length === 0) return false;
+  return types.some((type) => SUPPLY_TRACKING_BUSINESS_TYPES.has(type.trim()));
+};
+
+export const userNeedsSupplyTracking = (): boolean =>
+  businessTypesNeedSupplyTracking(readUserBusinessTypes());
+
 export const getAppCategories = (): string[] => {
   const userCats = readUserCategories();
   // No custom categories yet → fall back to categories relevant to the business type.

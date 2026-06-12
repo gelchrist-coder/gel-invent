@@ -82,6 +82,7 @@ class ProductRead(ProductBase):
     updated_at: datetime
     created_by_name: str | None = None
     current_stock: Decimal = Decimal(0)
+    reserved_stock: Decimal = Decimal(0)
     active_batch_count: int = 0
     next_batch_expiry_date: date | None = None
     variants: list[ProductVariantRead] = Field(default_factory=list)
@@ -305,6 +306,7 @@ class SaleBase(BaseModel):
     unit_price: Decimal = Field(..., ge=0, decimal_places=2)
     total_price: Decimal = Field(..., ge=0, decimal_places=2)
     customer_name: str | None = Field(default=None, max_length=255)
+    customer_phone: str | None = Field(default=None, max_length=40)
     payment_method: str = Field(default="cash", max_length=50)
     notes: str | None = Field(default=None)
 
@@ -321,6 +323,13 @@ class SaleCreate(SaleBase):
     preferred_batch_number: str | None = Field(default=None, max_length=100)
     amount_paid: Decimal | None = Field(default=None, decimal_places=2)
     partial_payment_method: str | None = Field(default=None, max_length=50)
+    # When true, goods are paid for but left in the shop for later collection.
+    not_supplied: bool = Field(default=False)
+
+
+class SaleSupplyRequest(BaseModel):
+    # Quantity to hand over now (supply). Defaults to "all remaining".
+    quantity: Decimal | None = Field(default=None, gt=0, decimal_places=2)
 
 
 class SaleRead(SaleBase):
@@ -328,6 +337,8 @@ class SaleRead(SaleBase):
     client_sale_id: str | None = None
     amount_paid: Decimal | None = None
     partial_payment_method: str | None = None
+    supplied_quantity: Decimal | None = None
+    supplied_at: datetime | None = None
     created_at: datetime
     created_by_name: str | None = None
     deducted_batches: list[dict[str, object]] | None = None

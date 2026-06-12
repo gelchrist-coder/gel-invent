@@ -4,6 +4,8 @@ import { assignSaleCustomer, fetchSalesCached, createSalesBulk, deleteSale, fetc
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
+import AwaitingSupplyList from "../components/AwaitingSupplyList";
+import { userNeedsSupplyTracking } from "../categories";
 import { SaleTransaction, formatSaleQuantityLabel, groupSalesIntoTransactions } from "../sales-transactions";
 import {
   applyLocalSaleToCachedProducts,
@@ -114,6 +116,8 @@ export default function Sales() {
   const salesPerson = userData?.name || "Sales Person";
   const canDeleteSales = hasUserPermission("delete_sales", userData);
   const canSendSaleReceipts = hasUserPermission("send_sale_receipts", userData);
+  // Only construction/agro/hardware-type businesses track collect-later goods.
+  const supplyTrackingEnabled = useMemo(() => userNeedsSupplyTracking(), []);
 
   const loadData = useCallback(async () => {
     if (!hasLoadedOnce.current) {
@@ -1077,6 +1081,13 @@ export default function Sales() {
           </>
         )}
       </div>
+
+      {/* Awaiting Supply (collect-later reserved goods) */}
+      {supplyTrackingEnabled && (
+        <div className="card" style={{ marginTop: 24 }}>
+          <AwaitingSupplyList products={products} onSupplied={loadData} />
+        </div>
+      )}
 
       {/* Returns History */}
       <div className="card" style={{ marginTop: 24 }}>

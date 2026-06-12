@@ -64,6 +64,7 @@ export type Product = {
   updated_at: string;
   created_by_name?: string | null;
   current_stock?: number | null;
+  reserved_stock?: number | null;
   active_batch_count?: number | null;
   next_batch_expiry_date?: string | null;
   variants?: ProductVariant[];
@@ -137,10 +138,13 @@ export type Sale = {
   unit_price: number;
   total_price: number;
   customer_name?: string | null;
+  customer_phone?: string | null;
   payment_method: string;
   amount_paid?: number | null;
   partial_payment_method?: string | null;
   notes?: string | null;
+  supplied_quantity?: number | null;
+  supplied_at?: string | null;
   created_at: string;
   created_by_name?: string | null;
   deducted_batches?: Array<{
@@ -168,10 +172,14 @@ export type NewSale = {
   unit_price: number;
   total_price: number;
   customer_name?: string | null;
+  customer_phone?: string | null;
   payment_method?: string;
   notes?: string | null;
   amount_paid?: number;
   partial_payment_method?: string;
+  // When true the customer paid in full but is collecting later — stock is
+  // deducted but the goods are still physically in the store (reserved).
+  not_supplied?: boolean;
 };
 
 export type Branch = {

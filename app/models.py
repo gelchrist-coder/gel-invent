@@ -294,10 +294,15 @@ class Sale(Base):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     customer_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    customer_phone: Mapped[str | None] = mapped_column(String(40), default=None)
     payment_method: Mapped[str] = mapped_column(String(50), default="cash")
     amount_paid: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     partial_payment_method: Mapped[str | None] = mapped_column(String(50), default=None)
     notes: Mapped[str | None] = mapped_column(default=None)
+    # Goods-supply / collection tracking for "paid now, collect later" sales.
+    # supplied_quantity == quantity → fully supplied; 0 → not supplied; between → partial.
+    supplied_quantity: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    supplied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     # Optional client-generated id for offline/poor-network idempotency.
     client_sale_id: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
     created_at: Mapped[datetime] = mapped_column(

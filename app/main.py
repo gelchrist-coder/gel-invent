@@ -113,6 +113,13 @@ def _ensure_critical_auth_schema_sync() -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_purchases_variant_id ON purchases (variant_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_variant_id ON sales (variant_id)"))
         conn.execute(text("ALTER TABLE creditors ADD COLUMN IF NOT EXISTS birthday DATE"))
+        # Goods-supply / collection tracking ("paid now, collect later").
+        conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(40)"))
+        conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS supplied_quantity NUMERIC(14,2)"))
+        conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS supplied_at TIMESTAMPTZ"))
+        # Existing/historical sales are treated as already supplied (collected).
+        conn.execute(text("UPDATE sales SET supplied_quantity = quantity WHERE supplied_quantity IS NULL"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_supply ON sales (product_id, branch_id) WHERE supplied_quantity < quantity"))
         conn.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id_unique "

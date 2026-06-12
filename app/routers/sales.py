@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from html import escape
 import re
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_active_user
 from ..database import get_db
 from .. import models
-from ..schemas import SaleBatchOptionRead, SaleCreate, SaleRead
+from ..schemas import SaleBatchOptionRead, SaleCreate, SaleRead, SaleSupplyRequest
 from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
@@ -349,9 +349,14 @@ def create_sale(
     normalized_customer_name = _normalized_customer_name(payload.customer_name)
     if _is_walk_in_customer_name(normalized_customer_name):
         normalized_customer_name = None
-    customer_phone = _extract_phone_from_notes(payload.notes)
+    # Prefer an explicit phone on the payload, falling back to one embedded in the
+    # notes (legacy credit-sale path / offline sync still pass it that way).
+    customer_phone = (payload.customer_phone or "").strip() or _extract_phone_from_notes(payload.notes)
 
     # Create the sale
+    # "Paid now, collect later" goods start un-supplied; normal sales are supplied immediately.
+    supplied_quantity = Decimal(0) if payload.not_supplied else Decimal(payload.quantity)
+
     sale = models.Sale(
         user_id=current_user.id,
         branch_id=active_branch_id,
@@ -363,10 +368,13 @@ def create_sale(
         unit_price=payload.unit_price,
         total_price=payload.total_price,
         customer_name=normalized_customer_name,
+        customer_phone=customer_phone,
         payment_method=payload.payment_method,
         amount_paid=payload.amount_paid,
         partial_payment_method=payload.partial_payment_method,
         notes=payload.notes,
+        supplied_quantity=supplied_quantity,
+        supplied_at=None if payload.not_supplied else func.now(),
         client_sale_id=payload.client_sale_id,
     )
     db.add(sale)
@@ -843,17 +851,25 @@ def list_sales(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
+    awaiting_supply: bool = False,
 ):
     """
     Retrieve all sales for the current user's tenant.
+    When awaiting_supply is true, only sales with goods still to be handed over
+    (supplied_quantity < quantity) are returned.
     """
     ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
-    sales = db.scalars(
+    query = (
         select(models.Sale)
         .where(models.Sale.user_id.in_(tenant_user_ids), models.Sale.branch_id == active_branch_id)
         .order_by(models.Sale.created_at.desc())
-    ).all()
+    )
+    if awaiting_supply:
+        query = query.where(
+            func.coalesce(models.Sale.supplied_quantity, models.Sale.quantity) < models.Sale.quantity
+        )
+    sales = db.scalars(query).all()
     
     creator_ids = sorted({s.user_id for s in sales})
     creators = db.execute(
@@ -906,6 +922,56 @@ def get_sale(
         branch_id=active_branch_id,
     )
     
+    return sale
+
+
+@router.post("/{sale_id}/supply", response_model=SaleRead)
+def supply_sale(
+    sale_id: int,
+    payload: SaleSupplyRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+    active_branch_id: int = Depends(get_active_branch_id),
+):
+    """
+    Hand over (supply) goods that were paid for but left for later collection.
+    Increases supplied_quantity by the requested amount (default: all remaining).
+    Stock is not re-deducted — it already left available stock at the sale.
+    """
+    ensure_permission(current_user, "process_sales")
+    tenant_user_ids = get_tenant_user_ids(current_user, db)
+    sale = db.scalar(
+        select(models.Sale).where(
+            models.Sale.id == sale_id,
+            models.Sale.user_id.in_(tenant_user_ids),
+            models.Sale.branch_id == active_branch_id,
+        )
+    )
+    if not sale:
+        raise HTTPException(status_code=404, detail="Sale not found")
+
+    total = Decimal(sale.quantity)
+    already = Decimal(sale.supplied_quantity) if sale.supplied_quantity is not None else Decimal(0)
+    remaining = total - already
+    if remaining <= 0:
+        raise HTTPException(status_code=400, detail="This sale has already been fully supplied")
+
+    amount = Decimal(payload.quantity) if payload.quantity is not None else remaining
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Supply quantity must be greater than zero")
+    if amount > remaining:
+        raise HTTPException(status_code=400, detail=f"Only {remaining} remaining to supply")
+
+    sale.supplied_quantity = already + amount
+    if sale.supplied_quantity >= total:
+        sale.supplied_quantity = total
+        sale.supplied_at = datetime.now(timezone.utc)
+    db.add(sale)
+    db.commit()
+    db.refresh(sale)
+
+    creator = db.scalar(select(models.User).where(models.User.id == sale.user_id))
+    sale.created_by_name = creator.name if creator else None
     return sale
 
 

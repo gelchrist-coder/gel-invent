@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NewProductUnitConversion, NewProductVariant, Product, ProductUpdate } from "../types";
 import { updateMyCategories } from "../api";
-import { useAppCategories } from "../categories";
+import { useAppCategories, userNeedsSupplyTracking } from "../categories";
 import { getProductBatchSummary, getProductSearchText, getProductUnitConversionSummary, getProductVariantSummary } from "../product-display";
 import { useCapabilities, useExpiryTracking, useSystemSettings } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
@@ -104,6 +104,8 @@ export default function ProductList({
   const categoryOptions = useAppCategories();
   const capabilities = useCapabilities();
   const usesExpiryTracking = useExpiryTracking();
+  // Reserved (collect-later) stock is only meaningful for businesses that use it.
+  const supplyTrackingEnabled = userNeedsSupplyTracking();
   const systemSettings = useSystemSettings();
   const showVariantMetadata = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes;
   const showBatchMetadata = capabilities.batch_tracking;
@@ -994,19 +996,35 @@ export default function ProductList({
                       <div style={{ fontSize: 12, color: "#1d4ed8", marginTop: 4 }}>{batchSummary}</div>
                     ) : null}
                   </div>
-                  <span
-                    style={{
-                      color: !stockLoaded ? "#6b7280" : stock > 0 ? "#059669" : "#dc2626",
-                      background: !stockLoaded ? "#f3f4f6" : stock > 0 ? "#d1fae5" : "#fee2e2",
-                      padding: "4px 8px",
-                      borderRadius: 999,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {stockLoaded ? `${stock} in stock` : "Loading..."}
-                  </span>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                    <span
+                      style={{
+                        color: !stockLoaded ? "#6b7280" : stock > 0 ? "#059669" : "#dc2626",
+                        background: !stockLoaded ? "#f3f4f6" : stock > 0 ? "#d1fae5" : "#fee2e2",
+                        padding: "4px 8px",
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {stockLoaded ? `${stock} available` : "Loading..."}
+                    </span>
+                    {supplyTrackingEnabled && Number(p.reserved_stock ?? 0) > 0 ? (
+                      <span
+                        style={{
+                          color: "#92400e",
+                          background: "#fffbeb",
+                          border: "1px solid #fde68a",
+                          padding: "3px 8px",
+                          borderRadius: 999,
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {Number(p.reserved_stock)} reserved
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginBottom: 8 }}>
@@ -1184,6 +1202,11 @@ export default function ProductList({
                       }}>
                         {stockLoaded ? stock : "..."}
                       </span>
+                      {supplyTrackingEnabled && Number(p.reserved_stock ?? 0) > 0 ? (
+                        <div style={{ fontSize: 11, color: "#92400e", fontWeight: 700, marginTop: 4 }}>
+                          {Number(p.reserved_stock)} reserved
+                        </div>
+                      ) : null}
                     </td>
                     <td style={{ padding: "12px", textAlign: "right", color: "#374151" }}>
                       {p.cost_price ? `₵${Number(p.cost_price).toFixed(2)}` : "-"}
