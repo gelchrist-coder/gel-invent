@@ -1,10 +1,12 @@
-const SHELL_CACHE = "gel-invent-shell-v12";
-const ASSET_CACHE = "gel-invent-assets-v12";
+const SHELL_CACHE = "gel-invent-shell-v13";
+const ASSET_CACHE = "gel-invent-assets-v13";
 const APP_SHELL_URLS = [
   "/offline.html",
   "/manifest.webmanifest",
-  "/favicon.ico",
-  "/pwa-icon.svg",
+  "/favicon-32.png",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/apple-touch-icon.png",
 ];
 
 self.addEventListener("message", (event) => {
