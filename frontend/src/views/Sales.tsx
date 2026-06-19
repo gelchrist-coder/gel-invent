@@ -24,6 +24,8 @@ type SalesPaymentFilterOption = {
   count: number;
 };
 
+type SalesTab = "pos" | "recent" | "supply" | "returns";
+
 const SALES_PERIOD_LABEL: Record<"all" | "day" | "week" | "month", string> = {
   all: "All time",
   day: "Today",
@@ -118,6 +120,41 @@ export default function Sales() {
   const canSendSaleReceipts = hasUserPermission("send_sale_receipts", userData);
   // Only construction/agro/hardware-type businesses track collect-later goods.
   const supplyTrackingEnabled = useMemo(() => userNeedsSupplyTracking(), []);
+
+  const [activeSalesTab, setActiveSalesTab] = useState<SalesTab>("pos");
+  // Number of sale lines still awaiting collection — shown as a badge on the tab.
+  const awaitingSupplyCount = useMemo(
+    () =>
+      sales.filter(
+        (sale) => Number(sale.supplied_quantity ?? sale.quantity) < Number(sale.quantity),
+      ).length,
+    [sales],
+  );
+  const salesTabs = useMemo<Array<{ id: SalesTab; label: string; description: string; count?: number }>>(
+    () => [
+      { id: "pos", label: "Point of Sale", description: "Ring up items, take payment, and check out the cart." },
+      { id: "recent", label: "Recent Sales", description: "Browse, filter, and export your sales history." },
+      ...(supplyTrackingEnabled
+        ? [
+            {
+              id: "supply" as const,
+              label: "Awaiting Supply",
+              description: "Paid goods still in the store — mark them supplied when the customer collects.",
+              count: awaitingSupplyCount,
+            },
+          ]
+        : []),
+      { id: "returns", label: "Returns", description: "Review processed sale returns." },
+    ],
+    [supplyTrackingEnabled, awaitingSupplyCount],
+  );
+  const activeSalesTabMeta = salesTabs.find((tab) => tab.id === activeSalesTab) ?? salesTabs[0];
+
+  useEffect(() => {
+    if (!salesTabs.some((tab) => tab.id === activeSalesTab)) {
+      setActiveSalesTab("pos");
+    }
+  }, [salesTabs, activeSalesTab]);
 
   const loadData = useCallback(async () => {
     if (!hasLoadedOnce.current) {
@@ -864,7 +901,22 @@ export default function Sales() {
 
   return (
     <div className="app-shell">
-      <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Point of Sale</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h1 className="page-title" style={{ margin: 0 }}>Sales</h1>
+        <button
+          onClick={() => void loadData()}
+          style={{
+            padding: "8px 16px",
+            borderRadius: 6,
+            border: "1px solid #d1d5db",
+            backgroundColor: "white",
+            cursor: "pointer",
+            fontSize: 14,
+          }}
+        >
+          Refresh
+        </button>
+      </div>
 
       {outboxCount > 0 && (
         <div className="card" style={{ marginBottom: 16, border: "1px solid #fde68a", background: "#fffbeb" }}>
@@ -892,7 +944,61 @@ export default function Sales() {
         </div>
       )}
 
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16, padding: 6, border: "1px solid #dbe5f2", borderRadius: 14, background: "linear-gradient(180deg, #f8fbff, #f1f5fb)" }}>
+        {salesTabs.map((tab) => {
+          const isActive = activeSalesTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveSalesTab(tab.id)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 16px",
+                border: isActive ? "1px solid #2f66d0" : "1px solid transparent",
+                borderRadius: 10,
+                background: isActive ? "linear-gradient(120deg, #2f66d0, #4a82e8)" : "transparent",
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 14,
+                color: isActive ? "#ffffff" : "#475569",
+                boxShadow: isActive ? "0 8px 18px rgba(47, 102, 208, 0.28)" : "none",
+              }}
+            >
+              <span>{tab.label}</span>
+              {typeof tab.count === "number" ? (
+                <span
+                  style={{
+                    minWidth: 22,
+                    height: 22,
+                    padding: "0 6px",
+                    borderRadius: 999,
+                    background: isActive ? "rgba(255,255,255,0.18)" : "#e2e8f0",
+                    color: isActive ? "#ffffff" : "#334155",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {tab.count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ marginBottom: 24, padding: "14px 16px", borderRadius: 12, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.04)" }}>
+        <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "#0f172a" }}>{activeSalesTabMeta.label}</h2>
+        <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>{activeSalesTabMeta.description}</p>
+      </div>
+
       {/* POS Form */}
+      {activeSalesTab === "pos" && (
       <div className="card" style={{ marginBottom: 24, padding: 16 }}>
         {products.length === 0 && loading ? (
           <p style={{ margin: 0, color: "#6b7280" }}>Loading products...</p>
@@ -906,7 +1012,10 @@ export default function Sales() {
         )}
       </div>
 
+      )}
+
       {/* Sales List */}
+      {activeSalesTab === "recent" && (
       <div className="card">
         <div style={{ display: "grid", gap: 10, marginBottom: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -1082,20 +1191,24 @@ export default function Sales() {
         )}
       </div>
 
+      )}
+
       {/* Awaiting Supply (collect-later reserved goods) */}
-      {supplyTrackingEnabled && (
-        <div className="card" style={{ marginTop: 24 }}>
+      {activeSalesTab === "supply" && supplyTrackingEnabled && (
+        <div className="card">
           <AwaitingSupplyList products={products} onSupplied={loadData} />
         </div>
       )}
 
       {/* Returns History */}
-      <div className="card" style={{ marginTop: 24 }}>
+      {activeSalesTab === "returns" && (
+      <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Returns History</h3>
         </div>
         <ReturnsList products={products} />
       </div>
+      )}
 
       {/* Assign Customer Modal */}
       {assignCustomerTransaction && (
