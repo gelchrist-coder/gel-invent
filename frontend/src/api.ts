@@ -1119,10 +1119,12 @@ export async function deleteSale(saleId: number): Promise<void> {
   dataCache.delete(getCacheKey("salesDashboard"));
 }
 
-// Sales that were paid in full but not yet fully handed over to the customer
-// (collect-later goods still physically reserved in the store).
-export async function fetchAwaitingSupply(): Promise<Sale[]> {
-  return jsonRequest<Sale[]>("/sales?awaiting_supply=true");
+// Collect-later ("leave in store") sales. By default only those with goods
+// still pending hand-over; pass includeCollected to also return already-
+// collected ones, so the reserved-goods record is kept for auditing.
+export async function fetchAwaitingSupply(includeCollected = false): Promise<Sale[]> {
+  const query = includeCollected ? "collect_later=true" : "awaiting_supply=true";
+  return jsonRequest<Sale[]>(`/sales?${query}`);
 }
 
 // Record that some/all of a reserved sale's goods have been handed over. When

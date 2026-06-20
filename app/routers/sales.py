@@ -988,11 +988,15 @@ def list_sales(
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
     awaiting_supply: bool = False,
+    collect_later: bool = False,
 ):
     """
     Retrieve all sales for the current user's tenant.
     When awaiting_supply is true, only sales with goods still to be handed over
     (supplied_quantity < quantity) are returned.
+    When collect_later is true, every "leave in store" sale is returned — both
+    still-pending and already-collected — so the reserved goods stay on record
+    for auditing (they have at least one collection-log entry, or are pending).
     """
     ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
@@ -1004,6 +1008,18 @@ def list_sales(
     if awaiting_supply:
         query = query.where(
             func.coalesce(models.Sale.supplied_quantity, models.Sale.quantity) < models.Sale.quantity
+        )
+    elif collect_later:
+        has_supply_log = (
+            select(models.SaleSupply.id)
+            .where(models.SaleSupply.sale_id == models.Sale.id)
+            .exists()
+        )
+        query = query.where(
+            or_(
+                func.coalesce(models.Sale.supplied_quantity, models.Sale.quantity) < models.Sale.quantity,
+                has_supply_log,
+            )
         )
     sales = db.scalars(query).all()
     
@@ -1023,7 +1039,7 @@ def list_sales(
         branch_id=active_branch_id,
     )
     # The collection history is only needed where reserved goods are shown.
-    if awaiting_supply:
+    if awaiting_supply or collect_later:
         _attach_supplies(db=db, sales=sales, tenant_user_ids=tenant_user_ids)
 
     return sales

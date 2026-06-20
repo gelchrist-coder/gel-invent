@@ -23,6 +23,9 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [qtyDraft, setQtyDraft] = useState<Record<number, string>>({});
+  // "pending" = goods still in store; "all" = full collect-later record (kept
+  // for auditing, including sales that have been fully collected).
+  const [view, setView] = useState<"pending" | "all">("pending");
 
   const productById = useMemo(() => {
     const map = new Map<number, Product>();
@@ -34,14 +37,14 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchAwaitingSupply();
+      const data = await fetchAwaitingSupply(view === "all");
       setRows(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load reserved goods.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     void load();
@@ -74,15 +77,37 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
         <div>
           <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Awaiting Supply</h3>
           <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-            Paid goods still in the store. Mark them supplied when the customer collects.
+            {view === "all"
+              ? "Full record of leave-in-store sales, including collected ones, kept for auditing."
+              : "Paid goods still in the store. Mark them supplied when the customer collects."}
           </p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           {rows.length > 0 && (
             <span style={{ fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 999, padding: "4px 10px", fontWeight: 700 }}>
-              {totalReserved} reserved across {rows.length} sale{rows.length === 1 ? "" : "s"}
+              {totalReserved} reserved · {rows.length} sale{rows.length === 1 ? "" : "s"}
             </span>
           )}
+          <div style={{ display: "inline-flex", border: "1px solid #d1d5db", borderRadius: 999, overflow: "hidden" }}>
+            {(["pending", "all"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setView(option)}
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  padding: "6px 14px",
+                  border: "none",
+                  background: view === option ? "#111827" : "white",
+                  color: view === option ? "white" : "#374151",
+                  cursor: "pointer",
+                }}
+              >
+                {option === "pending" ? "Pending" : "All records"}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={() => void load()}
@@ -112,7 +137,9 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
         <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>Loading reserved goods...</p>
       ) : rows.length === 0 ? (
         <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-          Nothing awaiting supply. Reserved goods will appear here when a sale is marked "leave in store".
+          {view === "all"
+            ? "No leave-in-store sales yet. They'll be recorded here for auditing once you make one."
+            : 'Nothing awaiting supply. Reserved goods will appear here when a sale is marked "leave in store".'}
         </p>
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
@@ -157,14 +184,27 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
                 </div>
 
                 <div style={{ textAlign: "center", minWidth: 110 }}>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#92400e" }}>
-                    {remaining} {unit}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#92400e" }}>
-                    {partiallySupplied ? `reserved (of ${Number(sale.quantity)} ${unit})` : "reserved"}
-                  </div>
+                  {remaining > 0 ? (
+                    <>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: "#92400e" }}>
+                        {remaining} {unit}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#92400e" }}>
+                        {partiallySupplied ? `reserved (of ${Number(sale.quantity)} ${unit})` : "reserved"}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "#166534" }}>Collected</div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        {Number(sale.quantity)} {unit}
+                        {sale.supplied_at ? ` · ${new Date(sale.supplied_at).toLocaleDateString()}` : ""}
+                      </div>
+                    </>
+                  )}
                 </div>
 
+                {remaining > 0 ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <input
                     type="number"
@@ -221,6 +261,7 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
                     {busy ? "Saving..." : "Supply all"}
                   </button>
                 </div>
+                ) : null}
 
                 {(sale.supplies?.length ?? 0) > 0 && (
                   <div
