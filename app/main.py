@@ -85,6 +85,21 @@ def _ensure_critical_auth_schema_sync() -> None:
     minimal so endpoints that query User do not fail due to missing columns.
     """
     with engine.begin() as conn:
+        # Fast path: if the most recently added critical column already exists,
+        # every earlier ADD COLUMN / index in this function has already been
+        # applied. Skip the whole batch so a cold start doesn't repeatedly run
+        # ~30 round-trips and take an ACCESS EXCLUSIVE lock on `sales` — that
+        # locking is what makes concurrent cold-start requests contend and fail
+        # (the "won't load until I refresh a few times" symptom).
+        already_applied = conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'sales' AND column_name = 'supplied_quantity' LIMIT 1"
+            )
+        ).first()
+        if already_applied:
+            return
+
         _ensure_product_extension_tables(conn)
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
