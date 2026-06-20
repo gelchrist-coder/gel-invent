@@ -65,8 +65,20 @@ export function applyLocalSaleToCachedProducts(sales: NewSale[], branchIdOverrid
     if (!product) continue;
     const current = Number(product.current_stock ?? 0);
     const qty = Number(s.quantity ?? 0);
-    if (Number.isFinite(current) && Number.isFinite(qty)) {
-      product.current_stock = Math.max(0, current - qty);
+    if (!Number.isFinite(current) || !Number.isFinite(qty)) continue;
+
+    // "Leave in store" goods stay physically in the shop (Stock Left) and only
+    // leave — moving to Stock Out — when the customer collects. So optimistically
+    // deduct just the portion taken now; hold the rest as reserved. This mirrors
+    // the backend, which doesn't deduct reserved goods until collection.
+    const collectedNow = s.not_supplied ? Number(s.collected_quantity ?? 0) : qty;
+    const leaving = Number.isFinite(collectedNow) ? Math.max(0, collectedNow) : 0;
+    const reservedAdd = s.not_supplied ? Math.max(0, qty - leaving) : 0;
+
+    product.current_stock = Math.max(0, current - leaving);
+    if (reservedAdd > 0) {
+      const currentReserved = Number(product.reserved_stock ?? 0);
+      product.reserved_stock = (Number.isFinite(currentReserved) ? currentReserved : 0) + reservedAdd;
     }
   }
 
