@@ -161,78 +161,6 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
         </div>
       </div>
 
-      {/* Total Stock Left */}
-      <div
-        style={{
-          backgroundColor: "white",
-          borderRadius: 8,
-          border: "1px solid #e5e7eb",
-          padding: 20,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 8,
-              backgroundColor: "#e0e7ff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#4338ca",
-            }}
-          >
-            <PackageIcon />
-          </div>
-          <div>
-            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Total Stock Left</p>
-            <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700 }}>{formatQty(analytics.total_stock_left)}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Reserved (collect-later) — paid goods still physically in store.
-          Only shows when there is reserved stock, keeping the product list clean
-          and putting the audit figure in one place. */}
-      {(analytics.total_reserved ?? 0) > 0 && (
-        <div
-          style={{
-            backgroundColor: "white",
-            borderRadius: 8,
-            border: "1px solid #fde68a",
-            padding: 20,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 8,
-                backgroundColor: "#fffbeb",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#b45309",
-              }}
-            >
-              <BookmarkIcon />
-            </div>
-            <div>
-              <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Reserved (collect later)</p>
-              <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#b45309" }}>
-                {formatQty(analytics.total_reserved ?? 0)}
-              </p>
-              <p style={{ margin: "2px 0 0", fontSize: 12, color: "#92400e" }}>
-                {(analytics.reserved_product_count ?? 0)} product{(analytics.reserved_product_count ?? 0) === 1 ? "" : "s"}
-                {(analytics.reserved_value ?? 0) > 0 ? ` · ${formatCurrency(analytics.reserved_value ?? 0)}` : ""}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Stock In */}
       <div
         style={{
@@ -298,6 +226,78 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
           </div>
         </div>
       </div>
+
+      {/* Total Stock Left */}
+      <div
+        style={{
+          backgroundColor: "white",
+          borderRadius: 8,
+          border: "1px solid #e5e7eb",
+          padding: 20,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 8,
+              backgroundColor: "#e0e7ff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#4338ca",
+            }}
+          >
+            <PackageIcon />
+          </div>
+          <div>
+            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Total Stock Left</p>
+            <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700 }}>{formatQty(analytics.total_stock_left)}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Reserved (collect-later) — paid goods still physically in store.
+          Shown after Stock Left so the owner reads in → out → left → reserved.
+          Reserved is NOT part of stock-out: the goods are still in the shop. */}
+      {(analytics.total_reserved ?? 0) > 0 && (
+        <div
+          style={{
+            backgroundColor: "white",
+            borderRadius: 8,
+            border: "1px solid #fde68a",
+            padding: 20,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 8,
+                backgroundColor: "#fffbeb",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#b45309",
+              }}
+            >
+              <BookmarkIcon />
+            </div>
+            <div>
+              <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Reserved (collect later)</p>
+              <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#b45309" }}>
+                {formatQty(analytics.total_reserved ?? 0)}
+              </p>
+              <p style={{ margin: "2px 0 0", fontSize: 12, color: "#92400e" }}>
+                {(analytics.reserved_product_count ?? 0)} product{(analytics.reserved_product_count ?? 0) === 1 ? "" : "s"}
+                {(analytics.reserved_value ?? 0) > 0 ? ` · ${formatCurrency(analytics.reserved_value ?? 0)}` : ""}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Low Stock Alerts */}
       <div

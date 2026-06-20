@@ -311,6 +311,40 @@ class Sale(Base):
 
     product: Mapped[Product] = relationship()
     variant: Mapped[ProductVariant | None] = relationship()
+    supplies: Mapped[list["SaleSupply"]] = relationship(
+        back_populates="sale",
+        cascade="all, delete-orphan",
+        order_by="SaleSupply.created_at",
+    )
+
+
+class SaleSupply(Base):
+    """Audit log of each collection (hand-over) of a 'paid now, collect later' sale.
+
+    One row per pickup event so the owner can prove exactly how much was
+    collected, when, and by which staff member — even across several partial
+    pickups. The initial amount a customer takes at the counter is logged here
+    too, so the history is complete from the first hand-over.
+    """
+    __tablename__ = "sale_supplies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id", ondelete="CASCADE"), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    # Staff member who handed the goods over (kept as a name snapshot so the log
+    # still reads correctly if the user is later removed).
+    collected_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    collected_by_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    sale: Mapped["Sale"] = relationship(back_populates="supplies")
 
 
 class TransactionType(str, Enum):

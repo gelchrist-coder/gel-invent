@@ -221,6 +221,42 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
                     {busy ? "Saving..." : "Supply all"}
                   </button>
                 </div>
+
+                {(sale.supplies?.length ?? 0) > 0 && (
+                  <div
+                    style={{
+                      flexBasis: "100%",
+                      borderTop: "1px dashed #fde68a",
+                      paddingTop: 8,
+                      marginTop: 2,
+                    }}
+                  >
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 4 }}>
+                      Collection history
+                    </div>
+                    {sale.supplies!.map((entry) => (
+                      <div
+                        key={entry.id}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          fontSize: 11,
+                          color: "#6b7280",
+                          padding: "2px 0",
+                        }}
+                      >
+                        <span>
+                          {new Date(entry.created_at).toLocaleString()} · {entry.collected_by_name || "Staff"}
+                        </span>
+                        <span style={{ fontWeight: 700, color: "#111827", whiteSpace: "nowrap" }}>
+                          {Number(entry.quantity)} {unit}
+                          {entry.notes ? ` · ${entry.notes}` : ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}

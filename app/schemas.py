@@ -325,11 +325,27 @@ class SaleCreate(SaleBase):
     partial_payment_method: str | None = Field(default=None, max_length=50)
     # When true, goods are paid for but left in the shop for later collection.
     not_supplied: bool = Field(default=False)
+    # For "collect later" sales: how much the customer takes at the counter now.
+    # The rest (quantity - collected_quantity) stays reserved in the store.
+    collected_quantity: Decimal | None = Field(default=None, ge=0, decimal_places=2)
 
 
 class SaleSupplyRequest(BaseModel):
     # Quantity to hand over now (supply). Defaults to "all remaining".
     quantity: Decimal | None = Field(default=None, gt=0, decimal_places=2)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class SaleSupplyRead(BaseModel):
+    """One collection (hand-over) event in a reserved sale's history."""
+    id: int
+    sale_id: int
+    quantity: Decimal
+    collected_by_name: str | None = None
+    notes: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SaleRead(SaleBase):
@@ -342,6 +358,7 @@ class SaleRead(SaleBase):
     created_at: datetime
     created_by_name: str | None = None
     deducted_batches: list[dict[str, object]] | None = None
+    supplies: list[SaleSupplyRead] | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

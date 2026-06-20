@@ -392,9 +392,21 @@ export default function Sales() {
         const unitPrice = Number(sale.unit_price) || 0;
         const lineTotal = Number(sale.total_price) || 0;
 
+        // Collect-later lines: show what was bought, taken now, and left in store
+        // so the receipt is proof of exactly what the customer walked out with.
+        let reservedNote = "";
+        if (sale.not_supplied) {
+          const unit = product.unit || "pcs";
+          const bought = Number(sale.quantity) || 0;
+          const took = Math.max(0, Number(sale.collected_quantity ?? 0));
+          const left = Math.max(0, bought - took);
+          reservedNote = `<div class="item-row" style="font-size:11px;color:#92400e"><div>Took now: ${took} ${unit} · Left in store: ${left} ${unit}</div></div>`;
+        }
+
         return `
           <div class="item-row"><div><strong>${product.name}</strong></div></div>
           <div class="item-row"><div>${formatSaleQuantityLabel(sale)} × GHS ${unitPrice.toFixed(2)}</div><div>GHS ${lineTotal.toFixed(2)}</div></div>
+          ${reservedNote}
         `;
       })
       .join("");
@@ -508,9 +520,20 @@ export default function Sales() {
         const product = productById.get(sale.product_id);
         const productName = product?.name || `Product #${sale.product_id}`;
 
+        // Show taken/left for any line still partly reserved (collect-later).
+        let reservedNote = "";
+        const bought = Number(sale.quantity) || 0;
+        const took = Math.max(0, Number(sale.supplied_quantity ?? bought));
+        if (took < bought) {
+          const unit = product?.unit || "pcs";
+          const left = Math.max(0, bought - took);
+          reservedNote = `<div class="item-row" style="font-size:11px;color:#92400e"><div>Collected: ${took} ${unit} · Left in store: ${left} ${unit}</div></div>`;
+        }
+
         return `
           <div class="item-row"><div><strong>${productName}</strong></div></div>
           <div class="item-row"><div>${formatSaleQuantityLabel(sale)} × GHS ${Number(sale.unit_price).toFixed(2)}</div><div>GHS ${Number(sale.total_price).toFixed(2)}</div></div>
+          ${reservedNote}
         `;
       })
       .join("");

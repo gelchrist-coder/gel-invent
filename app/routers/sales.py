@@ -157,6 +157,34 @@ def _resolve_sale_variant(
     return variant
 
 
+def _attach_supplies(
+    *,
+    db: Session,
+    sales: list[models.Sale],
+    tenant_user_ids: list[int],
+) -> None:
+    """Attach the per-pickup collection log to each sale (newest events last)."""
+    sale_ids = sorted({int(sale.id) for sale in sales})
+    if not sale_ids:
+        return
+
+    rows = db.scalars(
+        select(models.SaleSupply)
+        .where(
+            models.SaleSupply.sale_id.in_(sale_ids),
+            models.SaleSupply.user_id.in_(tenant_user_ids),
+        )
+        .order_by(models.SaleSupply.created_at.asc(), models.SaleSupply.id.asc())
+    ).all()
+
+    supplies_by_sale_id: dict[int, list[models.SaleSupply]] = {sale_id: [] for sale_id in sale_ids}
+    for row in rows:
+        supplies_by_sale_id.setdefault(int(row.sale_id), []).append(row)
+
+    for sale in sales:
+        sale.supplies = supplies_by_sale_id.get(int(sale.id), [])
+
+
 def _attach_deducted_batches(
     *,
     db: Session,
@@ -501,9 +529,20 @@ def create_sale(
     # notes (legacy credit-sale path / offline sync still pass it that way).
     customer_phone = (payload.customer_phone or "").strip() or _extract_phone_from_notes(payload.notes)
 
-    # Create the sale
-    # "Paid now, collect later" goods start un-supplied; normal sales are supplied immediately.
-    supplied_quantity = Decimal(0) if payload.not_supplied else Decimal(payload.quantity)
+    # Create the sale.
+    # "Paid now, collect later" goods may be partially taken at the counter: the
+    # taken portion (collected_quantity) leaves now, the rest stays reserved.
+    # Normal sales are fully supplied immediately.
+    quantity = Decimal(payload.quantity)
+    if payload.not_supplied:
+        collected_now = Decimal(payload.collected_quantity or 0)
+        if collected_now < 0:
+            collected_now = Decimal(0)
+        if collected_now > quantity:
+            collected_now = quantity
+    else:
+        collected_now = quantity
+    fully_supplied = collected_now >= quantity
 
     sale = models.Sale(
         user_id=current_user.id,
@@ -521,8 +560,8 @@ def create_sale(
         amount_paid=payload.amount_paid,
         partial_payment_method=payload.partial_payment_method,
         notes=payload.notes,
-        supplied_quantity=supplied_quantity,
-        supplied_at=None if payload.not_supplied else func.now(),
+        supplied_quantity=collected_now,
+        supplied_at=func.now() if fully_supplied else None,
         client_sale_id=payload.client_sale_id,
     )
     db.add(sale)
@@ -544,9 +583,7 @@ def create_sale(
     # stay physically in the store (reserved) and are only deducted when the
     # customer actually picks them up (see supply_sale), so the app stock keeps
     # matching the shop floor.
-    if payload.not_supplied:
-        deducted_batches: list[dict[str, object]] = []
-    else:
+    if collected_now > 0:
         deducted_batches = _deduct_sale_stock(
             db=db,
             tenant_user_ids=tenant_user_ids,
@@ -554,10 +591,27 @@ def create_sale(
             actor_user_id=current_user.id,
             product=product,
             variant=variant,
-            quantity=Decimal(payload.quantity),
+            quantity=collected_now,
             preferred_batch_number=payload.preferred_batch_number,
             unit_selling_price=sale.unit_price,
             sale_id=sale.id,
+        )
+    else:
+        deducted_batches = []
+
+    # Record the counter pickup in the collection log so collect-later sales have
+    # a complete, dispute-proof history from the very first hand-over.
+    if payload.not_supplied and collected_now > 0:
+        db.add(
+            models.SaleSupply(
+                user_id=current_user.id,
+                branch_id=active_branch_id,
+                sale_id=sale.id,
+                quantity=collected_now,
+                collected_by_user_id=current_user.id,
+                collected_by_name=current_user.name,
+                notes="Taken at counter",
+            )
         )
 
     # Handle credit transactions
@@ -968,7 +1022,10 @@ def list_sales(
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
     )
-    
+    # The collection history is only needed where reserved goods are shown.
+    if awaiting_supply:
+        _attach_supplies(db=db, sales=sales, tenant_user_ids=tenant_user_ids)
+
     return sales
 
 
@@ -1003,7 +1060,8 @@ def get_sale(
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
     )
-    
+    _attach_supplies(db=db, sales=[sale], tenant_user_ids=tenant_user_ids)
+
     return sale
 
 
@@ -1074,6 +1132,19 @@ def supply_sale(
         sale_id=sale.id,
     )
 
+    # Log this hand-over so the owner can prove what was collected and when.
+    db.add(
+        models.SaleSupply(
+            user_id=sale.user_id,
+            branch_id=active_branch_id,
+            sale_id=sale.id,
+            quantity=amount,
+            collected_by_user_id=current_user.id,
+            collected_by_name=current_user.name,
+            notes=(payload.notes or "").strip() or None,
+        )
+    )
+
     sale.supplied_quantity = already + amount
     if sale.supplied_quantity >= total:
         sale.supplied_quantity = total
@@ -1084,6 +1155,7 @@ def supply_sale(
 
     creator = db.scalar(select(models.User).where(models.User.id == sale.user_id))
     sale.created_by_name = creator.name if creator else None
+    _attach_supplies(db=db, sales=[sale], tenant_user_ids=tenant_user_ids)
     return sale
 
 

@@ -51,7 +51,6 @@ type SuspendedCart = {
   customerName: string;
   paymentMethod: string;
   notes: string;
-  amountReceived: string;
 };
 
 const normalizeQuantityStep = (value: number | null | undefined): number => {
@@ -226,7 +225,6 @@ export default function POSSaleForm({
   const customerInputRef = useRef<HTMLInputElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const scanInputRef = useRef<HTMLInputElement | null>(null);
-  const amountReceivedInputRef = useRef<HTMLInputElement | null>(null);
   const checkoutFormRef = useRef<HTMLFormElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const stopCameraScannerRef = useRef<(() => void) | null>(null);
@@ -253,8 +251,11 @@ export default function POSSaleForm({
     },
     [supplyTrackingEnabled],
   );
-  const [amountReceived, setAmountReceived] = useState("");
-  
+  // For "leave in store" sales: how much of each cart line the customer takes at
+  // the counter now (keyed by cart line id). Empty/0 means the whole line stays
+  // reserved in the shop.
+  const [collectNowByLine, setCollectNowByLine] = useState<Record<string, string>>({});
+
   // Credit sale states
   const [showCreditModal, setShowCreditModal] = useState(false);
   const [creditorName, setCreditorName] = useState("");
@@ -384,7 +385,6 @@ export default function POSSaleForm({
       customerName,
       paymentMethod,
       notes,
-      amountReceived,
     };
 
     const next = [snapshot, ...suspendedCarts].slice(0, MAX_SUSPENDED_CARTS);
@@ -439,7 +439,6 @@ export default function POSSaleForm({
     setCustomerName(snapshot.customerName || "");
     setPaymentMethod(snapshot.paymentMethod || "cash");
     setNotes(snapshot.notes || "");
-    setAmountReceived(snapshot.amountReceived || "");
 
     const next = suspendedCarts.filter((entry) => entry.id !== cartId);
     persistSuspendedCarts(next);
@@ -628,7 +627,7 @@ export default function POSSaleForm({
     setNotes("");
     setScanInput("");
     setSearchTerm("");
-    setAmountReceived("");
+    setCollectNowByLine({});
     setCreditorName("");
     setCreditorPhone("");
     setInitialPayment(0);
@@ -641,17 +640,6 @@ export default function POSSaleForm({
 
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
   const formattedTotalItems = Number.isInteger(totalItems) ? String(totalItems) : totalItems.toFixed(2);
-  const parsedAmountReceived = Number(amountReceived);
-  const hasEnteredAmountReceived = amountReceived.trim() !== "" && Number.isFinite(parsedAmountReceived);
-  const effectiveCashReceived = paymentMethod === "cash"
-    ? (hasEnteredAmountReceived ? parsedAmountReceived : cartTotal)
-    : cartTotal;
-  const changeDue = paymentMethod === "cash" ? Math.max(effectiveCashReceived - cartTotal, 0) : 0;
-  const amountShort = paymentMethod === "cash" ? Math.max(cartTotal - effectiveCashReceived, 0) : 0;
-
-  const applyQuickTender = (extra: number) => {
-    setAmountReceived((cartTotal + extra).toFixed(2));
-  };
 
   useEffect(() => {
     try {
@@ -767,7 +755,6 @@ export default function POSSaleForm({
     setPaymentMethod(repeatDraft.sales[0]?.payment_method || "cash");
     setCustomerName(String(repeatDraft.sales[0]?.customer_name || ""));
     setNotes(String(repeatDraft.sales[0]?.notes || ""));
-    setAmountReceived("");
     setSearchTerm("");
     lastAppliedRepeatTokenRef.current = repeatDraft.token;
     showMessage(`Loaded repeat sale${repeatDraft.sourceLabel ? ` from ${repeatDraft.sourceLabel}` : ""}.`, "info");
@@ -817,13 +804,6 @@ export default function POSSaleForm({
         } else {
           showMessage("No suspended carts available.", "info");
         }
-        return;
-      }
-
-      if (event.key === "F2" && paymentMethod === "cash") {
-        event.preventDefault();
-        amountReceivedInputRef.current?.focus();
-        amountReceivedInputRef.current?.select();
         return;
       }
 
@@ -893,11 +873,6 @@ export default function POSSaleForm({
       return;
     }
 
-    if (paymentMethod === "cash" && hasEnteredAmountReceived && amountShort > 0) {
-      showMessage(`Amount received is short by GHS ${amountShort.toFixed(2)}`);
-      return;
-    }
-
     processOrder();
   };
 
@@ -908,9 +883,24 @@ export default function POSSaleForm({
     const sales: NewSale[] = [];
     let remainingInitialPayment = paymentMethod === "credit" ? Number(initialPayment || 0) : 0;
 
+    const collectLaterActive = supplyTrackingEnabled && collectLater;
+
     for (const item of cart) {
       const unitPrice = getCartItemUnitPrice(item);
       const pieceQuantity = getCartItemBaseQuantity(item);
+
+      // "Leave in store": convert the per-line "taking now" amount (entered in the
+      // line's own sale unit) into pieces so the backend can deduct exactly that
+      // much and reserve the rest.
+      let collectedPieces: number | undefined;
+      if (collectLaterActive) {
+        const basePerUnit = item.quantity > 0 ? pieceQuantity / item.quantity : 1;
+        const takingUnitsRaw = Number(collectNowByLine[item.id] ?? 0);
+        const takingUnits = Number.isFinite(takingUnitsRaw)
+          ? Math.min(Math.max(takingUnitsRaw, 0), item.quantity)
+          : 0;
+        collectedPieces = Number((takingUnits * basePerUnit).toFixed(2));
+      }
 
       // For credit sales, add phone to notes (backend extracts it for creditor record).
       let saleNotes = notes || null;
@@ -941,7 +931,8 @@ export default function POSSaleForm({
         notes: saleNotes,
         amount_paid: paymentMethod === "credit" && appliedPayment > 0 ? appliedPayment : undefined,
         partial_payment_method: paymentMethod === "credit" && appliedPayment > 0 ? "cash" : undefined,
-        not_supplied: supplyTrackingEnabled && collectLater ? true : undefined,
+        not_supplied: collectLaterActive ? true : undefined,
+        collected_quantity: collectLaterActive ? collectedPieces : undefined,
       });
     }
 
@@ -1242,7 +1233,7 @@ export default function POSSaleForm({
           )}
 
           <div style={{ marginTop: 8, fontSize: 11, opacity: 0.85 }}>
-            Shortcuts: Ctrl+F search, Ctrl+B scan, Ctrl+K customer, F2 cash, F4 charge.
+            Shortcuts: Ctrl+F search, Ctrl+B scan, Ctrl+K customer, F4 charge.
           </div>
         </div>
 
@@ -1506,6 +1497,57 @@ export default function POSSaleForm({
                     </div>
                   </div>
 
+                  {supplyTrackingEnabled && collectLater ? (() => {
+                    const takingRaw = Number(collectNowByLine[item.id] ?? 0);
+                    const taking = Number.isFinite(takingRaw) ? Math.min(Math.max(takingRaw, 0), item.quantity) : 0;
+                    const leftInStore = Math.max(0, item.quantity - taking);
+                    return (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #fde68a",
+                          background: "#fffbeb",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#92400e" }}>Taking now</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            max={item.quantity}
+                            step={quantityStep}
+                            value={collectNowByLine[item.id] ?? "0"}
+                            onChange={(event) =>
+                              setCollectNowByLine((prev) => ({ ...prev, [item.id]: event.target.value }))
+                            }
+                            aria-label={`Quantity taken now for ${item.product.name}`}
+                            style={{
+                              width: 64,
+                              padding: "6px 8px",
+                              border: "1px solid #fbbf24",
+                              borderRadius: 4,
+                              fontSize: 13,
+                              fontWeight: 600,
+                              textAlign: "center",
+                              background: "white",
+                            }}
+                          />
+                          <span style={{ fontSize: 11, color: "#92400e" }}>
+                            of {formatQuantityValue(item.quantity)} · {formatQuantityValue(leftInStore)} left in store
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })() : null}
+
                   {showBatchPicker ? (
                     <div
                       style={{
@@ -1621,13 +1663,7 @@ export default function POSSaleForm({
                 <div style={{ marginBottom: 10 }}>
                   <select
                     value={paymentMethod}
-                    onChange={(e) => {
-                      const method = e.target.value;
-                      setPaymentMethod(method);
-                      if (method !== "cash") {
-                        setAmountReceived("");
-                      }
-                    }}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
                     style={{
                       width: "100%",
                       padding: "10px 12px",
@@ -1745,74 +1781,6 @@ export default function POSSaleForm({
                         }}
                       />
                     )}
-                  </div>
-                )}
-
-                {paymentMethod === "cash" && (
-                  <div
-                    style={{
-                      marginBottom: 10,
-                      padding: "10px",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: 6,
-                      background: "#f8fafc",
-                    }}
-                  >
-                    <label style={{ display: "block", fontSize: 12, color: "#475569", marginBottom: 6, fontWeight: 700 }}>
-                      Amount Received
-                    </label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      min="0"
-                      value={amountReceived}
-                      ref={amountReceivedInputRef}
-                      onChange={(e) => setAmountReceived(e.target.value)}
-                      placeholder={`Exact: ${cartTotal.toFixed(2)}`}
-                      style={{
-                        width: "100%",
-                        padding: "9px 10px",
-                        border: "1px solid #d1d5db",
-                        borderRadius: 4,
-                        fontSize: 13,
-                        background: "white",
-                      }}
-                    />
-
-                    <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                      {[
-                        { label: "Exact", extra: 0 },
-                        { label: "+5", extra: 5 },
-                        { label: "+10", extra: 10 },
-                        { label: "+20", extra: 20 },
-                      ].map((quick) => (
-                        <button
-                          key={quick.label}
-                          type="button"
-                          onClick={() => applyQuickTender(quick.extra)}
-                          style={{
-                            padding: "5px 10px",
-                            borderRadius: 999,
-                            border: "1px solid #cbd5e1",
-                            background: "white",
-                            color: "#334155",
-                            fontSize: 11,
-                            fontWeight: 700,
-                            cursor: "pointer",
-                          }}
-                        >
-                          {quick.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, fontSize: 12 }}>
-                      <span style={{ color: "#64748b", fontWeight: 700 }}>{amountShort > 0 ? "Amount Short" : "Change Due"}</span>
-                      <strong style={{ color: amountShort > 0 ? "#b91c1c" : "#166534", fontSize: 13 }}>
-                        GHS {(amountShort > 0 ? amountShort : changeDue).toFixed(2)}
-                      </strong>
-                    </div>
                   </div>
                 )}
 

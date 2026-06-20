@@ -92,11 +92,8 @@ def _ensure_critical_auth_schema_sync() -> None:
         # locking is what makes concurrent cold-start requests contend and fail
         # (the "won't load until I refresh a few times" symptom).
         already_applied = conn.execute(
-            text(
-                "SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = 'sales' AND column_name = 'supplied_quantity' LIMIT 1"
-            )
-        ).first()
+            text("SELECT to_regclass('public.sale_supplies')")
+        ).scalar()
         if already_applied:
             return
 
@@ -135,6 +132,23 @@ def _ensure_critical_auth_schema_sync() -> None:
         # Existing/historical sales are treated as already supplied (collected).
         conn.execute(text("UPDATE sales SET supplied_quantity = quantity WHERE supplied_quantity IS NULL"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sales_supply ON sales (product_id, branch_id) WHERE supplied_quantity < quantity"))
+        # Per-pickup collection log so the owner can prove what was collected and when.
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS sale_supplies ("
+                "id SERIAL PRIMARY KEY, "
+                "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                "branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, "
+                "sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE, "
+                "quantity NUMERIC(14,2) NOT NULL, "
+                "collected_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, "
+                "collected_by_name VARCHAR(255), "
+                "notes TEXT, "
+                "created_at TIMESTAMPTZ NOT NULL DEFAULT now()"
+                ")"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sale_supplies_sale ON sale_supplies (sale_id, created_at)"))
         conn.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase_user_id_unique "

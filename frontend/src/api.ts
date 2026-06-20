@@ -1127,10 +1127,13 @@ export async function fetchAwaitingSupply(): Promise<Sale[]> {
 
 // Record that some/all of a reserved sale's goods have been handed over. When
 // `quantity` is omitted the whole remaining balance is marked supplied.
-export async function supplySale(saleId: number, quantity?: number): Promise<Sale> {
+export async function supplySale(saleId: number, quantity?: number, notes?: string): Promise<Sale> {
+  const body: Record<string, unknown> = {};
+  if (quantity != null) body.quantity = quantity;
+  if (notes && notes.trim()) body.notes = notes.trim();
   const result = await jsonRequest<Sale>(`/sales/${saleId}/supply`, {
     method: "POST",
-    body: JSON.stringify(quantity != null ? { quantity } : {}),
+    body: JSON.stringify(body),
   });
   dataCache.delete(getCacheKey("sales"));
   dataCache.delete(getCacheKey("products"));

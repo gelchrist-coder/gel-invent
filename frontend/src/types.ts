@@ -152,6 +152,17 @@ export type Sale = {
     expiry_date?: string | null;
     quantity: number;
   }> | null;
+  // Per-pickup collection history for "collect later" sales (proof of hand-over).
+  supplies?: SaleSupply[] | null;
+};
+
+export type SaleSupply = {
+  id: number;
+  sale_id: number;
+  quantity: number;
+  collected_by_name?: string | null;
+  notes?: string | null;
+  created_at: string;
 };
 
 export type SaleBatchOption = {
@@ -177,9 +188,12 @@ export type NewSale = {
   notes?: string | null;
   amount_paid?: number;
   partial_payment_method?: string;
-  // When true the customer paid in full but is collecting later — stock is
-  // deducted but the goods are still physically in the store (reserved).
+  // When true the customer paid in full but is collecting later — the reserved
+  // portion stays physically in the store and is only deducted at collection.
   not_supplied?: boolean;
+  // For collect-later sales: how much the customer takes at the counter now.
+  // The rest (quantity - collected_quantity) stays reserved.
+  collected_quantity?: number;
 };
 
 export type Branch = {
