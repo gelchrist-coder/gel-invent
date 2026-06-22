@@ -111,3 +111,27 @@ def delete_auth_user(user_id: str) -> None:
     if not cleaned:
         return
     _request_json("DELETE", f"{_auth_base_url()}/admin/users/{cleaned}")
+
+
+def find_auth_user_id_by_email(email: str) -> str | None:
+    """Return the Supabase Auth user id for an email, or None if not present.
+    Pages through the admin users list so backfills can stay idempotent."""
+    target = (email or "").strip().lower()
+    if not target:
+        return None
+
+    page = 1
+    per_page = 200
+    while True:
+        resp = _request_json(
+            "GET", f"{_auth_base_url()}/admin/users?page={page}&per_page={per_page}"
+        )
+        users = resp.get("users") if isinstance(resp, dict) else resp
+        if not users:
+            return None
+        for user in users:
+            if str(user.get("email") or "").strip().lower() == target:
+                return str(user.get("id") or "").strip() or None
+        if len(users) < per_page:
+            return None
+        page += 1
