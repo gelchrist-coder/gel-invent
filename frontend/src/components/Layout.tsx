@@ -257,6 +257,8 @@ export default function Layout({
           style={{
             width: isMobile ? mobileSidebarWidth : "100%",
             height: "100%",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
         {/* Header */}
@@ -415,6 +417,69 @@ export default function Layout({
             </button>
           ))}
         </nav>
+
+        {/* User + logout pinned to the bottom of the drawer (mobile only). */}
+        {isMobile && (
+          <div
+            style={{
+              marginTop: "auto",
+              padding: "14px 16px calc(14px + env(safe-area-inset-bottom))",
+              borderTop: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+              <div
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: "50%",
+                  background: "linear-gradient(135deg, #1d4ed8, #2563eb)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 700,
+                  fontSize: 16,
+                  color: "#fff",
+                  flexShrink: 0,
+                  boxShadow: "0 8px 16px rgba(37, 99, 235, 0.35)",
+                }}
+              >
+                {userName.charAt(0).toUpperCase()}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {userName}
+                </div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", fontWeight: 600 }}>{userRole}</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSidebarOpen(false);
+                onLogout();
+              }}
+              style={{
+                width: "100%",
+                padding: "11px 12px",
+                borderRadius: 10,
+                border: "1px solid rgba(248, 113, 113, 0.35)",
+                background: "rgba(248, 113, 113, 0.12)",
+                color: "#fecaca",
+                fontSize: 14,
+                fontWeight: 700,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+              }}
+            >
+              <span aria-hidden="true">↪</span>
+              <span>Logout</span>
+            </button>
+          </div>
+        )}
         </div>
       </aside>
 

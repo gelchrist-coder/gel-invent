@@ -212,6 +212,7 @@ export default function TopBar({
           )}
         </div>
 
+        {!isMobile && (
         <div style={{ position: "relative" }} ref={dropdownRef}>
           <div
             onClick={() => setShowDropdown(!showDropdown)}
@@ -426,6 +427,7 @@ export default function TopBar({
             </div>
           )}
         </div>
+        )}
       </div>
     </header>
   );
