@@ -986,3 +986,103 @@ label {
     animation: none;
   }
 }
+
+/* ---- Mobile POS: one-hand friendly checkout + steppers ---- */
+@media (max-width: 900px) {
+  /* Let the sticky checkout escape the panel's clipping on stacked mobile POS. */
+  .pos-right {
+    overflow: visible;
+  }
+
+  .pos-checkout {
+    position: sticky;
+    bottom: 0;
+    z-index: 6;
+    background: #ffffff;
+    box-shadow: 0 -8px 20px rgba(15, 23, 42, 0.1);
+  }
+}
+
+@media (max-width: 768px) {
+  /* Keep the charge button clear of the bottom tab bar. */
+  .pos-checkout {
+    bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+
+  /* Bigger quantity steppers for thumbs. */
+  .pos-stepper button {
+    width: 40px !important;
+    height: 40px !important;
+    font-size: 20px !important;
+  }
+
+  .pos-stepper input {
+    height: 40px !important;
+    width: 64px !important;
+    font-size: 16px !important;
+  }
+}
+
+/* ---- Responsive tables: stack rows into cards on small screens ---- */
+@media (max-width: 640px) {
+  .table-cards thead {
+    display: none;
+  }
+
+  .table-cards,
+  .table-cards tbody,
+  .table-cards tr,
+  .table-cards td {
+    display: block;
+    width: 100%;
+  }
+
+  .table-cards {
+    min-width: 0 !important;
+  }
+
+  .table-cards tr {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    background: #ffffff;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+  }
+
+  .table-cards td {
+    border: none !important;
+    padding: 6px 0 !important;
+    white-space: normal !important;
+    text-align: right;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .table-cards td::before {
+    content: attr(data-label);
+    font-weight: 700;
+    color: #64748b;
+    font-size: 12px;
+    text-align: left;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .table-cards td:empty {
+    display: none;
+  }
+
+  /* Full-width cells (expanded detail rows) stay as normal blocks, no label. */
+  .table-cards td.td-full {
+    display: block;
+    text-align: left;
+    padding: 0 !important;
+  }
+
+  .table-cards td.td-full::before {
+    display: none;
+  }
+}

@@ -1417,7 +1417,7 @@ export default function Dashboard({ onNavigate }: Props) {
               ) : (
                 <>
                   <div style={{ overflowX: "auto" }}>
-                    <table className="table" style={{ minWidth: 760 }}>
+                    <table className="table table-cards" style={{ minWidth: 760 }}>
                       <thead>
                         <tr>
                           <th>Receipt</th>
@@ -1436,15 +1436,15 @@ export default function Dashboard({ onNavigate }: Props) {
                           const itemCount = getRecentSaleItemCount(sale);
                           return (
                             <tr key={sale.id}>
-                              <td style={{ fontWeight: 700, color: "#0f172a" }}>#{sale.receipt_number || sale.id}</td>
-                              <td>
+                              <td data-label="Receipt" style={{ fontWeight: 700, color: "#0f172a" }}>#{sale.receipt_number || sale.id}</td>
+                              <td data-label="Customer">
                                 <div style={{ fontWeight: 600, color: "#0f172a" }}>{sale.customer_name || "Walk-in"}</div>
                                 <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
                                   {itemCount} item{itemCount === 1 ? "" : "s"}
                                 </div>
                               </td>
-                              <td>
-                                <div style={{ display: "grid", gap: 4 }}>
+                              <td data-label="Items">
+                                <div style={{ display: "grid", gap: 4, width: "100%" }}>
                                   {saleItems.map((item, index) => (
                                     <div key={`${sale.id}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
                                       <span style={{ color: "#0f172a", fontWeight: 500 }}>{item.name || "Unknown"}</span>
@@ -1453,13 +1453,13 @@ export default function Dashboard({ onNavigate }: Props) {
                                   ))}
                                 </div>
                               </td>
-                              <td style={{ textAlign: "right", fontWeight: 800, color: "#047857" }}>GHS {Number(sale.total_price).toFixed(2)}</td>
-                              <td>
+                              <td data-label="Total" style={{ textAlign: "right", fontWeight: 800, color: "#047857" }}>GHS {Number(sale.total_price).toFixed(2)}</td>
+                              <td data-label="Payment">
                                 <span className="badge" style={{ background: paymentMeta.background, color: paymentMeta.color }}>
                                   {paymentMeta.label}
                                 </span>
                               </td>
-                              <td style={{ color: "#5f6475", fontSize: 12 }}>{new Date(sale.created_at).toLocaleString()}</td>
+                              <td data-label="Date" style={{ color: "#5f6475", fontSize: 12 }}>{new Date(sale.created_at).toLocaleString()}</td>
                             </tr>
                           );
                         })}

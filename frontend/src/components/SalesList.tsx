@@ -81,7 +81,7 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
   return (
     <div>
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table className="table-cards" style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ backgroundColor: "#f9fafb" }}>
               <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb", position: "sticky", top: 0, zIndex: 1, backgroundColor: "#f9fafb" }}>
@@ -117,11 +117,11 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
               return (
                 <Fragment key={transaction.key}>
                   <tr style={{ borderBottom: isExpanded ? "none" : "1px solid #e5e7eb", verticalAlign: "top" }}>
-                    <td style={{ padding: 12 }}>
+                    <td data-label="Date" style={{ padding: 12 }}>
                       <div style={{ fontWeight: 600, color: "#111827" }}>{formatDate(transaction.created_at)}</div>
                       <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>Receipt #{transaction.receiptNumber}</div>
                     </td>
-                    <td style={{ padding: 12 }}>
+                    <td data-label="Customer" style={{ padding: 12 }}>
                       <div style={{ fontWeight: 600, color: isWalkInSaleName(transaction.customer_name) ? "#92400e" : "#111827" }}>
                         {transaction.customer_name || "Walk-in"}
                       </div>
@@ -129,8 +129,8 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                         {transaction.item_count} item{transaction.item_count === 1 ? "" : "s"}
                       </div>
                     </td>
-                    <td style={{ padding: 12, minWidth: 280 }}>
-                      <div style={{ display: "grid", gap: 6 }}>
+                    <td data-label="Items" style={{ padding: 12, minWidth: 280 }}>
+                      <div style={{ display: "grid", gap: 6, width: "100%" }}>
                         {transaction.items.map((item) => (
                           <div key={item.sale.id} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
                             <span style={{ color: "#111827", fontWeight: 500 }}>{item.productName}</span>
@@ -139,7 +139,7 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                         ))}
                       </div>
                     </td>
-                    <td style={{ padding: 12 }}>
+                    <td data-label="Payment" style={{ padding: 12 }}>
                       <span
                         style={{
                           padding: "4px 8px",
@@ -162,10 +162,10 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                         </div>
                       ) : null}
                     </td>
-                    <td style={{ padding: 12, textAlign: "right", fontWeight: 700, color: "#111827", whiteSpace: "nowrap" }}>
+                    <td data-label="Total" style={{ padding: 12, textAlign: "right", fontWeight: 700, color: "#111827", whiteSpace: "nowrap" }}>
                       GHS {Number(transaction.total_price || 0).toFixed(2)}
                     </td>
-                    <td style={{ padding: 12 }}>
+                    <td data-label="Recorded By" style={{ padding: 12 }}>
                       <span
                         style={{
                           padding: "4px 8px",
@@ -179,7 +179,7 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                         {transaction.created_by_name || "Unknown"}
                       </span>
                     </td>
-                    <td style={{ padding: 12, textAlign: "center" }}>
+                    <td data-label="Actions" style={{ padding: 12, textAlign: "center" }}>
                       <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
                         <button
                           type="button"
@@ -256,7 +256,7 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                   </tr>
                   {isExpanded && (
                     <tr style={{ borderBottom: "1px solid #e5e7eb", background: "#f8fafc" }}>
-                      <td colSpan={7} style={{ padding: 0 }}>
+                      <td className="td-full" colSpan={7} style={{ padding: 0 }}>
                         <div style={{ padding: 14 }}>
                           <div style={{ marginBottom: 10, fontSize: 12, fontWeight: 700, color: "#475569" }}>
                             Line items in this checkout

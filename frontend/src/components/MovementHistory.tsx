@@ -86,7 +86,7 @@ export default function MovementHistory({ movements }: Props) {
 
       {/* Table */}
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table className="table-cards" style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ backgroundColor: "#f9fafb" }}>
               <th style={{ padding: 12, textAlign: "left", borderBottom: "2px solid #e5e7eb" }}>
@@ -119,17 +119,18 @@ export default function MovementHistory({ movements }: Props) {
             ) : (
               filteredMovements.map((movement) => (
                 <tr key={movement.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                  <td style={{ padding: 12, fontSize: 14 }}>{formatDate(movement.created_at)}</td>
-                  <td style={{ padding: 12, fontSize: 14 }}>
+                  <td data-label="Date/Time" style={{ padding: 12, fontSize: 14 }}>{formatDate(movement.created_at)}</td>
+                  <td data-label="Product" style={{ padding: 12, fontSize: 14 }}>
                     <div style={{ fontWeight: 500 }}>{movement.product_name}</div>
                     {movement.variant_label ? (
                       <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{movement.variant_label}</div>
                     ) : null}
                   </td>
-                  <td style={{ padding: 12, fontSize: 14, color: "#6b7280" }}>
+                  <td data-label="SKU" style={{ padding: 12, fontSize: 14, color: "#6b7280" }}>
                     {movement.product_sku}
                   </td>
                   <td
+                    data-label="Change"
                     style={{
                       padding: 12,
                       textAlign: "right",
@@ -141,7 +142,7 @@ export default function MovementHistory({ movements }: Props) {
                     {movement.change > 0 ? "+" : ""}
                     {movement.change.toFixed(2)}
                   </td>
-                  <td style={{ padding: 12, fontSize: 14 }}>
+                  <td data-label="Reason" style={{ padding: 12, fontSize: 14 }}>
                     <span
                       style={{
                         padding: "4px 8px",
@@ -158,7 +159,7 @@ export default function MovementHistory({ movements }: Props) {
                       {movement.reason}
                     </span>
                   </td>
-                  <td style={{ padding: 12, fontSize: 14, color: "#6b7280" }}>
+                  <td data-label="Batch" style={{ padding: 12, fontSize: 14, color: "#6b7280" }}>
                     {movement.batch_number || "-"}
                   </td>
                 </tr>

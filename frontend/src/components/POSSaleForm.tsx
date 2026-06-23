@@ -1405,7 +1405,7 @@ export default function POSSaleForm({
                   ) : null}
                   
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <div className="pos-stepper" style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <button
                         type="button"
                         onClick={() => updateQuantity(item.id, item.quantity - quantityStep)}
@@ -1786,20 +1786,22 @@ export default function POSSaleForm({
 
                 </div>
 
-                {/* Submit button */}
-                <div style={{ padding: "0 14px 14px" }}>
+                {/* Submit button — sticky above the bottom tab bar on mobile. */}
+                <div className="pos-checkout" style={{ padding: "12px 14px" }}>
                   <button
                     type="submit"
                     style={{
                       width: "100%",
-                      padding: "14px",
+                      minHeight: 52,
+                      padding: "15px",
                       background: "#10b981",
                       color: "white",
                       border: "none",
-                      borderRadius: 6,
-                      fontSize: 15,
-                      fontWeight: 700,
+                      borderRadius: 10,
+                      fontSize: 16,
+                      fontWeight: 800,
                       cursor: "pointer",
+                      boxShadow: "0 8px 18px rgba(16, 185, 129, 0.3)",
                     }}
                   >
                     Charge GHS {cartTotal.toFixed(2)}

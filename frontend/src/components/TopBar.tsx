@@ -17,7 +17,6 @@ type Props = {
   branches?: Branch[];
   activeBranchId?: number | null;
   onChangeBranch?: (branchId: number) => void;
-  onMenuClick?: () => void;
   isMobile?: boolean;
 };
 
@@ -35,7 +34,6 @@ export default function TopBar({
   branches,
   activeBranchId,
   onChangeBranch,
-  onMenuClick,
   isMobile = false,
 }: Props) {
   const [showDropdown, setShowDropdown] = useState(false);
@@ -97,38 +95,19 @@ export default function TopBar({
         zIndex: 100,
       }}
     >
-      {/* Left - Menu Button (mobile) */}
-      <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 12, justifyContent: "flex-start" }}>
-        {isMobile && onMenuClick ? (
-          <button
-            onClick={onMenuClick}
-            style={{
-              background: "transparent",
-              border: "1px solid #d6e2f2",
-              borderRadius: 10,
-              padding: 9,
-              cursor: "pointer",
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              boxShadow: "0 4px 12px rgba(15, 23, 42, 0.08)",
-            }}
-            aria-label="Open menu"
-          >
-            <span style={{ width: 20, height: 2, background: "#0b1021", borderRadius: 1 }} />
-            <span style={{ width: 20, height: 2, background: "#0b1021", borderRadius: 1 }} />
-            <span style={{ width: 20, height: 2, background: "#0b1021", borderRadius: 1 }} />
-          </button>
-        ) : null}
-      </div>
+      {/* Left spacer keeps the desktop 3-column grid balanced. On mobile the
+          bottom tab bar's "More" replaces the old hamburger, so it's dropped. */}
+      {!isMobile && (
+        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 12, justifyContent: "flex-start" }} />
+      )}
 
-      {/* Center - Business Name (desktop) / Business Name (mobile) */}
+      {/* Center - Business Name (desktop) / left-aligned brand (mobile) */}
       <div
         style={{
           minWidth: 0,
           display: "flex",
           alignItems: "center",
-          justifyContent: isMobile ? "center" : "center",
+          justifyContent: isMobile ? "flex-start" : "center",
           gap: isMobile ? 8 : 12,
         }}
       >

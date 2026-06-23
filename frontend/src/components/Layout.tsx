@@ -434,7 +434,6 @@ export default function Layout({
           branches={branches}
           activeBranchId={activeBranchId}
           onChangeBranch={onChangeBranch}
-          onMenuClick={() => setSidebarOpen(true)}
           isMobile={isMobile}
         />
         <div className="app-content" style={{ flex: 1 }}>{children}</div>
