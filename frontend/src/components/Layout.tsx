@@ -86,6 +86,17 @@ const UsersIcon = () => (
   </svg>
 );
 
+const MoreIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="4" y1="6" x2="20" y2="6" />
+    <line x1="4" y1="12" x2="20" y2="12" />
+    <line x1="4" y1="18" x2="20" y2="18" />
+  </svg>
+);
+
+// Primary destinations promoted to the mobile bottom tab bar (in order).
+const BOTTOM_NAV_IDS = ["dashboard", "sales", "products", "inventory"];
+
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: <DashboardIcon /> },
   { id: "products", label: "Products", icon: <ProductsIcon /> },
@@ -181,6 +192,10 @@ export default function Layout({
   const visibleNavItems = NAV_ITEMS.filter(
     (item) => !item.requiredPermission || hasUserPermission(item.requiredPermission, accessUser),
   );
+
+  const bottomNavItems = BOTTOM_NAV_IDS
+    .map((id) => visibleNavItems.find((item) => item.id === id))
+    .filter((item): item is NavItem => Boolean(item));
 
   const visibleBranches = branches;
 
@@ -422,8 +437,36 @@ export default function Layout({
           onMenuClick={() => setSidebarOpen(true)}
           isMobile={isMobile}
         />
-        <div style={{ flex: 1 }}>{children}</div>
+        <div className="app-content" style={{ flex: 1 }}>{children}</div>
       </main>
+
+      {/* Mobile bottom tab bar: primary destinations + More (opens the drawer). */}
+      {isMobile && (
+        <nav className="mobile-tabbar" aria-label="Primary">
+          {bottomNavItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={activeView === item.id ? "active" : undefined}
+              aria-current={activeView === item.id ? "page" : undefined}
+              onClick={() => handleNavigate(item.id)}
+            >
+              <span className="tab-icon">{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className={sidebarOpen ? "active" : undefined}
+            aria-label="More menu"
+            aria-expanded={sidebarOpen}
+            onClick={() => setSidebarOpen(true)}
+          >
+            <span className="tab-icon"><MoreIcon /></span>
+            <span>More</span>
+          </button>
+        </nav>
+      )}
     </div>
   );
 }

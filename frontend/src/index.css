@@ -249,9 +249,77 @@ label {
   }
 }
 
+/* Mobile bottom tab bar (primary navigation on phones) */
+.mobile-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 997;
+  display: flex;
+  background: #ffffff;
+  border-top: 1px solid #e2e8f0;
+  box-shadow: 0 -6px 18px rgba(15, 23, 42, 0.08);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.mobile-tabbar button {
+  flex: 1 1 0;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 2px;
+  min-height: 56px;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  transition: color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-tabbar button.active {
+  color: #1d4ed8;
+}
+
+.mobile-tabbar .tab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.mobile-tabbar .tab-icon svg {
+  width: 21px;
+  height: 21px;
+}
+
+.mobile-tabbar button.active .tab-icon {
+  transform: translateY(-1px);
+}
+
+.mobile-tabbar button > span:last-child {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 768px) {
   .app-shell {
-    padding: 14px 10px 80px;
+    padding: 14px 10px 24px;
+  }
+
+  /* Clear the fixed bottom tab bar for every page (incl. non-app-shell views). */
+  .app-content {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
   }
 
   .page-header {
@@ -305,15 +373,19 @@ label {
 
 @media (max-width: 480px) {
   .app-shell {
-    padding: 12px 8px 80px;
+    padding: 12px 8px 20px;
   }
-  
+
   .card {
     padding: 10px;
   }
-  
+
   .kpi-value {
     font-size: 20px;
+  }
+
+  .page-title {
+    font-size: 1.5rem;
   }
 }
 
