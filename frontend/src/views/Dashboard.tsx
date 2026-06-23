@@ -4,6 +4,32 @@ import { fetchMorningSummary, fetchProductsCached, fetchSalesCached, fetchSalesD
 import { Product } from "../types";
 import { useExpiryTracking } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
+import { Skeleton, SkeletonCard, SkeletonKpiRow } from "../components/Skeleton";
+
+function DashboardSkeleton() {
+  return (
+    <div className="app-shell" aria-busy="true">
+      <Skeleton width={180} height={28} style={{ marginBottom: 14 }} />
+      <div className="card" style={{ marginBottom: 24, padding: 14 }}>
+        <Skeleton width="60%" height={20} />
+      </div>
+      <SkeletonKpiRow />
+      <div className="card" style={{ marginBottom: 24, display: "grid", gap: 12 }}>
+        <Skeleton width="30%" height={18} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} height={52} />
+          ))}
+        </div>
+      </div>
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginBottom: 24 }}>
+        <SkeletonCard lines={6} style={{ minHeight: 240 }} />
+        <SkeletonCard lines={6} style={{ minHeight: 240 }} />
+      </div>
+      <SkeletonCard lines={6} style={{ minHeight: 200 }} />
+    </div>
+  );
+}
 
 type Props = {
   onNavigate: (view: string) => void;
@@ -795,6 +821,12 @@ export default function Dashboard({ onNavigate }: Props) {
     };
   }, [recentSales]);
 
+  // First load with no cached data: show the whole dashboard as one skeleton so
+  // everything appears together instead of fields popping in one by one.
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
+
   return (
     <div className="app-shell">
       <div className="page-header" style={{ marginBottom: 14 }}>
@@ -998,7 +1030,7 @@ export default function Dashboard({ onNavigate }: Props) {
               </div>
             </div>
             {dashboardLoading ? (
-              <p style={{ margin: 0, color: "#4a5368" }}>Loading chart...</p>
+              <Skeleton height={244} />
             ) : (
               <>
                 <div style={{ width: "100%", background: "#f8fbff", border: "1px solid #e6e9f2", borderRadius: 10, padding: 12 }}>
@@ -1088,7 +1120,11 @@ export default function Dashboard({ onNavigate }: Props) {
           <div className="card">
             <h2 className="section-title" style={{ marginBottom: 10 }}>Top Products (Revenue, {rangeLabel})</h2>
             {dashboardLoading ? (
-              <p style={{ margin: 0, color: "#4a5368" }}>Loading chart...</p>
+              <div style={{ display: "grid", gap: 12 }}>
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <Skeleton key={index} height={26} />
+                ))}
+              </div>
             ) : topProductsBars.length === 0 ? (
               <p style={{ margin: 0, color: "#4a5368" }}>No data for the selected range</p>
             ) : (
@@ -1297,7 +1333,14 @@ export default function Dashboard({ onNavigate }: Props) {
             </button>
           </div>
           {dashboardLoading ? (
-            <p style={{ margin: 0, color: "#4a5368" }}>Loading...</p>
+            <div style={{ display: "grid", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <Skeleton key={index} height={56} />
+                ))}
+              </div>
+              <Skeleton height={160} />
+            </div>
           ) : (
             <>
               <div

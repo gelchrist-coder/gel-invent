@@ -893,3 +893,24 @@ label {
     animation: none !important;
   }
 }
+
+/* ---- Skeleton loaders ---- */
+@keyframes skeletonShimmer {
+  0% { background-position: -480px 0; }
+  100% { background-position: 480px 0; }
+}
+
+.skeleton {
+  display: block;
+  border-radius: 8px;
+  background-color: #eef2f7;
+  background-image: linear-gradient(90deg, #eef2f7 0px, #f6f8fb 80px, #eef2f7 160px);
+  background-size: 480px 100%;
+  animation: skeletonShimmer 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}

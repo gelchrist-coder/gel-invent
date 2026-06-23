@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 
 import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, updateProduct, getCachedProducts, clearDataCache, isTemporaryServerDelayError, warmBackend } from "./api";
 import Layout from "./components/Layout";
+import { PageSkeleton } from "./components/Skeleton";
 import { getSalesOutboxCount } from "./offline/storage";
 import { syncSalesOutboxOnce } from "./offline/sync";
 import { useAppCategories } from "./categories";
@@ -140,11 +141,7 @@ const Sales = lazyWithRetry(() => import("./views/Sales"));
 const UserManagement = lazyWithRetry(() => import("./views/UserManagement"));
 
 function LazyViewFallback() {
-  return (
-    <div className="card" style={{ margin: 16, padding: 18, color: "#64748b" }}>
-      Loading...
-    </div>
-  );
+  return <PageSkeleton />;
 }
 
 // Top-level boundary so a failed lazy chunk (e.g. after a deploy) shows a

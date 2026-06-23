@@ -272,6 +272,46 @@ export async function warmBackend(
   return false;
 }
 
+// ---- Cold-start stampede guard --------------------------------------------
+// On app load the UI fires ~10+ GETs at once. On Vercel each concurrent request
+// can spin up its own cold function, and the pile-up is what makes the first
+// load time out ("won't load until I refresh a few times"). Instead, the first
+// authenticated GET warms ONE instance (a single /health/db probe) and every
+// other in-flight GET awaits the same promise, so the cold start happens once.
+// Once anything succeeds we mark the backend warm and skip the gate entirely.
+let backendKnownWarm = false;
+let backendWarmInFlight: Promise<void> | null = null;
+
+function markBackendWarm(): void {
+  backendKnownWarm = true;
+  backendWarmInFlight = null;
+}
+
+async function ensureBackendWarm(): Promise<void> {
+  if (backendKnownWarm) return;
+  // Only gate the authenticated app shell; public pages shouldn't warm anything.
+  if (!localStorage.getItem("token")) return;
+
+  if (!backendWarmInFlight) {
+    backendWarmInFlight = warmBackend("/health/db", true, {
+      timeoutMs: COLD_START_WARM_TIMEOUT_MS,
+      probeTimeoutMs: COLD_START_WARM_PROBE_TIMEOUT_MS,
+      retryIntervalMs: COLD_START_WARM_RETRY_INTERVAL_MS,
+    })
+      .then((ready) => {
+        if (ready) markBackendWarm();
+      })
+      .catch(() => {
+        // Never block requests forever on a warm-up failure; let them try anyway.
+      })
+      .finally(() => {
+        backendWarmInFlight = null;
+      });
+  }
+
+  await backendWarmInFlight;
+}
+
 function getCacheKey(key: string): string {
   const branchId = localStorage.getItem("activeBranchId");
   return `${key}:${branchId || "default"}`;
@@ -517,6 +557,11 @@ async function jsonRequestWithBehavior<T>(
   }
 
   const execute = async (): Promise<T> => {
+    // Serialize the cold start: hold the initial GET burst behind one warm-up.
+    if (method === "GET") {
+      await ensureBackendWarm();
+    }
+
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...(options?.headers as Record<string, string> ?? {})
@@ -575,6 +620,11 @@ async function jsonRequestWithBehavior<T>(
       if (isReady) {
         response = await request();
       }
+    }
+
+    // Any successful response proves the backend is warm; skip the gate after.
+    if (response.ok) {
+      markBackendWarm();
     }
 
     if (!response.ok) {

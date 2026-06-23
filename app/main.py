@@ -543,21 +543,31 @@ async def on_startup() -> None:
     print(f"Railway Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'Not set')}")
     print(f"Database URL set: {'Yes' if os.getenv('DATABASE_URL') else 'No'}")
 
-    # Always apply critical auth schema changes first to avoid request-time
-    # failures when background/full migrations are disabled or still running.
-    try:
-        await asyncio.to_thread(_ensure_critical_auth_schema_sync)
-        print("✅ Critical auth schema verified")
-    except Exception as e:
-        print(f"⚠️ Could not verify critical auth schema: {type(e).__name__}: {e}")
+    async def _verify_schema() -> None:
+        # Always apply critical auth schema changes to avoid request-time failures
+        # when background/full migrations are disabled or still running.
+        try:
+            await asyncio.to_thread(_ensure_critical_auth_schema_sync)
+            print("✅ Critical auth schema verified")
+        except Exception as e:
+            print(f"⚠️ Could not verify critical auth schema: {type(e).__name__}: {e}")
 
-    # Apply tiny non-auth schema guards once at startup (not on each request)
-    # to prevent request-time DDL from causing lock contention.
-    try:
-        await asyncio.to_thread(ensure_critical_schema)
-        print("✅ Critical runtime schema guard verified")
-    except Exception as e:
-        print(f"⚠️ Could not verify critical runtime schema guard: {type(e).__name__}: {e}")
+        # Tiny non-auth schema guards applied once at startup (not per request).
+        try:
+            await asyncio.to_thread(ensure_critical_schema)
+            print("✅ Critical runtime schema guard verified")
+        except Exception as e:
+            print(f"⚠️ Could not verify critical runtime schema guard: {type(e).__name__}: {e}")
+
+    if os.getenv("VERCEL"):
+        # Serverless: NEVER block the cold-start critical path with DB round-trips.
+        # The schema is already migrated, so verifying it before serving the first
+        # request only adds latency to every cold start and, under the concurrent
+        # cold-start fan-out at app load, makes requests time out ("won't load until
+        # I refresh a few times"). Verify in the background and serve immediately.
+        asyncio.create_task(_verify_schema())
+    else:
+        await _verify_schema()
 
     if not _should_run_startup_migrations():
         print("ℹ️ Startup migrations skipped (RUN_STARTUP_MIGRATIONS disabled)")
