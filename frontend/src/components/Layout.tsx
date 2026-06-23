@@ -241,7 +241,9 @@ export default function Layout({
           color: "#fff",
           padding: "16px 0",
           boxShadow: isExpanded && !isMobile ? "4px 0 24px rgba(0,0,0,0.2)" : "2px 0 8px rgba(0,0,0,0.1)",
-          position: isMobile ? "fixed" : "sticky",
+          // Fixed on desktop too: the rail expands on hover as an overlay so the
+          // page content never reflows/jumps sideways (a 64px spacer holds its place).
+          position: "fixed",
           top: 0,
           left: isMobile ? (sidebarOpen ? 0 : "calc(-1 * min(86vw, 320px))") : 0,
           height: "100vh",
@@ -249,7 +251,9 @@ export default function Layout({
           overflowX: "hidden",
           flexShrink: 0,
           zIndex: 999,
-          transition: "left 0.26s ease, box-shadow 0.2s ease",
+          transition: isMobile
+            ? "left 0.26s ease, box-shadow 0.2s ease"
+            : "width 0.18s ease, box-shadow 0.2s ease",
           pointerEvents: isMobile && !sidebarOpen ? "none" : "auto",
         }}
       >
@@ -484,7 +488,18 @@ export default function Layout({
       </aside>
 
       {/* Main Content */}
-      <main style={{ flex: 1, background: "#f7f9ff", display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <main
+        style={{
+          flex: 1,
+          background: "#f7f9ff",
+          display: "flex",
+          flexDirection: "column",
+          minWidth: 0,
+          // Reserve the collapsed-rail width on desktop so the fixed sidebar's
+          // hover-expand overlays content instead of pushing it.
+          marginLeft: isMobile ? 0 : SIDEBAR_COLLAPSED_WIDTH,
+        }}
+      >
         <TopBar
           userName={userName}
           userRole={userRole}
