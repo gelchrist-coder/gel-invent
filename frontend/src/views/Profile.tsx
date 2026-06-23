@@ -1,8 +1,39 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateMyBusinessProfile, updateSystemSettings } from "../api";
+import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateBusinessLogo, updateMyBusinessProfile, updateSystemSettings } from "../api";
 import { Branch } from "../types";
-import { hasUserPermission, readStoredUser } from "../user-storage";
+import { getStoredBusinessLogo, hasUserPermission, readStoredUser, setStoredBusinessLogo } from "../user-storage";
+
+// Downscale + compress an uploaded image to a small square-ish data URL so it
+// stays light enough to store and to embed in printed receipts.
+function compressImageToDataUrl(file: File, maxSize = 240): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the image file."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("That file is not a valid image."));
+      img.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Image processing is not supported on this device."));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        // PNG preserves logos with transparency; fall back is fine for photos.
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 type PasswordInputProps = {
   label: string;
@@ -86,6 +117,46 @@ export default function Profile() {
 
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  const [businessLogo, setBusinessLogo] = useState<string | null>(() => getStoredBusinessLogo());
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleLogoFile = async (file: File | null) => {
+    if (!file) return;
+    setLogoError(null);
+    if (!file.type.startsWith("image/")) {
+      setLogoError("Please choose an image file (PNG or JPG).");
+      return;
+    }
+    setLogoBusy(true);
+    try {
+      const dataUrl = await compressImageToDataUrl(file);
+      const saved = await updateBusinessLogo(dataUrl);
+      setStoredBusinessLogo(saved);
+      setBusinessLogo(saved);
+    } catch (error) {
+      setLogoError(error instanceof Error ? error.message : "Could not upload the logo.");
+    } finally {
+      setLogoBusy(false);
+      if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    setLogoError(null);
+    setLogoBusy(true);
+    try {
+      await updateBusinessLogo(null);
+      setStoredBusinessLogo(null);
+      setBusinessLogo(null);
+    } catch (error) {
+      setLogoError(error instanceof Error ? error.message : "Could not remove the logo.");
+    } finally {
+      setLogoBusy(false);
+    }
+  };
 
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -634,6 +705,81 @@ export default function Profile() {
             Business Information
           </h2>
           <div style={{ display: "grid", gap: 20 }}>
+            {/* Business logo — shows on the header and printed receipts. */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 16,
+                flexWrap: "wrap",
+                padding: 16,
+                border: "1px solid #e5e7eb",
+                borderRadius: 12,
+                background: "#f9fafb",
+              }}
+            >
+              <div
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: 14,
+                  background: "#fff",
+                  border: "1px solid #e5e7eb",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  overflow: "hidden",
+                  flexShrink: 0,
+                }}
+              >
+                {businessLogo ? (
+                  <img src={businessLogo} alt="Business logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <span style={{ fontSize: 26, fontWeight: 800, color: "#1e3a8a" }}>
+                    {(businessInfo.name || "B").charAt(0).toUpperCase()}
+                  </span>
+                )}
+              </div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>Business Logo</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+                  Shown on the app header and on printed receipts. Square PNG/JPG works best.
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={logoBusy}
+                    onClick={() => logoInputRef.current?.click()}
+                    style={{ background: "#1f7aff", fontSize: 13, padding: "8px 14px", opacity: logoBusy ? 0.6 : 1 }}
+                  >
+                    {logoBusy ? "Saving..." : businessLogo ? "Change Logo" : "Upload Logo"}
+                  </button>
+                  {businessLogo && (
+                    <button
+                      type="button"
+                      className="button"
+                      disabled={logoBusy}
+                      onClick={handleRemoveLogo}
+                      style={{ background: "#ef4444", fontSize: 13, padding: "8px 14px", opacity: logoBusy ? 0.6 : 1 }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={(e) => void handleLogoFile(e.target.files?.[0] ?? null)}
+                    style={{ display: "none" }}
+                  />
+                </div>
+                {logoError && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#b91c1c" }}>{logoError}</div>
+                )}
+              </div>
+            </div>
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>

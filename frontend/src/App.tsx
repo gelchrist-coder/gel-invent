@@ -10,7 +10,8 @@ import { useAppCategories } from "./categories";
 import { updateMyCategories } from "./api";
 import { Branch, NewProduct, Product, ProductUpdate, Supplier } from "./types";
 import { useExpiryTracking } from "./settings";
-import { getDisplayBusinessName, getEffectiveUserRole, hasUserPermission, readStoredUser } from "./user-storage";
+import { getDisplayBusinessName, getEffectiveUserRole, hasUserPermission, readStoredUser, setStoredBusinessLogo } from "./user-storage";
+import { fetchBusinessLogo } from "./api";
 
 const LAZY_IMPORT_RETRY_KEY = "gel-invent:lazy-import-retry";
 
@@ -447,6 +448,19 @@ export default function App() {
         });
     }
   }, []);
+
+  // Refresh the business logo from the server so the header + receipts match
+  // what the owner uploaded, on any device.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+    fetchBusinessLogo()
+      .then((logo) => setStoredBusinessLogo(logo))
+      .catch(() => {
+        // Keep any locally cached logo on transient failures.
+      });
+  }, [isAuthenticated]);
 
   // Load branches after login and pick an active branch.
   useEffect(() => {

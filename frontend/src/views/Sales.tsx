@@ -16,7 +16,7 @@ import {
   removeOutboxItem,
 } from "../offline/storage";
 import { syncSalesOutboxOnce } from "../offline/sync";
-import { getDisplayBusinessName, hasUserPermission, readStoredUser } from "../user-storage";
+import { getDisplayBusinessName, getStoredBusinessLogo, hasUserPermission, readStoredUser } from "../user-storage";
 
 type SalesPaymentFilterOption = {
   key: string;
@@ -435,6 +435,7 @@ export default function Sales() {
       <body>
         ${watermarkHtml}
         <div class="header">
+          ${getStoredBusinessLogo() ? `<img src="${getStoredBusinessLogo()}" alt="${businessName}" style="max-width:130px;max-height:80px;object-fit:contain;margin:0 auto 8px auto;display:block;" />` : ""}
           <div class="business-name">${businessName}</div>
           <div>Sales Receipt</div>
         </div>
@@ -563,6 +564,7 @@ export default function Sales() {
       <body>
         ${watermarkHtml}
         <div class="header">
+          ${getStoredBusinessLogo() ? `<img src="${getStoredBusinessLogo()}" alt="${businessName}" style="max-width:130px;max-height:80px;object-fit:contain;margin:0 auto 8px auto;display:block;" />` : ""}
           <div class="business-name">${businessName}</div>
           <div>Sales Receipt</div>
         </div>

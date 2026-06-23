@@ -237,3 +237,29 @@ export function getDisplayBusinessName(user: StoredUser | null = readStoredUser(
   const businessInfo = readStoredBusinessInfo();
   return businessInfo?.name || user?.business_name || "Business";
 }
+
+const BUSINESS_LOGO_KEY = "businessLogo";
+
+// The uploaded business logo (a base64 data URL) is cached locally so the header
+// and receipts render it instantly, then refreshed from the server on load.
+export function getStoredBusinessLogo(): string | null {
+  try {
+    const raw = localStorage.getItem(BUSINESS_LOGO_KEY);
+    return raw && raw.startsWith("data:image/") ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredBusinessLogo(dataUrl: string | null): void {
+  try {
+    if (dataUrl) {
+      localStorage.setItem(BUSINESS_LOGO_KEY, dataUrl);
+    } else {
+      localStorage.removeItem(BUSINESS_LOGO_KEY);
+    }
+  } catch {
+    // Ignore storage write failures (e.g. private mode quota).
+  }
+  window.dispatchEvent(new CustomEvent("businessLogoChanged", { detail: dataUrl }));
+}

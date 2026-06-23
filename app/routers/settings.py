@@ -4,6 +4,7 @@ from urllib.request import urlopen
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
@@ -206,6 +207,73 @@ def update_system_settings(
     db.refresh(settings)
 
     return _serialize_settings(settings, current_user)
+
+
+class BusinessLogoRead(BaseModel):
+    business_logo: str | None = None
+
+
+class BusinessLogoUpdate(BaseModel):
+    business_logo: str | None = None
+
+
+# Base64 data URL cap (~450KB encoded). The client compresses before upload.
+MAX_LOGO_CHARS = 600_000
+
+
+@router.get("/business-logo", response_model=BusinessLogoRead)
+def get_business_logo(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Return the business logo (data URL) for the current tenant, or null.
+
+    Reads defensively so a tenant that has never uploaded one — where the column
+    may not exist yet — simply returns no logo instead of erroring.
+    """
+    owner_user_id = _get_tenant_owner_id(current_user)
+    _get_or_create_settings(db, owner_user_id)
+    try:
+        row = db.execute(
+            text("SELECT business_logo FROM system_settings WHERE owner_user_id = :oid"),
+            {"oid": owner_user_id},
+        ).first()
+        logo = row[0] if row and row[0] else None
+    except Exception:
+        db.rollback()
+        logo = None
+    return BusinessLogoRead(business_logo=logo)
+
+
+@router.put("/business-logo", response_model=BusinessLogoRead)
+def update_business_logo(
+    payload: BusinessLogoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Set or clear the tenant's business logo. Admin/owner only.
+
+    The storage column is created on first use so no separate migration or
+    cold-start schema work is required.
+    """
+    ensure_permission(current_user, "manage_settings", "Only the business owner can update the logo")
+
+    logo = (payload.business_logo or "").strip() or None
+    if logo is not None:
+        if not logo.startswith("data:image/"):
+            raise HTTPException(status_code=400, detail="Logo must be an image file.")
+        if len(logo) > MAX_LOGO_CHARS:
+            raise HTTPException(status_code=400, detail="Logo image is too large. Please choose a smaller image.")
+
+    owner_user_id = _get_tenant_owner_id(current_user)
+    _get_or_create_settings(db, owner_user_id)
+    db.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS business_logo TEXT"))
+    db.execute(
+        text("UPDATE system_settings SET business_logo = :logo WHERE owner_user_id = :oid"),
+        {"logo": logo, "oid": owner_user_id},
+    )
+    db.commit()
+    return BusinessLogoRead(business_logo=logo)
 
 
 @router.post("/system/currency/convert", response_model=CurrencyConvertResponse)

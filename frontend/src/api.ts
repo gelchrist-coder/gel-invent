@@ -420,6 +420,20 @@ export async function updateMyBusinessProfile(payload: BusinessProfileUpdate): P
   return updated;
 }
 
+// Business logo (a base64 data URL) shown in the header and on receipts.
+export async function fetchBusinessLogo(): Promise<string | null> {
+  const res = await jsonRequest<{ business_logo: string | null }>("/settings/business-logo");
+  return res?.business_logo ?? null;
+}
+
+export async function updateBusinessLogo(dataUrl: string | null): Promise<string | null> {
+  const res = await jsonRequest<{ business_logo: string | null }>("/settings/business-logo", {
+    method: "PUT",
+    body: JSON.stringify({ business_logo: dataUrl }),
+  });
+  return res?.business_logo ?? null;
+}
+
 export type SystemSettings = {
   capability_overrides: CapabilityOverrides;
   effective_capabilities: CapabilityMap;

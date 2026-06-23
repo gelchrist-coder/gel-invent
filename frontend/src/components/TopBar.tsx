@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 
 import { Branch } from "../types";
+import { getStoredBusinessLogo } from "../user-storage";
 
 
 type Props = {
@@ -37,8 +38,19 @@ export default function TopBar({
   isMobile = false,
 }: Props) {
   const [showDropdown, setShowDropdown] = useState(false);
+  const [businessLogo, setBusinessLogo] = useState<string | null>(() => getStoredBusinessLogo());
   const dropdownRef = useRef<HTMLDivElement>(null);
   const visibleBranches = branches ?? [];
+
+  // Keep the header logo in sync when it's uploaded/removed in Settings.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<string | null>).detail;
+      setBusinessLogo(detail ?? getStoredBusinessLogo());
+    };
+    window.addEventListener("businessLogoChanged", handler as EventListener);
+    return () => window.removeEventListener("businessLogoChanged", handler as EventListener);
+  }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -111,24 +123,41 @@ export default function TopBar({
           gap: isMobile ? 8 : 12,
         }}
       >
-        <div
-          style={{
-            width: isMobile ? 30 : 36,
-            height: isMobile ? 30 : 36,
-            borderRadius: 10,
-            background: "#1e3a8a",
-            color: "#fff",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 800,
-            fontSize: isMobile ? 14 : 17,
-            flexShrink: 0,
-            boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
-          }}
-        >
-          {businessLabel.charAt(0).toUpperCase()}
-        </div>
+        {businessLogo ? (
+          <img
+            src={businessLogo}
+            alt={businessLabel}
+            style={{
+              width: isMobile ? 32 : 40,
+              height: isMobile ? 32 : 40,
+              borderRadius: 10,
+              objectFit: "cover",
+              flexShrink: 0,
+              background: "#fff",
+              border: "1px solid #e6e9f2",
+              boxShadow: "0 8px 18px rgba(37, 99, 235, 0.16)",
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: isMobile ? 30 : 36,
+              height: isMobile ? 30 : 36,
+              borderRadius: 10,
+              background: "#1e3a8a",
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 800,
+              fontSize: isMobile ? 14 : 17,
+              flexShrink: 0,
+              boxShadow: "0 8px 18px rgba(37, 99, 235, 0.2)",
+            }}
+          >
+            {businessLabel.charAt(0).toUpperCase()}
+          </div>
+        )}
         <div style={{ minWidth: 0 }}>
           <h1
             style={{

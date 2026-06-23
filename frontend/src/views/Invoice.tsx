@@ -5,7 +5,7 @@ import POSSaleForm from "../components/POSSaleForm";
 import { cacheProducts, loadCachedProducts } from "../offline/storage";
 import { formatSaleQuantityLabel } from "../sales-transactions";
 import { NewSale, Product } from "../types";
-import { getDisplayBusinessName, readStoredUser } from "../user-storage";
+import { getDisplayBusinessName, getStoredBusinessLogo, readStoredUser } from "../user-storage";
 
 type UiMessage = { type: "error" | "info"; text: string } | null;
 
@@ -141,6 +141,7 @@ export default function Invoice() {
         </head>
         <body>
           ${watermarkHtml}
+          ${getStoredBusinessLogo() ? `<img src="${getStoredBusinessLogo()}" alt="${businessName}" style="max-width:160px;max-height:90px;object-fit:contain;margin-bottom:10px;display:block;" />` : ""}
           <h1>${businessName}</h1>
           <div class="meta">PROFORMA INVOICE</div>
           <div class="meta">Invoice No: ${invoiceNumber}</div>
