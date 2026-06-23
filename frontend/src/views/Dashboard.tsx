@@ -418,7 +418,12 @@ export default function Dashboard({ onNavigate }: Props) {
       void loadDashboardData();
     };
     window.addEventListener("activeBranchChanged", handler as EventListener);
-    return () => window.removeEventListener("activeBranchChanged", handler as EventListener);
+    // Recover the dashboard after a network change once connectivity returns.
+    window.addEventListener("appReconnected", handler as EventListener);
+    return () => {
+      window.removeEventListener("activeBranchChanged", handler as EventListener);
+      window.removeEventListener("appReconnected", handler as EventListener);
+    };
   }, [loadDashboardData]);
 
   const dashboardTopProducts = dashboardData?.top_products;

@@ -598,6 +598,17 @@ export default function App() {
     const handleOnline = () => {
       setIsOnline(true);
       void syncQueuedSales();
+      // Self-heal after a network change: refetch the core data and tell the
+      // open view to reload, so a load that was killed mid-flight recovers
+      // without the user having to refresh.
+      fetchProductsCached((fresh) => setProducts(fresh)).catch(() => {});
+      fetchBranchesCached((fresh) => setBranches(fresh)).catch(() => {});
+      void fetchInventoryAnalytics().catch(() => {});
+      void fetchSalesCached().catch(() => {});
+      if (canViewReports) {
+        void fetchSalesDashboard().catch(() => {});
+      }
+      window.dispatchEvent(new CustomEvent("appReconnected"));
     };
 
     const handleOffline = () => {

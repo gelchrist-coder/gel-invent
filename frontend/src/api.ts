@@ -105,7 +105,7 @@ const CACHE_TTL = 30000; // 30 seconds - data is considered fresh
 const inflightGetRequests = new Map<string, Promise<unknown>>();
 const REQUEST_TIMEOUT_MS = 45000;
 const REPORT_REQUEST_TIMEOUT_MS = 60000;
-const GET_RETRY_ATTEMPTS = 2;
+const GET_RETRY_ATTEMPTS = 3;
 const COLD_START_RETRY_STATUS_CODES = new Set([500, 502, 503, 504]);
 const COLD_START_WARM_TIMEOUT_MS = 90000;
 const COLD_START_WARM_PROBE_TIMEOUT_MS = 35000;
@@ -129,6 +129,33 @@ function clearAuthSession(): void {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+// Resolve as soon as the browser reports it's back online (or after maxMs).
+// Used to retry exactly when connectivity returns after a network change
+// (Wi-Fi <-> mobile data, roaming, VPN toggles) instead of guessing a delay.
+function waitForReconnect(maxMs: number): Promise<void> {
+  if (typeof navigator === "undefined" || navigator.onLine) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("online", finish);
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, maxMs);
+    window.addEventListener("online", finish);
+  });
+}
+
+// Exponential backoff for retried GETs, capped so a flaky network still recovers
+// quickly once it settles.
+function retryBackoffMs(attempt: number): number {
+  return Math.min(400 * 2 ** (attempt - 1), 3000);
 }
 
 function isAbortError(error: unknown): boolean {
@@ -160,7 +187,11 @@ export async function resilientFetch(
     } catch (error) {
       const canRetry = method === "GET" && attempt < maxAttempts;
       if (canRetry && (isAbortError(error) || error instanceof TypeError)) {
-        await delay(500 * attempt);
+        // A network change (ERR_NETWORK_CHANGED) surfaces as a TypeError and
+        // kills every in-flight request at once. Wait for connectivity to return,
+        // then back off, so reads recover on their own without a manual refresh.
+        await waitForReconnect(10000);
+        await delay(retryBackoffMs(attempt));
         continue;
       }
 
@@ -186,7 +217,7 @@ export async function resilientFetch(
     }
 
     if (method === "GET" && [502, 503, 504].includes(response.status) && attempt < maxAttempts) {
-      await delay(500 * attempt);
+      await delay(retryBackoffMs(attempt));
       response = null;
       continue;
     }
@@ -285,6 +316,14 @@ let backendWarmInFlight: Promise<void> | null = null;
 function markBackendWarm(): void {
   backendKnownWarm = true;
   backendWarmInFlight = null;
+}
+
+// When the network drops, force the next request to re-warm so it waits for the
+// backend to be reachable again instead of firing into a dead connection.
+if (typeof window !== "undefined") {
+  window.addEventListener("offline", () => {
+    backendKnownWarm = false;
+  });
 }
 
 async function ensureBackendWarm(): Promise<void> {
