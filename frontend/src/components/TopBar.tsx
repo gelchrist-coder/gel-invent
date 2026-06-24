@@ -430,13 +430,14 @@ export default function TopBar({
                     background: "#fff5f5",
                     border: "1px solid #fee2e2",
                     borderRadius: 10,
-                    textAlign: "left",
+                    textAlign: "center",
                     cursor: "pointer",
                     fontSize: 14,
-                    fontWeight: 600,
+                    fontWeight: 700,
                     color: "#b91c1c",
                     display: "flex",
                     alignItems: "center",
+                    justifyContent: "center",
                     gap: 10,
                     transition: "background 0.15s ease, border-color 0.15s ease",
                   }}
@@ -449,8 +450,7 @@ export default function TopBar({
                     e.currentTarget.style.borderColor = "#fee2e2";
                   }}
                 >
-                  <span aria-hidden="true">↪</span>
-                  <span style={{ flex: 1 }}>Logout</span>
+                  <span>Logout</span>
                 </button>
               )}
             </div>

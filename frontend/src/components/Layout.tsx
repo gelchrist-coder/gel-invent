@@ -479,7 +479,6 @@ export default function Layout({
                 gap: 8,
               }}
             >
-              <span aria-hidden="true">↪</span>
               <span>Logout</span>
             </button>
           </div>
