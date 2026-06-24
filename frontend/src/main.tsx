@@ -27,7 +27,7 @@ if ("serviceWorker" in navigator && !import.meta.env.PROD) {
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    const swVersion = "20260618-1";
+    const swVersion = "20260623-1";
     const hadController = Boolean(navigator.serviceWorker.controller);
     let refreshing = false;
 

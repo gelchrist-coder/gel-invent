@@ -1,5 +1,5 @@
-const SHELL_CACHE = "gel-invent-shell-v13";
-const ASSET_CACHE = "gel-invent-assets-v13";
+const SHELL_CACHE = "gel-invent-shell-v14";
+const ASSET_CACHE = "gel-invent-assets-v14";
 const APP_SHELL_URLS = [
   "/offline.html",
   "/manifest.webmanifest",
@@ -39,19 +39,24 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-async function networkFirst(request) {
-  const cache = await caches.open(SHELL_CACHE);
-  try {
-    const response = await fetch(request, { cache: "no-store" });
-    if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => {
-        // Ignore cache write failures.
-      });
+// Navigations always go to the network so the freshly-deployed index.html (with
+// the current asset hashes) is used. We deliberately do NOT cache or serve a
+// stale index.html: after a deploy its hashed JS/CSS no longer exist on the CDN,
+// so a stale shell would 404 its own chunks and show a blank page until the user
+// refreshes several times. A short retry absorbs brief blips; a real outage
+// falls back to offline.html.
+async function handleNavigation(request) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await fetch(request, { cache: "no-store" });
+    } catch {
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
     }
-    return response;
-  } catch {
-    return (await cache.match(request)) || (await cache.match("/index.html")) || cache.match("/offline.html");
   }
+  const cache = await caches.open(SHELL_CACHE);
+  return (await cache.match("/offline.html")) || Response.error();
 }
 
 async function staleWhileRevalidate(request) {
@@ -88,7 +93,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    event.respondWith(networkFirst(request));
+    event.respondWith(handleNavigation(request));
     return;
   }
 
