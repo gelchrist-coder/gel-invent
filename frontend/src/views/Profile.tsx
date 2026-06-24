@@ -6,14 +6,24 @@ import { getStoredBusinessLogo, hasUserPermission, readStoredUser, setStoredBusi
 
 // Downscale + compress an uploaded image to a small square-ish data URL so it
 // stays light enough to store and to embed in printed receipts.
+//
+// Loads via an object URL rather than FileReader.readAsDataURL: object URLs
+// don't read the whole file into memory as base64, so they handle large images
+// and mobile photos (incl. not-yet-downloaded iCloud photos) far more reliably.
 function compressImageToDataUrl(file: File, maxSize = 240): Promise<string> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Could not read the image file."));
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error("That file is not a valid image."));
-      img.onload = () => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    const cleanup = () => URL.revokeObjectURL(objectUrl);
+
+    img.onerror = () => {
+      cleanup();
+      reject(new Error("Couldn't read that image. Please pick a PNG or JPG (a screenshot works too)."));
+    };
+
+    img.onload = () => {
+      try {
         const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
         const width = Math.max(1, Math.round(img.width * scale));
         const height = Math.max(1, Math.round(img.height * scale));
@@ -26,12 +36,16 @@ function compressImageToDataUrl(file: File, maxSize = 240): Promise<string> {
           return;
         }
         ctx.drawImage(img, 0, 0, width, height);
-        // PNG preserves logos with transparency; fall back is fine for photos.
+        // PNG preserves logos with transparency; fine for photos too.
         resolve(canvas.toDataURL("image/png"));
-      };
-      img.src = String(reader.result);
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error("Could not process the image."));
+      } finally {
+        cleanup();
+      }
     };
-    reader.readAsDataURL(file);
+
+    img.src = objectUrl;
   });
 }
 
@@ -126,7 +140,10 @@ export default function Profile() {
   const handleLogoFile = async (file: File | null) => {
     if (!file) return;
     setLogoError(null);
-    if (!file.type.startsWith("image/")) {
+    // Some mobile browsers report an empty type for a valid photo, so only
+    // reject when a non-image type is explicitly given; otherwise let the
+    // image decoder validate it.
+    if (file.type && !file.type.startsWith("image/")) {
       setLogoError("Please choose an image file (PNG or JPG).");
       return;
     }
