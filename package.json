@@ -1,0 +1,8 @@
+{
+  "name": "gel-invent",
+  "private": true,
+  "description": "Single Vercel project: builds the React frontend and serves the FastAPI backend under /api.",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build"
+  }
+}
