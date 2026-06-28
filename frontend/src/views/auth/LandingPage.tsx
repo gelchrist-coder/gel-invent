@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import appLogo from "../../asset/logo.png";
-import wareImage from "../../asset/Ware.png";
+import wareImage from "../../asset/Ware.webp";
 import { BENEFIT_ITEMS, FEATURE_ITEMS, useWarmBackend } from "./authShared";
 
 const I = ({ children }: { children: React.ReactNode }) => (
