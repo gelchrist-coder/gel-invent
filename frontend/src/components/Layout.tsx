@@ -109,8 +109,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: "users", label: "Users", icon: <UsersIcon />, requiredPermission: "manage_employees" },
 ];
 
-const SIDEBAR_EXPANDED_WIDTH = 220;
-const SIDEBAR_COLLAPSED_WIDTH = 64;
+const SIDEBAR_EXPANDED_WIDTH = 210;
+const SIDEBAR_COLLAPSED_WIDTH = 60;
 
 type Props = {
   activeView: string;
@@ -373,11 +373,11 @@ export default function Layout({
               title={!isExpanded ? item.label : undefined}
               style={{
                 width: "100%",
-                padding: !isExpanded ? "10px 0" : "10px 16px",
-                background: activeView === item.id ? "rgba(31, 122, 255, 0.15)" : "transparent",
+                padding: !isExpanded ? "8px 0" : "8px 14px",
+                background: activeView === item.id ? "rgba(31, 122, 255, 0.16)" : "transparent",
                 border: "none",
                 borderLeft: activeView === item.id ? "3px solid #1f7aff" : "3px solid transparent",
-                color: activeView === item.id ? "#fff" : "rgba(255,255,255,0.7)",
+                color: activeView === item.id ? "#fff" : "rgba(255,255,255,0.72)",
                 textAlign: !isExpanded ? "center" : "left",
                 cursor: "pointer",
                 fontSize: 13,
@@ -386,7 +386,7 @@ export default function Layout({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: !isExpanded ? "center" : "flex-start",
-                gap: 10,
+                gap: 11,
               }}
               onMouseEnter={(e) => {
                 if (activeView !== item.id) {
@@ -401,15 +401,14 @@ export default function Layout({
                 }
               }}
             >
-              <span style={{ 
-                width: 28, 
-                height: 28, 
-                borderRadius: 6, 
-                background: activeView === item.id ? "rgba(31, 122, 255, 0.3)" : "rgba(255,255,255,0.1)",
+              <span style={{
+                width: 22,
+                height: 22,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 flexShrink: 0,
+                color: activeView === item.id ? "#60a5fa" : "rgba(255,255,255,0.55)",
               }}>
                 {item.icon}
               </span>
