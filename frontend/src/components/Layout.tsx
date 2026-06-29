@@ -237,7 +237,7 @@ export default function Layout({
           width: isMobile ? (sidebarOpen ? mobileSidebarWidth : 0) : sidebarWidth,
           minWidth: isMobile ? (sidebarOpen ? mobileSidebarWidth : 0) : sidebarWidth,
           maxWidth: isMobile ? (sidebarOpen ? mobileSidebarWidth : 0) : sidebarWidth,
-          background: "linear-gradient(180deg, #0b1021 0%, #1a2235 100%)",
+          background: "linear-gradient(180deg, #0a1733 0%, #14306b 100%)",
           color: "#fff",
           padding: "16px 0",
           boxShadow: isExpanded && !isMobile ? "4px 0 24px rgba(0,0,0,0.2)" : "2px 0 8px rgba(0,0,0,0.1)",
