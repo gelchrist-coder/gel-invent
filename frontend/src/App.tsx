@@ -658,7 +658,6 @@ export default function App() {
           const newUser = JSON.parse(e.newValue);
           // If a different user logged in, reload the page
           if (newUser.id && newUser.id !== currentUserId) {
-            console.log("Different user detected, refreshing...");
             window.location.reload();
             return;
           }
@@ -684,7 +683,6 @@ export default function App() {
       }
       // Only reload when switching between two different logged-in users (not for initial login).
       if (currentUserId !== null && changedUser?.id && changedUser.id !== currentUserId) {
-        console.log("Different user detected in same tab, refreshing...");
         window.location.reload();
         return;
       }
