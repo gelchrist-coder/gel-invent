@@ -758,7 +758,6 @@ def list_sale_batch_options(
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=product_id,
-        variant_id=variant.id if variant is not None else None,
     )
     db.flush()
 
