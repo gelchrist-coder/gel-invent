@@ -87,7 +87,6 @@ export default function SignIn({ onLogin }: SignInProps) {
     }
 
     if (!loginResponse.ok) {
-      if (recaptcha.enabled) recaptcha.reset();
       const errorData = await safeJson(loginResponse);
       const detail = isRecord(errorData) && typeof errorData.detail === "string" ? errorData.detail : null;
       setError(detail || "Invalid email/phone or password");
@@ -113,18 +112,14 @@ export default function SignIn({ onLogin }: SignInProps) {
         setLoading(false);
         return;
       }
-      if (recaptcha.enabled && !recaptcha.token) {
-        setError("Please complete the reCAPTCHA checkbox");
-        setLoading(false);
-        return;
-      }
-
-      await performLogin(email, password, recaptcha.token);
+      // v3: mint an invisible token at submit time (undefined if reCAPTCHA is
+      // off or failed to run — we proceed anyway, fail-open).
+      const captchaToken = await recaptcha.execute("login");
+      await performLogin(email, password, captchaToken);
       setLoading(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[SignIn] Unhandled error:", err);
-      if (recaptcha.enabled) recaptcha.reset();
       if (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("fetch")) {
         setError("Cannot reach the server. Check your internet connection and try again.");
       } else {
@@ -185,12 +180,6 @@ export default function SignIn({ onLogin }: SignInProps) {
             />
           </div>
 
-          {recaptcha.enabled && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div ref={recaptcha.containerRef} />
-              {recaptcha.loadError && <span style={{ fontSize: 12, color: "#b91c1c" }}>{recaptcha.loadError}</span>}
-            </div>
-          )}
         </div>
 
         <button type="submit" disabled={loading} style={submitButtonStyle(loading)}>

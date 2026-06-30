@@ -4,6 +4,16 @@ import react from "@vitejs/plugin-react";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
 
+  // reCAPTCHA v3 site key. Vercel injects dashboard vars into process.env at
+  // build, so we read SITE_KEY directly (a non-VITE_ name isn't auto-exposed to
+  // the browser). Falls back to VITE_RECAPTCHA_SITE_KEY or a local .env value.
+  const recaptchaSiteKey =
+    process.env.SITE_KEY ||
+    process.env.VITE_RECAPTCHA_SITE_KEY ||
+    env.SITE_KEY ||
+    env.VITE_RECAPTCHA_SITE_KEY ||
+    "";
+
   return {
     plugins: [react()],
     server: {
@@ -20,7 +30,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     define: {
-      "import.meta.env.Site_key": JSON.stringify(env.Site_key || ""),
+      "import.meta.env.RECAPTCHA_SITE_KEY": JSON.stringify(recaptchaSiteKey),
     },
   };
 });

@@ -124,11 +124,8 @@ export default function SignUp({ onLogin }: SignUpProps) {
         setLoading(false);
         return;
       }
-      if (recaptcha.enabled && !recaptcha.token) {
-        setError("Please complete the reCAPTCHA checkbox");
-        setLoading(false);
-        return;
-      }
+      // v3: invisible token at submit time; undefined = proceed without it.
+      const captchaToken = await recaptcha.execute("signup");
 
       const signupPayload = {
         email: formData.email.trim(),
@@ -139,7 +136,7 @@ export default function SignUp({ onLogin }: SignUpProps) {
         business_location: formData.businessLocation.trim(),
         business_types: formData.businessTypes,
         branches: formData.hasBranches ? formData.branches : [],
-        ...(recaptcha.enabled ? { recaptcha_token: recaptcha.token } : {}),
+        ...(captchaToken ? { recaptcha_token: captchaToken } : {}),
       };
 
       const signupResponse = await fetchWithSameOriginApiFallback("/auth/signup", {
@@ -151,7 +148,6 @@ export default function SignUp({ onLogin }: SignUpProps) {
       if (!signupResponse.ok) {
         const errorData = await safeJson(signupResponse);
         const detail = isRecord(errorData) && typeof errorData.detail === "string" ? errorData.detail : null;
-        if (recaptcha.enabled) recaptcha.reset();
         setError(detail || "Signup failed");
         setLoading(false);
         return;
@@ -166,7 +162,6 @@ export default function SignUp({ onLogin }: SignUpProps) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[SignUp] Unhandled error:", err);
-      if (recaptcha.enabled) recaptcha.reset();
       if (message.includes("Failed to fetch") || message.includes("NetworkError") || message.includes("fetch")) {
         setError("Cannot reach the server. Check your internet connection and try again.");
       } else {
@@ -422,13 +417,6 @@ export default function SignUp({ onLogin }: SignUpProps) {
               autoComplete="new-password"
             />
           </div>
-
-          {recaptcha.enabled && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div ref={recaptcha.containerRef} />
-              {recaptcha.loadError && <span style={{ fontSize: 12, color: "#b91c1c" }}>{recaptcha.loadError}</span>}
-            </div>
-          )}
         </div>
 
         <button type="submit" disabled={loading} style={submitButtonStyle(loading)}>

@@ -199,13 +199,22 @@ def _ordered_branch_names(primary_location: Optional[str], branches: Optional[li
     return ordered
 
 
-def _verify_recaptcha_or_raise(token: Optional[str]) -> None:
-    secret = (os.getenv("RECAPTCHA_SECRET_KEY") or "").strip()
-    if not secret:
-        return
+# reCAPTCHA v3 returns a score in [0,1]; below this the request is treated as
+# likely automated. Kept lenient so genuine users on shared/VPN networks are not
+# wrongly blocked. The whole check is fail-open: a missing token or a Google
+# outage never blocks sign-in/sign-up.
+RECAPTCHA_MIN_SCORE = 0.3
 
+
+def _verify_recaptcha_or_raise(token: Optional[str]) -> None:
+    secret = (os.getenv("RECAPTCHA_SECRET_KEY") or os.getenv("CAP_SECRET_KEY") or "").strip()
+    if not secret:
+        return  # reCAPTCHA not configured -> allow
+
+    # Fail-open: if the invisible v3 widget didn't run (region/network/adblock),
+    # there's no token — don't lock the user out over it.
     if not token:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please complete the reCAPTCHA checkbox")
+        return
 
     payload = urllib.parse.urlencode({"secret": secret, "response": token}).encode("utf-8")
     request = urllib.request.Request(
@@ -217,13 +226,21 @@ def _verify_recaptcha_or_raise(token: Optional[str]) -> None:
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             verification = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not verify reCAPTCHA") from exc
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        # Fail-open on Google downtime/timeouts.
+        return
 
     if not verification.get("success"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="reCAPTCHA verification failed. Use a reCAPTCHA v2 checkbox site key and secret.",
+            detail="reCAPTCHA verification failed. Please try again.",
+        )
+
+    score = verification.get("score")
+    if isinstance(score, (int, float)) and score < RECAPTCHA_MIN_SCORE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your request looked automated. Please try again.",
         )
 
 

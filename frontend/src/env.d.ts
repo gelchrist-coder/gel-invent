@@ -3,7 +3,8 @@
 interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
   readonly VITE_RECAPTCHA_SITE_KEY?: string;
-  readonly Site_key?: string;
+  // Injected by vite.config from the SITE_KEY env var (reCAPTCHA v3 site key).
+  readonly RECAPTCHA_SITE_KEY?: string;
 }
 
 interface ImportMeta {
@@ -13,16 +14,8 @@ interface ImportMeta {
 interface Window {
   grecaptcha?: {
     ready: (callback: () => void) => void;
-    render: (
-      container: HTMLElement | string,
-      parameters: {
-        sitekey: string;
-        callback?: (token: string) => void;
-        "expired-callback"?: () => void;
-        "error-callback"?: () => void;
-      },
-    ) => number;
-    reset: (widgetId?: number) => void;
+    // reCAPTCHA v3: invisible, returns a token for the given action.
+    execute: (siteKey: string, options: { action: string }) => Promise<string>;
   };
   __gelInventRecaptchaScriptPromise?: Promise<void>;
 }

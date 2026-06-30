@@ -104,12 +104,12 @@ export const getPasswordRuleError = (password: string): string | null => {
 // reCAPTCHA
 // ---------------------------------------------------------------------------
 
-export function loadRecaptchaScript(): Promise<void> {
+export function loadRecaptchaScript(siteKey: string): Promise<void> {
   if (typeof window === "undefined") {
     return Promise.resolve();
   }
 
-  if (window.grecaptcha) {
+  if (window.grecaptcha?.execute) {
     return Promise.resolve();
   }
 
@@ -119,7 +119,8 @@ export function loadRecaptchaScript(): Promise<void> {
 
   window.__gelInventRecaptchaScriptPromise = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
+    // v3 loads with the site key in the URL and runs invisibly.
+    script.src = `https://www.google.com/recaptcha/api.js?render=${encodeURIComponent(siteKey)}`;
     script.async = true;
     script.defer = true;
     script.onload = () => resolve();
@@ -130,90 +131,59 @@ export function loadRecaptchaScript(): Promise<void> {
   return window.__gelInventRecaptchaScriptPromise;
 }
 
-const RECAPTCHA_LOAD_ERROR = "reCAPTCHA could not load. Use a reCAPTCHA v2 checkbox site key, not a v3 key.";
-
 export type RecaptchaController = {
   enabled: boolean;
-  token: string;
-  loadError: string;
-  reset: () => void;
-  containerRef: React.RefObject<HTMLDivElement>;
+  /**
+   * Get a fresh reCAPTCHA v3 token for an action. Resolves to undefined when
+   * reCAPTCHA is disabled or fails to run — callers proceed without a token
+   * (fail-open) so a reCAPTCHA hiccup can never block sign-in/sign-up.
+   */
+  execute: (action: string) => Promise<string | undefined>;
 };
 
 /**
- * Renders and manages a reCAPTCHA v2 checkbox widget. Pass `active=false`
- * (e.g. while a different sub-flow is showing) to clear the token.
+ * reCAPTCHA v3 (invisible, score-based). No checkbox/widget to render: call
+ * `execute(action)` at submit time to mint a token. Pass `active=false` to skip
+ * preloading the script.
  */
 export function useRecaptcha(active: boolean = true): RecaptchaController {
   const siteKey =
-    import.meta.env.VITE_RECAPTCHA_SITE_KEY?.trim() || import.meta.env.Site_key?.trim() || "";
+    (import.meta.env.RECAPTCHA_SITE_KEY || import.meta.env.VITE_RECAPTCHA_SITE_KEY || "").trim();
   const enabled = siteKey.length > 0;
 
-  const [token, setToken] = useState("");
-  const [loadError, setLoadError] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
-  const widgetIdRef = useRef<number | null>(null);
-
-  const reset = useCallback(() => {
-    setToken("");
-    if (window.grecaptcha && widgetIdRef.current !== null) {
-      window.grecaptcha.reset(widgetIdRef.current);
-    }
-  }, []);
-
+  // Preload the script when enabled so the first execute() is fast.
   useEffect(() => {
     if (!enabled || !active) {
-      setToken("");
       return;
     }
-
-    let cancelled = false;
-
-    loadRecaptchaScript()
-      .then(() => {
-        if (cancelled || !window.grecaptcha || !containerRef.current) {
-          return;
-        }
-
-        window.grecaptcha.ready(() => {
-          if (cancelled || !window.grecaptcha || !containerRef.current) {
-            return;
-          }
-
-          setLoadError("");
-
-          if (widgetIdRef.current === null) {
-            widgetIdRef.current = window.grecaptcha.render(containerRef.current, {
-              sitekey: siteKey,
-              callback: (t: string) => {
-                setToken(t);
-                setLoadError("");
-              },
-              "expired-callback": () => setToken(""),
-              "error-callback": () => {
-                setToken("");
-                setLoadError(RECAPTCHA_LOAD_ERROR);
-              },
-            });
-            return;
-          }
-
-          window.grecaptcha.reset(widgetIdRef.current);
-          setToken("");
-        });
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setLoadError(RECAPTCHA_LOAD_ERROR);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    void loadRecaptchaScript(siteKey).catch(() => {
+      // Ignore preload failures; execute() retries and fails open.
+    });
   }, [enabled, active, siteKey]);
 
-  return { enabled, token, loadError, reset, containerRef };
+  const execute = useCallback(
+    async (action: string): Promise<string | undefined> => {
+      if (!enabled) {
+        return undefined;
+      }
+      try {
+        await loadRecaptchaScript(siteKey);
+        const grecaptcha = window.grecaptcha;
+        if (!grecaptcha?.execute) {
+          return undefined;
+        }
+        await new Promise<void>((resolve) => grecaptcha.ready(() => resolve()));
+        const token = await grecaptcha.execute(siteKey, { action });
+        return token || undefined;
+      } catch {
+        // Fail-open: never block auth because reCAPTCHA couldn't run.
+        return undefined;
+      }
+    },
+    [enabled, siteKey],
+  );
+
+  return { enabled, execute };
 }
 
 /** Warm the backend process on mount so the first auth request is faster. */
