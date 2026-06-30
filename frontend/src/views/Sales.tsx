@@ -62,16 +62,19 @@ function receiptMoney(n: number): string {
 }
 
 function buildReceiptHtml(data: ReceiptData): string {
+  // Modern minimal: item name on top with a muted "qty x price" line beneath,
+  // line total right-aligned. Reads cleaner than a 4-column table on 80mm.
   const itemsRows = data.lines
     .map(
       (line) => `
-      <tr>
-        <td class="it-name">${escapeReceiptHtml(line.name)}</td>
-        <td class="r">${escapeReceiptHtml(line.qtyLabel)}</td>
-        <td class="r">${line.unitPrice.toFixed(2)}</td>
-        <td class="r">${line.lineTotal.toFixed(2)}</td>
-      </tr>
-      ${line.note ? `<tr><td colspan="4" class="it-note">${escapeReceiptHtml(line.note)}</td></tr>` : ""}`,
+      <div class="item">
+        <div class="top">
+          <div class="name">${escapeReceiptHtml(line.name)}</div>
+          <div class="amt">${receiptMoney(line.lineTotal)}</div>
+        </div>
+        <div class="sub">${escapeReceiptHtml(line.qtyLabel)} &times; ${line.unitPrice.toFixed(2)}</div>
+        ${line.note ? `<div class="note">${escapeReceiptHtml(line.note)}</div>` : ""}
+      </div>`,
     )
     .join("");
 
@@ -79,17 +82,18 @@ function buildReceiptHtml(data: ReceiptData): string {
   const tax = Number(data.tax || 0);
   const isCredit = data.paymentMethod.toLowerCase() === "credit";
 
-  const payRows: string[] = [
-    `<div class="row"><span>Payment</span><span>${escapeReceiptHtml(data.paymentMethod.toUpperCase())}</span></div>`,
-  ];
+  const methodLabel = data.paymentMethod
+    ? data.paymentMethod.charAt(0).toUpperCase() + data.paymentMethod.slice(1).toLowerCase()
+    : "Cash";
+  const payRows: string[] = [`<div class="method">Paid by ${escapeReceiptHtml(methodLabel)}</div>`];
   if (isCredit) {
     if (data.amountPaid != null) payRows.push(`<div class="row"><span>Paid</span><span>${receiptMoney(Number(data.amountPaid))}</span></div>`);
     if (data.receivedVia) payRows.push(`<div class="row"><span>Received via</span><span>${escapeReceiptHtml(String(data.receivedVia).toUpperCase())}</span></div>`);
-    if (data.balance != null) payRows.push(`<div class="row strong"><span>Balance Due</span><span>${receiptMoney(Number(data.balance))}</span></div>`);
+    if (data.balance != null) payRows.push(`<div class="row due"><span>Balance due</span><span>${receiptMoney(Number(data.balance))}</span></div>`);
   } else {
     const cash = data.cashPaid != null ? Number(data.cashPaid) : data.total;
     const change = data.change != null ? Number(data.change) : Math.max(0, cash - data.total);
-    payRows.push(`<div class="row"><span>Cash</span><span>${receiptMoney(cash)}</span></div>`);
+    payRows.push(`<div class="row"><span>Tendered</span><span>${receiptMoney(cash)}</span></div>`);
     payRows.push(`<div class="row"><span>Change</span><span>${receiptMoney(change)}</span></div>`);
   }
 
@@ -102,60 +106,61 @@ function buildReceiptHtml(data: ReceiptData): string {
   @page { size: 80mm auto; margin: 0; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; }
-  body { width: 80mm; color: #000; font-family: ui-monospace, 'SFMono-Regular', 'Roboto Mono', 'Courier New', monospace; font-size: 12px; line-height: 1.45; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .wrap { padding: 5mm 4mm 4mm; }
-  .logo { display: block; margin: 0 auto 5px; max-width: 36mm; max-height: 22mm; object-fit: contain; }
-  .biz { text-align: center; font-size: 18px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
-  .tagline { text-align: center; font-size: 11px; color: #222; margin-top: 2px; letter-spacing: 3px; }
-  hr { border: 0; border-top: 1px dashed #000; margin: 7px 0; }
-  .meta { font-size: 11px; }
-  .meta .row { display: flex; justify-content: space-between; gap: 8px; }
-  table.items { width: 100%; border-collapse: collapse; font-size: 11px; }
-  table.items thead th { text-align: right; font-weight: 700; padding: 0 0 4px; border-bottom: 1px solid #000; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
-  table.items thead th:first-child { text-align: left; }
-  table.items td { padding: 4px 0; vertical-align: top; }
-  table.items td.r { text-align: right; white-space: nowrap; padding-left: 6px; }
-  td.it-name { font-weight: 700; word-break: break-word; }
-  td.it-note { font-size: 10px; color: #444; padding: 0 0 5px; }
-  .totals .row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12px; }
-  .grand { display: flex; justify-content: space-between; align-items: center; font-size: 16px; font-weight: 800; border-top: 2px solid #000; border-bottom: 2px solid #000; padding: 6px 0; margin: 4px 0; }
-  .pay .row { display: flex; justify-content: space-between; padding: 2px 0; font-size: 11px; }
-  .pay .row.strong { font-weight: 800; }
-  .footer { text-align: center; font-size: 11px; margin-top: 9px; }
-  .footer .thanks { font-weight: 800; font-size: 12px; }
-  .footer .powered { margin-top: 7px; font-size: 9px; color: #777; letter-spacing: 1px; }
+  body { width: 80mm; color: #1a1a1a; font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .wrap { padding: 7mm 6mm 6mm; }
+  .logo { display: block; margin: 0 auto 9px; max-width: 40mm; max-height: 24mm; object-fit: contain; }
+  .biz { text-align: center; font-size: 19px; font-weight: 700; letter-spacing: 0.3px; }
+  .docnum { text-align: center; font-size: 10px; color: #999; letter-spacing: 1.5px; text-transform: uppercase; margin-top: 7px; }
+  .meta { margin-top: 11px; font-size: 11px; }
+  .meta .row { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+  .meta .k { color: #999; }
+  .divider { height: 1px; background: #d9d9d9; margin: 13px 0; }
+  .item { padding: 7px 0; border-bottom: 1px solid #ececec; }
+  .item:last-child { border-bottom: 0; }
+  .item .top { display: flex; justify-content: space-between; gap: 10px; }
+  .item .name { font-weight: 600; word-break: break-word; }
+  .item .amt { font-weight: 600; white-space: nowrap; }
+  .item .sub { font-size: 10.5px; color: #999; margin-top: 1px; }
+  .item .note { font-size: 10px; color: #b45309; margin-top: 3px; }
+  .totals { margin-top: 13px; }
+  .totals .row { display: flex; justify-content: space-between; color: #666; font-size: 12px; padding: 2px 0; }
+  .grandbar { display: flex; justify-content: space-between; align-items: center; background: #111; color: #fff; border-radius: 8px; padding: 11px 14px; margin: 13px 0; }
+  .grandbar .lbl { font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+  .grandbar .val { font-size: 18px; font-weight: 800; }
+  .pay { font-size: 11px; }
+  .pay .method { font-weight: 600; margin-bottom: 4px; }
+  .pay .row { display: flex; justify-content: space-between; color: #666; padding: 1px 0; }
+  .pay .row.due { color: #1a1a1a; font-weight: 700; }
+  .footer { text-align: center; margin-top: 18px; }
+  .footer .thanks { font-size: 12px; font-weight: 600; }
+  .footer .sub { font-size: 11px; color: #777; margin-top: 1px; }
+  .footer .powered { margin-top: 10px; font-size: 9px; color: #bbb; letter-spacing: 1.5px; }
 </style>
 </head>
 <body>
   <div class="wrap">
     ${data.logo ? `<img class="logo" src="${data.logo}" alt="${escapeReceiptHtml(data.businessName)}" />` : ""}
     <div class="biz">${escapeReceiptHtml(data.businessName)}</div>
-    <div class="tagline">SALES RECEIPT</div>
-    <hr />
+    <div class="docnum">Sales Receipt${data.receiptNumber != null && data.receiptNumber !== "" ? ` &middot; #${escapeReceiptHtml(data.receiptNumber)}` : ""}</div>
     <div class="meta">
-      ${data.receiptNumber != null && data.receiptNumber !== "" ? `<div class="row"><span>Receipt</span><span>#${escapeReceiptHtml(data.receiptNumber)}</span></div>` : ""}
-      <div class="row"><span>Date</span><span>${escapeReceiptHtml(data.dateTime)}</span></div>
-      <div class="row"><span>Cashier</span><span>${escapeReceiptHtml(data.cashier)}</span></div>
-      <div class="row"><span>Customer</span><span>${escapeReceiptHtml(data.customer || "Walk-in")}</span></div>
+      <div class="row"><span class="k">Date</span><span>${escapeReceiptHtml(data.dateTime)}</span></div>
+      <div class="row"><span class="k">Cashier</span><span>${escapeReceiptHtml(data.cashier)}</span></div>
+      <div class="row"><span class="k">Customer</span><span>${escapeReceiptHtml(data.customer || "Walk-in")}</span></div>
     </div>
-    <hr />
-    <table class="items">
-      <thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Total</th></tr></thead>
-      <tbody>${itemsRows}</tbody>
-    </table>
-    <hr />
+    <div class="divider"></div>
+    <div class="items">${itemsRows}</div>
+    <div class="divider"></div>
     <div class="totals">
       <div class="row"><span>Subtotal</span><span>${receiptMoney(data.subtotal)}</span></div>
       ${discount > 0 ? `<div class="row"><span>Discount</span><span>- ${receiptMoney(discount)}</span></div>` : ""}
       ${tax > 0 ? `<div class="row"><span>Tax</span><span>${receiptMoney(tax)}</span></div>` : ""}
     </div>
-    <div class="grand"><span>TOTAL</span><span>${receiptMoney(data.total)}</span></div>
+    <div class="grandbar"><span class="lbl">TOTAL</span><span class="val">${receiptMoney(data.total)}</span></div>
     <div class="pay">${payRows.join("")}</div>
-    <hr />
     <div class="footer">
-      <div class="thanks">Thank you for shopping with us!</div>
-      <div>Please come again</div>
-      <div class="powered">Powered by Gel Invent</div>
+      <div class="thanks">Thank you for your purchase</div>
+      <div class="sub">We hope to see you again</div>
+      <div class="powered">POWERED BY GEL INVENT</div>
     </div>
   </div>
 </body>
