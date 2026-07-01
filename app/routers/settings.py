@@ -43,6 +43,72 @@ def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
     return settings
 
 
+# Ghana's standard taxes/levies, preloaded (all off) so owners can just toggle
+# and adjust. Prices are treated as tax-INCLUSIVE: the total never changes, the
+# receipt only breaks out how much of it is each tax.
+DEFAULT_TAXES: list[dict] = [
+    {"name": "VAT", "rate": 15.0, "enabled": False},
+    {"name": "NHIL", "rate": 2.5, "enabled": False},
+    {"name": "GETFund", "rate": 2.5, "enabled": False},
+    {"name": "COVID-19 Levy", "rate": 1.0, "enabled": False},
+    {"name": "Tourism Levy", "rate": 1.0, "enabled": False},
+]
+
+
+class TaxLine(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    rate: float = Field(ge=0, le=100)
+    enabled: bool = False
+
+
+def _read_taxes(db: Session, owner_user_id: int) -> list[dict]:
+    try:
+        row = db.execute(
+            text("SELECT tax_config FROM system_settings WHERE owner_user_id = :oid"),
+            {"oid": owner_user_id},
+        ).first()
+        raw = row[0] if row else None
+    except Exception:
+        db.rollback()
+        raw = None
+
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            cleaned: list[dict] = []
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()[:40]
+                if not name:
+                    continue
+                try:
+                    rate = float(item.get("rate") or 0)
+                except Exception:
+                    rate = 0.0
+                cleaned.append({"name": name, "rate": max(0.0, min(100.0, rate)), "enabled": bool(item.get("enabled"))})
+            return cleaned  # may be empty if the owner removed all taxes
+    return [dict(t) for t in DEFAULT_TAXES]
+
+
+def _write_taxes(db: Session, owner_user_id: int, taxes: list["TaxLine"]) -> None:
+    payload = json.dumps(
+        [
+            {"name": t.name.strip()[:40], "rate": float(t.rate), "enabled": bool(t.enabled)}
+            for t in taxes
+            if t.name.strip()
+        ]
+    )
+    db.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS tax_config TEXT"))
+    db.execute(
+        text("UPDATE system_settings SET tax_config = :cfg WHERE owner_user_id = :oid"),
+        {"cfg": payload, "oid": owner_user_id},
+    )
+
+
 class SystemSettingsRead(BaseModel):
     low_stock_threshold: int
     expiry_warning_days: int
@@ -52,6 +118,7 @@ class SystemSettingsRead(BaseModel):
     currency_code: str
     auto_backup: bool
     email_notifications: bool
+    taxes: list[TaxLine] = []
 
 
 class SystemSettingsUpdate(BaseModel):
@@ -62,6 +129,7 @@ class SystemSettingsUpdate(BaseModel):
     currency_code: str = Field(min_length=3, max_length=3)
     auto_backup: bool
     email_notifications: bool
+    taxes: list[TaxLine] | None = None
 
 
 class CurrencyConvertRequest(BaseModel):
@@ -143,7 +211,7 @@ def _tenant_user_ids(db: Session, owner_user_id: int) -> list[int]:
     return [int(row[0]) for row in rows]
 
 
-def _serialize_settings(settings: SystemSettings, owner: User | None) -> SystemSettingsRead:
+def _serialize_settings(settings: SystemSettings, owner: User | None, taxes: list[dict]) -> SystemSettingsRead:
     capability_overrides = normalize_capability_overrides(getattr(settings, "capability_overrides", None))
     business_types: list[str] | None = None
     if owner and getattr(owner, "business_types", None):
@@ -169,6 +237,7 @@ def _serialize_settings(settings: SystemSettings, owner: User | None) -> SystemS
         currency_code=_normalize_currency(getattr(settings, "currency_code", "GHS") or "GHS"),
         auto_backup=settings.auto_backup,
         email_notifications=settings.email_notifications,
+        taxes=[TaxLine(**t) for t in taxes],
     )
 
 
@@ -180,7 +249,7 @@ def get_system_settings(
     owner_user_id = _get_tenant_owner_id(current_user)
     settings = _get_or_create_settings(db, owner_user_id)
     owner = db.query(User).filter(User.id == owner_user_id).first()
-    return _serialize_settings(settings, owner)
+    return _serialize_settings(settings, owner, _read_taxes(db, owner_user_id))
 
 
 @router.put("/system", response_model=SystemSettingsRead)
@@ -191,7 +260,8 @@ def update_system_settings(
 ):
     ensure_permission(current_user, "manage_settings", "Only business owners can update system settings")
 
-    settings = _get_or_create_settings(db, current_user.id)
+    owner_user_id = _get_tenant_owner_id(current_user)
+    settings = _get_or_create_settings(db, owner_user_id)
     currency_code = _validate_currency(payload.currency_code)
     settings.low_stock_threshold = payload.low_stock_threshold
     settings.expiry_warning_days = payload.expiry_warning_days
@@ -203,10 +273,12 @@ def update_system_settings(
     settings.email_notifications = payload.email_notifications
 
     db.add(settings)
+    if payload.taxes is not None:
+        _write_taxes(db, owner_user_id, payload.taxes)
     db.commit()
     db.refresh(settings)
 
-    return _serialize_settings(settings, current_user)
+    return _serialize_settings(settings, current_user, _read_taxes(db, owner_user_id))
 
 
 class BusinessLogoRead(BaseModel):

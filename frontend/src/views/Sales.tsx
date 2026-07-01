@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
-import { assignSaleCustomer, fetchSalesCached, createSalesBulk, deleteSale, fetchProductsCached, getCachedProducts, getCachedSales, isTemporaryServerDelayError, sendSalesReceiptEmail } from "../api";
+import { assignSaleCustomer, fetchSalesCached, createSalesBulk, deleteSale, fetchProductsCached, fetchSystemSettingsCached, getCachedProducts, getCachedSales, isTemporaryServerDelayError, sendSalesReceiptEmail, TaxLine } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
@@ -31,6 +31,8 @@ type ReceiptLineItem = {
   note?: string;
 };
 
+type ReceiptTaxLine = { label: string; amount: number };
+
 type ReceiptData = {
   businessName: string;
   logo: string | null;
@@ -41,7 +43,8 @@ type ReceiptData = {
   lines: ReceiptLineItem[];
   subtotal: number;
   discount?: number;
-  tax?: number;
+  // Tax-inclusive breakdown: each active tax's portion of the (unchanged) total.
+  taxLines?: ReceiptTaxLine[];
   total: number;
   paymentMethod: string;
   cashPaid?: number | null;
@@ -50,6 +53,22 @@ type ReceiptData = {
   balance?: number | null;
   receivedVia?: string | null;
 };
+
+// Prices are tax-inclusive: split each active tax out of the total so the total
+// itself never changes. net = total / (1 + sumRates); tax_i = net * rate_i.
+function computeInclusiveTaxLines(
+  total: number,
+  taxes: { name: string; rate: number; enabled: boolean }[],
+): ReceiptTaxLine[] {
+  const active = taxes.filter((t) => t.enabled && Number(t.rate) > 0);
+  if (active.length === 0 || !(total > 0)) return [];
+  const sumRates = active.reduce((sum, t) => sum + Number(t.rate), 0);
+  const net = total / (1 + sumRates / 100);
+  return active.map((t) => ({
+    label: `${t.name} (${Number(t.rate)}%)`,
+    amount: net * (Number(t.rate) / 100),
+  }));
+}
 
 function escapeReceiptHtml(value: unknown): string {
   return String(value ?? "").replace(/[&<>"']/g, (c) =>
@@ -79,7 +98,8 @@ function buildReceiptHtml(data: ReceiptData): string {
     .join("");
 
   const discount = Number(data.discount || 0);
-  const tax = Number(data.tax || 0);
+  const taxLines = data.taxLines || [];
+  const hasTax = taxLines.length > 0;
   const isCredit = data.paymentMethod.toLowerCase() === "credit";
 
   const methodLabel = data.paymentMethod
@@ -127,6 +147,9 @@ function buildReceiptHtml(data: ReceiptData): string {
   .grandbar { display: flex; justify-content: space-between; align-items: center; background: #111; color: #fff; border-radius: 8px; padding: 11px 14px; margin: 13px 0; }
   .grandbar .lbl { font-size: 13px; font-weight: 700; letter-spacing: 1px; }
   .grandbar .val { font-size: 18px; font-weight: 800; }
+  .taxbreak { font-size: 11px; }
+  .taxbreak .tb-head { color: #999; text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; margin-bottom: 3px; }
+  .taxbreak .row { display: flex; justify-content: space-between; color: #666; padding: 1px 0; }
   .pay { font-size: 11px; }
   .pay .method { font-weight: 600; margin-bottom: 4px; }
   .pay .row { display: flex; justify-content: space-between; color: #666; padding: 1px 0; }
@@ -150,12 +173,15 @@ function buildReceiptHtml(data: ReceiptData): string {
     <div class="divider"></div>
     <div class="items">${itemsRows}</div>
     <div class="divider"></div>
-    <div class="totals">
+    ${!hasTax ? `<div class="totals">
       <div class="row"><span>Subtotal</span><span>${receiptMoney(data.subtotal)}</span></div>
       ${discount > 0 ? `<div class="row"><span>Discount</span><span>- ${receiptMoney(discount)}</span></div>` : ""}
-      ${tax > 0 ? `<div class="row"><span>Tax</span><span>${receiptMoney(tax)}</span></div>` : ""}
-    </div>
+    </div>` : ""}
     <div class="grandbar"><span class="lbl">TOTAL</span><span class="val">${receiptMoney(data.total)}</span></div>
+    ${hasTax ? `<div class="taxbreak">
+      <div class="tb-head">Tax included in total</div>
+      ${taxLines.map((t) => `<div class="row"><span>${escapeReceiptHtml(t.label)}</span><span>${receiptMoney(t.amount)}</span></div>`).join("")}
+    </div>` : ""}
     <div class="pay">${payRows.join("")}</div>
     <div class="footer">
       <div class="thanks">Thank you for your purchase</div>
@@ -557,6 +583,21 @@ export default function Sales() {
     return map;
   }, [products]);
 
+  // Active taxes for the tax-inclusive receipt breakdown, refreshed when the
+  // owner changes them in Settings.
+  const [salesTaxes, setSalesTaxes] = useState<TaxLine[]>([]);
+  useEffect(() => {
+    fetchSystemSettingsCached((fresh) => setSalesTaxes(fresh.taxes ?? []))
+      .then((s) => setSalesTaxes(s.taxes ?? []))
+      .catch(() => {});
+    const onSettingsChanged = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { taxes?: TaxLine[] } | undefined;
+      if (detail?.taxes) setSalesTaxes(detail.taxes);
+    };
+    window.addEventListener("systemSettingsChanged", onSettingsChanged as EventListener);
+    return () => window.removeEventListener("systemSettingsChanged", onSettingsChanged as EventListener);
+  }, []);
+
   const printReceipt = () => {
     if (pendingSales.length === 0) return;
 
@@ -603,6 +644,7 @@ export default function Sales() {
       customer: customerName,
       lines,
       subtotal: total,
+      taxLines: computeInclusiveTaxLines(total, salesTaxes),
       total,
       paymentMethod,
       amountPaid: isCredit ? totalPaid : undefined,
@@ -662,6 +704,7 @@ export default function Sales() {
       customer: transaction.customer_name,
       lines,
       subtotal: total,
+      taxLines: computeInclusiveTaxLines(total, salesTaxes),
       total,
       paymentMethod,
       amountPaid: isCredit ? totalPaid : undefined,

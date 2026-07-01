@@ -473,6 +473,12 @@ export async function updateBusinessLogo(dataUrl: string | null): Promise<string
   return res?.business_logo ?? null;
 }
 
+export type TaxLine = {
+  name: string;
+  rate: number;
+  enabled: boolean;
+};
+
 export type SystemSettings = {
   capability_overrides: CapabilityOverrides;
   effective_capabilities: CapabilityMap;
@@ -482,6 +488,7 @@ export type SystemSettings = {
   currency_code: string;
   auto_backup: boolean;
   email_notifications: boolean;
+  taxes: TaxLine[];
 };
 
 export type CapabilityKey =
@@ -516,6 +523,7 @@ export type SystemSettingsUpdate = {
   currency_code: string;
   auto_backup: boolean;
   email_notifications: boolean;
+  taxes?: TaxLine[];
 };
 
 type JsonObject = Record<string, unknown>;

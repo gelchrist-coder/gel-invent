@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, updateBranch, updateBusinessLogo, updateMyBusinessProfile, updateSystemSettings } from "../api";
+import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, TaxLine, updateBranch, updateBusinessLogo, updateMyBusinessProfile, updateSystemSettings } from "../api";
 import { Branch } from "../types";
 import { getStoredBusinessLogo, hasUserPermission, readStoredUser, setStoredBusinessLogo } from "../user-storage";
 
@@ -128,6 +128,7 @@ export default function Profile() {
     autoBackup: true,
     emailNotifications: false,
   });
+  const [taxes, setTaxes] = useState<TaxLine[]>([]);
 
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -246,6 +247,7 @@ export default function Profile() {
           autoBackup: settings.auto_backup,
           emailNotifications: settings.email_notifications,
         });
+        setTaxes(Array.isArray(settings.taxes) ? settings.taxes : []);
         setBusinessInfo((prev) => ({
           ...prev,
           currency: String(settings.currency_code || prev.currency || "GHS"),
@@ -314,6 +316,9 @@ export default function Profile() {
           currency_code: selectedCurrency,
           auto_backup: systemSettings.autoBackup,
           email_notifications: systemSettings.emailNotifications,
+          taxes: taxes
+            .map((t) => ({ name: t.name.trim(), rate: Number(t.rate) || 0, enabled: !!t.enabled }))
+            .filter((t) => t.name.length > 0),
         };
         const updated = await updateSystemSettings(payload);
 
@@ -340,6 +345,7 @@ export default function Profile() {
           autoBackup: updated.auto_backup,
           emailNotifications: updated.email_notifications,
         });
+        setTaxes(Array.isArray(updated.taxes) ? updated.taxes : []);
 
         window.dispatchEvent(new CustomEvent("systemSettingsChanged", { detail: updated }));
         if (conversionMessage) {
@@ -1266,6 +1272,129 @@ export default function Profile() {
                 </label>
 
               </div>
+            </div>
+
+            {/* Taxes & Levies */}
+            <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 24 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 6px", color: "#374151" }}>
+                Taxes &amp; Levies
+              </h3>
+              <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 16px" }}>
+                Prices are treated as tax-inclusive — the total a customer pays never changes.
+                Enabled taxes are shown as a breakdown on the receipt.
+              </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {taxes.map((tax, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: 12,
+                      background: "#f9fafb",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 8,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={tax.enabled}
+                      disabled={!editing}
+                      onChange={(e) =>
+                        setTaxes((prev) => prev.map((t, i) => (i === index ? { ...t, enabled: e.target.checked } : t)))
+                      }
+                      style={{ width: 18, height: 18, cursor: editing ? "pointer" : "not-allowed", flexShrink: 0 }}
+                      title="Enable this tax"
+                    />
+                    <input
+                      type="text"
+                      value={tax.name}
+                      disabled={!editing}
+                      placeholder="Tax name"
+                      onChange={(e) =>
+                        setTaxes((prev) => prev.map((t, i) => (i === index ? { ...t, name: e.target.value } : t)))
+                      }
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        padding: "8px 10px",
+                        border: "1px solid #d1d5db",
+                        borderRadius: 6,
+                        fontSize: 14,
+                        background: editing ? "#fff" : "#f3f4f6",
+                        color: tax.enabled ? "#111827" : "#6b7280",
+                      }}
+                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                      <input
+                        type="number"
+                        value={tax.rate}
+                        disabled={!editing}
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        onChange={(e) =>
+                          setTaxes((prev) => prev.map((t, i) => (i === index ? { ...t, rate: Number(e.target.value) } : t)))
+                        }
+                        style={{
+                          width: 74,
+                          padding: "8px 10px",
+                          border: "1px solid #d1d5db",
+                          borderRadius: 6,
+                          fontSize: 14,
+                          textAlign: "right",
+                          background: editing ? "#fff" : "#f3f4f6",
+                        }}
+                      />
+                      <span style={{ fontSize: 14, color: "#6b7280" }}>%</span>
+                    </div>
+                    {editing && (
+                      <button
+                        type="button"
+                        onClick={() => setTaxes((prev) => prev.filter((_, i) => i !== index))}
+                        style={{
+                          border: "none",
+                          background: "transparent",
+                          color: "#ef4444",
+                          cursor: "pointer",
+                          fontSize: 20,
+                          lineHeight: 1,
+                          padding: "0 4px",
+                          flexShrink: 0,
+                        }}
+                        aria-label="Remove tax"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {taxes.length === 0 && (
+                  <p style={{ fontSize: 13, color: "#9ca3af", margin: 0 }}>No taxes configured.</p>
+                )}
+              </div>
+
+              {editing && (
+                <button
+                  type="button"
+                  onClick={() => setTaxes((prev) => [...prev, { name: "", rate: 0, enabled: true }])}
+                  style={{
+                    marginTop: 12,
+                    padding: "8px 14px",
+                    border: "1px dashed #9ca3af",
+                    background: "#fff",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#374151",
+                    cursor: "pointer",
+                  }}
+                >
+                  + Add tax / levy
+                </button>
+              )}
             </div>
 
             {/* Branch Management */}
