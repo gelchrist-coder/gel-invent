@@ -28,6 +28,7 @@ class ProductBase(BaseModel):
     pack_cost_price: Decimal | None = Field(default=None, decimal_places=2)
     selling_price: Decimal | None = Field(default=None, decimal_places=2)
     pack_selling_price: Decimal | None = Field(default=None, decimal_places=2)
+    image: str | None = Field(default=None)
 
 
 class ProductVariantBase(BaseModel):

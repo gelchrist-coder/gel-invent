@@ -5,6 +5,7 @@ import { useAppCategories } from "../categories";
 import { getProductBatchSummary, getProductSearchText, getProductUnitConversionSummary, getProductVariantSummary } from "../product-display";
 import { useCapabilities, useExpiryTracking, useSystemSettings } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
+import ImagePicker from "./ImagePicker";
 
 type VariantDraft = {
   label: string;
@@ -171,6 +172,7 @@ export default function ProductList({
       pack_cost_price: product.pack_cost_price,
       selling_price: product.selling_price,
       pack_selling_price: product.pack_selling_price,
+      image: product.image,
     });
     setVariantDrafts(
       product.variants?.length
@@ -474,6 +476,15 @@ export default function ProductList({
               </div>
             ) : null}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                  Product Photo
+                </span>
+                <ImagePicker
+                  value={editForm.image}
+                  onChange={(url) => setEditForm({ ...editForm, image: url })}
+                />
+              </div>
               <label>
                 <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
                   Product Name *

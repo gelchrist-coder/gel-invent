@@ -6,6 +6,7 @@ import { createSupplier, updateMyCategories } from "../api";
 import { startCameraBarcodeScan } from "../barcode-scanner";
 import { useCapabilities } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
+import ImagePicker from "./ImagePicker";
 
 type Props = {
   onCreate: (payload: NewProduct, branchIdOverride?: number | null) => Promise<void>;
@@ -521,6 +522,7 @@ export default function ProductForm({
         pack_cost_price: form.packCostPrice ? parseFloat(form.packCostPrice) : undefined,
         selling_price: form.sellingPrice ? parseFloat(form.sellingPrice) : undefined,
         pack_selling_price: form.packSellingPrice ? parseFloat(form.packSellingPrice) : undefined,
+        image: form.image ?? undefined,
         initial_stock: actualStock,
         variants: preparedVariants,
         unit_conversions: preparedUnitConversions,
@@ -604,6 +606,14 @@ export default function ProductForm({
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
             Core
           </h3>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 500 }}>Product Photo</label>
+            <ImagePicker
+              value={form.image}
+              onChange={(url) => setForm({ ...form, image: url ?? undefined })}
+              disabled={busy}
+            />
+          </div>
           <div className="grid" style={{ gap: 12 }}>
             <div className="form-row">
               <label>

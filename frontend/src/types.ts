@@ -60,6 +60,7 @@ export type Product = {
   pack_cost_price?: number | null;
   selling_price?: number | null;
   pack_selling_price?: number | null;
+  image?: string | null;
   created_at: string;
   updated_at: string;
   created_by_name?: string | null;
@@ -107,6 +108,7 @@ export type NewProduct = {
   pack_cost_price?: number | null;
   selling_price?: number | null;
   pack_selling_price?: number | null;
+  image?: string | null;
   initial_stock?: number;
   variants?: NewProductVariant[];
   unit_conversions?: NewProductUnitConversion[];

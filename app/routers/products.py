@@ -288,8 +288,26 @@ class ProductUpdate(BaseModel):
     pack_cost_price: Optional[Decimal] = None
     selling_price: Optional[Decimal] = None
     pack_selling_price: Optional[Decimal] = None
+    image: Optional[str] = None
     variants: list[schemas.ProductVariantCreate] | None = None
     unit_conversions: list[schemas.ProductUnitConversionCreate] | None = None
+
+
+# The client compresses product photos to a small thumbnail before upload.
+MAX_PRODUCT_IMAGE_CHARS = 300_000
+
+
+def _validate_product_image(image: Optional[str]) -> Optional[str]:
+    if image is None:
+        return None
+    cleaned = image.strip()
+    if not cleaned:
+        return None
+    if not cleaned.startswith("data:image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product image must be an image file.")
+    if len(cleaned) > MAX_PRODUCT_IMAGE_CHARS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product image is too large. Please choose a smaller image.")
+    return cleaned
 
 
 @router.post("", response_model=schemas.ProductRead, status_code=status.HTTP_201_CREATED)
@@ -333,6 +351,7 @@ def create_product(
     initial_stock = payload.initial_stock
     product_data = payload.model_dump(exclude={'initial_stock', 'initial_location', 'variants', 'unit_conversions'})
     product_data['barcode'] = normalized_barcode
+    product_data['image'] = _validate_product_image(product_data.get('image'))
     product_data['user_id'] = current_user.id
     product_data['branch_id'] = active_branch_id
     product_data = _apply_product_defaults(product_data)
@@ -715,6 +734,8 @@ def update_product(
     # Update only provided fields
     provided_fields = payload.model_fields_set
     update_data = payload.model_dump(exclude_unset=True, exclude={"variants", "unit_conversions"})
+    if "image" in update_data:
+        update_data["image"] = _validate_product_image(update_data["image"])
     if "barcode" in update_data:
         update_data["barcode"] = normalized_barcode
     if any(key in update_data for key in PRODUCT_METADATA_FIELDS):

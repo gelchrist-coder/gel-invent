@@ -1082,6 +1082,11 @@ export default function POSSaleForm({
                 disabled={available <= 0}
                 className="pos-product-card"
               >
+                {product.image ? (
+                  <div className="pos-card-img">
+                    <img src={product.image} alt="" loading="lazy" />
+                  </div>
+                ) : null}
                 <div className="pos-card-body">
                   <div className="pos-card-name">{product.name}</div>
                   {variantSummary ? (
