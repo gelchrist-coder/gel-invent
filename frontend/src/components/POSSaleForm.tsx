@@ -1042,18 +1042,7 @@ export default function POSSaleForm({
               key={category}
               type="button"
               onClick={() => setSelectedCategory(category || "all")}
-              style={{
-                padding: "5px 12px",
-                border: "none",
-                background: selectedCategory === category ? "#111827" : "white",
-                color: selectedCategory === category ? "white" : "#6b7280",
-                borderRadius: 4,
-                cursor: "pointer",
-                fontWeight: 500,
-                fontSize: 12,
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-              }}
+              className={selectedCategory === category ? "pos-cat-tab active" : "pos-cat-tab"}
             >
               {category === "all" ? "All" : category}
             </button>
@@ -1066,9 +1055,9 @@ export default function POSSaleForm({
           minHeight: 0,
           overflowY: "auto",
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
-          gap: 8,
-          padding: 0,
+          gridTemplateColumns: "repeat(auto-fill, minmax(138px, 1fr))",
+          gap: 10,
+          padding: "2px 2px 8px",
         }}>
           {filteredProducts.map((product) => {
             const variantSummary = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes
@@ -1079,56 +1068,35 @@ export default function POSSaleForm({
               : null;
             const available = availableToSell(product);
 
+            const stockStyle = available <= 0
+              ? { background: "#fee2e2", color: "#b91c1c" }
+              : available <= 5
+                ? { background: "#fef3c7", color: "#92400e" }
+                : { background: "#dcfce7", color: "#166534" };
+
             return (
               <button
                 key={product.id}
                 type="button"
                 onClick={() => addToCart(product, 'piece')}
                 disabled={available <= 0}
-                style={{
-                  padding: 0,
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 6,
-                  background: "white",
-                  display: "flex",
-                  flexDirection: "column",
-                  cursor: available <= 0 ? "not-allowed" : "pointer",
-                  opacity: available <= 0 ? 0.5 : 1,
-                  overflow: "hidden",
-                  textAlign: "left",
-                }}
+                className="pos-product-card"
               >
-                <div style={{ padding: "10px 10px 8px" }}>
-                  <div style={{
-                    fontWeight: 600,
-                    fontSize: 12,
-                    color: "#111827",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    marginBottom: 2,
-                  }}>
-                    {product.name}
-                  </div>
+                <div className="pos-card-body">
+                  <div className="pos-card-name">{product.name}</div>
                   {variantSummary ? (
-                    <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>{variantSummary}</div>
+                    <div style={{ fontSize: 10.5, color: "#64748b", marginBottom: 6 }}>{variantSummary}</div>
                   ) : null}
-                  <div style={{ fontSize: 10, color: available <= 0 ? "#dc2626" : "#9ca3af" }}>
-                    {available <= 0 ? "Out of stock" : `${available} available`}
-                  </div>
+                  <span className="pos-stock-badge" style={stockStyle}>
+                    {available <= 0 ? "Out of stock" : `${available} in stock`}
+                  </span>
                   {batchSummary ? (
-                    <div style={{ fontSize: 10, color: "#1d4ed8", marginTop: 4 }}>{batchSummary}</div>
+                    <div style={{ fontSize: 10, color: "#1d4ed8", marginTop: 6 }}>{batchSummary}</div>
                   ) : null}
                 </div>
-                <div style={{ 
-                  padding: "8px 10px",
-                  background: "#f9fafb",
-                  borderTop: "1px solid #f3f4f6",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  color: "#111827",
-                }}>
-                  GHS {Number(product.selling_price || 0).toFixed(2)}
+                <div className="pos-card-foot">
+                  <span className="pos-card-cur">GHS</span>
+                  <span className="pos-card-price">{Number(product.selling_price || 0).toFixed(2)}</span>
                 </div>
               </button>
             );
