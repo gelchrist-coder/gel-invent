@@ -3,51 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, TaxLine, updateBranch, updateBusinessLogo, updateMyBusinessProfile, updateSystemSettings } from "../api";
 import { Branch } from "../types";
 import { getStoredBusinessLogo, hasUserPermission, readStoredUser, setStoredBusinessLogo } from "../user-storage";
-
-// Downscale + compress an uploaded image to a small square-ish data URL so it
-// stays light enough to store and to embed in printed receipts.
-//
-// Loads via an object URL rather than FileReader.readAsDataURL: object URLs
-// don't read the whole file into memory as base64, so they handle large images
-// and mobile photos (incl. not-yet-downloaded iCloud photos) far more reliably.
-function compressImageToDataUrl(file: File, maxSize = 240): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const img = new Image();
-
-    const cleanup = () => URL.revokeObjectURL(objectUrl);
-
-    img.onerror = () => {
-      cleanup();
-      reject(new Error("Couldn't read that image. Please pick a PNG or JPG (a screenshot works too)."));
-    };
-
-    img.onload = () => {
-      try {
-        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
-        const width = Math.max(1, Math.round(img.width * scale));
-        const height = Math.max(1, Math.round(img.height * scale));
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("Image processing is not supported on this device."));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        // PNG preserves logos with transparency; fine for photos too.
-        resolve(canvas.toDataURL("image/png"));
-      } catch (error) {
-        reject(error instanceof Error ? error : new Error("Could not process the image."));
-      } finally {
-        cleanup();
-      }
-    };
-
-    img.src = objectUrl;
-  });
-}
+import { compressImageToDataUrl } from "../image";
 
 type PasswordInputProps = {
   label: string;
@@ -150,7 +106,7 @@ export default function Profile() {
     }
     setLogoBusy(true);
     try {
-      const dataUrl = await compressImageToDataUrl(file);
+      const dataUrl = await compressImageToDataUrl(file, { mime: "image/png" });
       const saved = await updateBusinessLogo(dataUrl);
       setStoredBusinessLogo(saved);
       setBusinessLogo(saved);
