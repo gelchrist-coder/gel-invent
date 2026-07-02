@@ -1385,7 +1385,7 @@ export default function POSSaleForm({
                   ) : null}
                   
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div className="pos-stepper" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <div className="pos-stepper" style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <button
                         type="button"
                         onClick={() => updateQuantity(item.id, item.quantity - quantityStep)}

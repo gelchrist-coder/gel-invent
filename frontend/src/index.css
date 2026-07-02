@@ -210,7 +210,7 @@ label {
 }
 
 .pos-right {
-  width: 320px;
+  width: 380px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
