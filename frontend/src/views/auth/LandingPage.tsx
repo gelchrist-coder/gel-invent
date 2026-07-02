@@ -2,13 +2,18 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import appLogo from "../../asset/logo.png";
-import wareImage from "../../asset/Ware.webp";
 import { BENEFIT_ITEMS, FEATURE_ITEMS, useWarmBackend } from "./authShared";
 
-const I = ({ children }: { children: React.ReactNode }) => (
-  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+const I = ({ children, size = 26 }: { children: React.ReactNode; size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
     {children}
   </svg>
+);
+
+const CheckIcon = () => (
+  <I size={16}>
+    <path d="M20 6 9 17l-5-5" />
+  </I>
 );
 
 const PharmacyIcon = () => (
@@ -62,6 +67,35 @@ const ElectronicsIcon = () => (
   </I>
 );
 
+// Feature icons (order matches FEATURE_ITEMS: tracking, branches, sales, loss prevention)
+const BoxIcon = () => (
+  <I size={22}>
+    <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+    <path d="m3.3 7 8.7 5 8.7-5" />
+    <path d="M12 22V12" />
+  </I>
+);
+const BranchesIcon = () => (
+  <I size={22}>
+    <circle cx="6" cy="6" r="3" />
+    <circle cx="18" cy="18" r="3" />
+    <path d="M6 9v3a3 3 0 0 0 3 3h6" />
+  </I>
+);
+const ChartIcon = () => (
+  <I size={22}>
+    <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+    <path d="m7 14 4-4 4 4 5-6" />
+  </I>
+);
+const ShieldIcon = () => (
+  <I size={22}>
+    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+    <path d="m9 12 2 2 4-4" />
+  </I>
+);
+const FEATURE_ICONS = [BoxIcon, BranchesIcon, ChartIcon, ShieldIcon];
+
 const BUSINESS_USE_CASES = [
   { Icon: PharmacyIcon, name: "Pharmacy", description: "Track medicines, batches & expiry dates with confidence." },
   { Icon: GroceryIcon, name: "Grocery", description: "Stay on top of fast-moving stock and perishables." },
@@ -73,10 +107,88 @@ const BUSINESS_USE_CASES = [
   { Icon: ElectronicsIcon, name: "Electronics", description: "Track devices, serial numbers and accessories." },
 ];
 
+/**
+ * Pure-CSS isometric warehouse scene: a grid floor, floating parcel cubes and
+ * glass KPI chips. No 3D library — just transforms — so it costs nothing on
+ * load and animates smoothly on phones.
+ */
+function Hero3DScene() {
+  return (
+    <div className="hero3d" aria-hidden>
+      <div className="hero3d-glow" />
+      <div className="hero3d-floor" />
+
+      {/* Parcel cubes, arranged as a small warehouse stack */}
+      <div className="iso-cube" style={{ left: "34%", bottom: "20%", animationDelay: "0s" }}>
+        <div className="f f-front" /><div className="f f-right" /><div className="f f-top" />
+      </div>
+      <div className="iso-cube" style={{ left: "16%", bottom: "34%", ["--s" as string]: "62px", animationDelay: "0.8s" } as React.CSSProperties}>
+        <div className="f f-front" /><div className="f f-right" /><div className="f f-top" />
+      </div>
+      <div className="iso-cube" style={{ left: "57%", bottom: "38%", ["--s" as string]: "52px", animationDelay: "1.6s" } as React.CSSProperties}>
+        <div className="f f-front" /><div className="f f-right" /><div className="f f-top" />
+      </div>
+      <div className="iso-cube" style={{ left: "66%", bottom: "12%", ["--s" as string]: "68px", animationDelay: "2.4s" } as React.CSSProperties}>
+        <div className="f f-front" /><div className="f f-right" /><div className="f f-top" />
+      </div>
+
+      {/* Floating KPI chips */}
+      <div className="hero3d-chip" style={{ top: "6%", left: "4%", animationDelay: "0.4s" }}>
+        <span className="chip-dot" style={{ background: "#34d399" }} />
+        Stock In <strong>+120</strong> <span className="chip-up">▲ today</span>
+      </div>
+      <div className="hero3d-chip" style={{ top: "26%", right: "0%", animationDelay: "1.4s" }}>
+        <span className="chip-dot" style={{ background: "#fbbf24" }} />
+        Low stock <strong>3 items</strong> <span className="chip-warn">restock</span>
+      </div>
+      <div className="hero3d-chip" style={{ bottom: "4%", left: "18%", animationDelay: "2.2s" }}>
+        <span className="chip-dot" style={{ background: "#60a5fa" }} />
+        Today&apos;s Sales <strong>GHS 2,450</strong>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Scrollytelling: elements with .reveal fade/slide in the first time they
+ * scroll into view. Falls back to always-visible when the browser lacks
+ * IntersectionObserver or the user prefers reduced motion.
+ */
+function useScrollReveal() {
+  useEffect(() => {
+    const elements = Array.from(document.querySelectorAll<HTMLElement>(".reveal"));
+    const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReduced || typeof IntersectionObserver === "undefined") {
+      elements.forEach((el) => el.classList.add("is-visible"));
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15, rootMargin: "0px 0px -40px 0px" },
+    );
+
+    elements.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+}
+
+const revealDelay = (index: number): React.CSSProperties =>
+  ({ ["--reveal-delay" as string]: `${(index % 8) * 70}ms` }) as React.CSSProperties;
+
 export default function LandingPage() {
   const navigate = useNavigate();
   const [scrollProgress, setScrollProgress] = useState(0);
   useWarmBackend();
+  useScrollReveal();
 
   useEffect(() => {
     const onScroll = () => {
@@ -91,6 +203,14 @@ export default function LandingPage() {
 
   return (
     <div className="auth-page" style={{ ["--scroll-progress" as string]: scrollProgress } as React.CSSProperties}>
+      {/* Ambient background: drifting glow orbs + dotted grid behind everything */}
+      <div className="auth-ambient" aria-hidden>
+        <span className="orb orb-1" />
+        <span className="orb orb-2" />
+        <span className="orb orb-3" />
+        <span className="orb orb-4" />
+      </div>
+
       <header className="auth-top-nav">
         <div className="auth-brand-wrap">
           <img src={appLogo} alt="Gel Invent" className="auth-brand-mark" style={{ objectFit: "cover", background: "#fff" }} />
@@ -100,23 +220,12 @@ export default function LandingPage() {
           </div>
         </div>
         <nav className="auth-top-links" aria-label="Marketing links">
-          <a href="#features">Features</a>
-          <a href="#industries">Industries</a>
-          <a href="#benefits">Benefits</a>
-          <button
-            type="button"
-            onClick={() => navigate("/login")}
-            style={{
-              background: "transparent",
-              border: "1px solid #c7d2fe",
-              color: "#1d4ed8",
-              borderRadius: 999,
-              padding: "9px 18px",
-              fontSize: 14,
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
-          >
+          <div className="auth-top-anchors">
+            <a href="#features">Features</a>
+            <a href="#industries">Industries</a>
+            <a href="#benefits">Benefits</a>
+          </div>
+          <button type="button" className="auth-nav-ghost" onClick={() => navigate("/login")}>
             Sign In
           </button>
           <button type="button" className="auth-magic-btn" onClick={() => navigate("/signup")} style={{ cursor: "pointer" }}>
@@ -129,46 +238,63 @@ export default function LandingPage() {
         <div className="auth-hero-copy">
           <p className="auth-kicker">Built for modern retail teams</p>
           <h1>
-            Manage inventory and fulfill orders
-            <span> the right way</span>
+            Every item counted.
+            <br />
+            <span>Every sale on record.</span>
           </h1>
           <p>
-            Track stock, prevent losses, monitor branch performance, and move faster with a clean dashboard built for everyday operations.
+            Track stock in real time, sell from a fast POS, print professional receipts,
+            and watch every branch from one clean dashboard.
           </p>
           <div className="auth-hero-actions">
             <button type="button" className="auth-primary-cta" onClick={() => navigate("/signup")}>
-              Get Started
+              Get Started — It&apos;s Fast
             </button>
             <button type="button" className="auth-secondary-cta" onClick={() => navigate("/login")}>
               Sign In
             </button>
           </div>
+          <div className="auth-hero-trust">
+            <span><CheckIcon /> Works on phone &amp; desktop</span>
+            <span><CheckIcon /> Multi-branch ready</span>
+            <span><CheckIcon /> Receipts, taxes &amp; credit sales</span>
+          </div>
         </div>
-        <div className="auth-hero-visual" aria-hidden>
-          <img className="auth-hero-photo" src={wareImage} alt="Warehouse operations" />
-        </div>
+        <Hero3DScene />
       </section>
 
       <section className="auth-marketing-band" id="features">
-        <div className="auth-marketing-head">
+        <div className="auth-marketing-head reveal">
           <p className="auth-kicker">Features</p>
           <h2>Everything you need to run inventory with confidence</h2>
         </div>
         <div className="auth-marketing-grid">
-          {FEATURE_ITEMS.map((item) => (
-            <article key={item.title} className="auth-marketing-card">
-              <h3>{item.title}</h3>
-              <p>{item.description}</p>
-            </article>
-          ))}
+          {FEATURE_ITEMS.map((item, index) => {
+            const FeatureIcon = FEATURE_ICONS[index % FEATURE_ICONS.length];
+            const tint = ["tint-blue", "tint-violet", "tint-green", "tint-amber"][index % 4];
+            return (
+              <article
+                key={item.title}
+                className={`auth-marketing-card auth-feature-card ${tint} reveal`}
+                style={revealDelay(index)}
+                data-index={String(index + 1).padStart(2, "0")}
+              >
+                <div className="auth-feature-chip" aria-hidden>
+                  <FeatureIcon />
+                </div>
+                <h3>{item.title}</h3>
+                <p>{item.description}</p>
+              </article>
+            );
+          })}
         </div>
       </section>
 
       <section className="auth-marketing-band" id="industries">
-        <div className="auth-marketing-head">
+        <div className="auth-marketing-head reveal">
           <p className="auth-kicker">Industries</p>
           <h2>Built for your business</h2>
-          <p style={{ margin: "8px auto 0", maxWidth: 560, color: "#64748b", fontSize: 15 }}>
+          <p style={{ margin: "10px auto 0", maxWidth: 560, color: "#64748b", fontSize: 15 }}>
             Whatever you sell, Gel Invent adapts to how your business works.
           </p>
         </div>
@@ -176,51 +302,38 @@ export default function LandingPage() {
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 16,
-            marginTop: 24,
+            gap: 14,
+            marginTop: 28,
           }}
         >
-          {BUSINESS_USE_CASES.map((useCase) => (
+          {BUSINESS_USE_CASES.map((useCase, index) => (
             <article
               key={useCase.name}
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e2e8f0",
-                borderRadius: 14,
-                padding: 20,
-                boxShadow: "0 8px 22px rgba(15, 23, 42, 0.05)",
-              }}
+              className={`auth-marketing-card reveal ${index % 2 === 0 ? "reveal-left" : "reveal-right"}`}
+              style={revealDelay(index)}
             >
-              <div
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 12,
-                  background: "#eff6ff",
-                  color: "#1d4ed8",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-                aria-hidden
-              >
+              <div className="auth-feature-chip" aria-hidden>
                 <useCase.Icon />
               </div>
-              <h3 style={{ margin: "14px 0 6px", fontSize: 17, fontWeight: 700, color: "#0f172a" }}>{useCase.name}</h3>
-              <p style={{ margin: 0, fontSize: 14, color: "#64748b", lineHeight: 1.5 }}>{useCase.description}</p>
+              <h3>{useCase.name}</h3>
+              <p>{useCase.description}</p>
             </article>
           ))}
         </div>
       </section>
 
       <section className="auth-marketing-band auth-marketing-band-benefits" id="benefits">
-        <div className="auth-marketing-head">
+        <div className="auth-marketing-head reveal">
           <p className="auth-kicker">Benefits</p>
           <h2>Why teams choose Gel Invent every day</h2>
         </div>
         <div className="auth-marketing-grid auth-marketing-grid-benefits">
-          {BENEFIT_ITEMS.map((item) => (
-            <article key={item.title} className="auth-marketing-card auth-marketing-card-benefit">
+          {BENEFIT_ITEMS.map((item, index) => (
+            <article
+              key={item.title}
+              className="auth-marketing-card auth-marketing-card-benefit reveal"
+              style={revealDelay(index)}
+            >
               <h3>{item.title}</h3>
               <p>{item.description}</p>
             </article>
