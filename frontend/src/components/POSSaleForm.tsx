@@ -210,6 +210,10 @@ export default function POSSaleForm({
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [collectLater, setCollectLater] = useState(false);
+  // When collecting later: is the customer leaving EVERYTHING in the store, or
+  // taking PART now? "all" (default) keeps the whole order reserved; "partial"
+  // reveals a per-item "taking now" list so the receipt records what stays.
+  const [collectMode, setCollectMode] = useState<"all" | "partial">("all");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [notes, setNotes] = useState("");
   const [uiMessage, setUiMessage] = useState<{ type: "error" | "info"; text: string } | null>(null);
@@ -623,6 +627,7 @@ export default function POSSaleForm({
     setCustomerName("");
     setCustomerPhone("");
     setCollectLater(false);
+    setCollectMode("all");
     setPaymentMethod("cash");
     setNotes("");
     setScanInput("");
@@ -895,7 +900,9 @@ export default function POSSaleForm({
       let collectedPieces: number | undefined;
       if (collectLaterActive) {
         const basePerUnit = item.quantity > 0 ? pieceQuantity / item.quantity : 1;
-        const takingUnitsRaw = Number(collectNowByLine[item.id] ?? 0);
+        // "Leave all in store" mode takes nothing now; only "partial" reads the
+        // per-line amount the clerk entered.
+        const takingUnitsRaw = collectMode === "partial" ? Number(collectNowByLine[item.id] ?? 0) : 0;
         const takingUnits = Number.isFinite(takingUnitsRaw)
           ? Math.min(Math.max(takingUnitsRaw, 0), item.quantity)
           : 0;
@@ -1205,7 +1212,7 @@ export default function POSSaleForm({
             </div>
           )}
 
-          <div style={{ marginTop: 8, fontSize: 11, opacity: 0.85 }}>
+          <div className="pos-shortcuts-hint" style={{ marginTop: 8, fontSize: 11, opacity: 0.85 }}>
             Shortcuts: Ctrl+F search, Ctrl+B scan, Ctrl+K customer, F4 charge.
           </div>
         </div>
@@ -1470,57 +1477,6 @@ export default function POSSaleForm({
                     </div>
                   </div>
 
-                  {supplyTrackingEnabled && collectLater ? (() => {
-                    const takingRaw = Number(collectNowByLine[item.id] ?? 0);
-                    const taking = Number.isFinite(takingRaw) ? Math.min(Math.max(takingRaw, 0), item.quantity) : 0;
-                    const leftInStore = Math.max(0, item.quantity - taking);
-                    return (
-                      <div
-                        style={{
-                          marginTop: 8,
-                          padding: "8px 10px",
-                          borderRadius: 6,
-                          border: "1px solid #fde68a",
-                          background: "#fffbeb",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 8,
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#92400e" }}>Taking now</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            min={0}
-                            max={item.quantity}
-                            step={quantityStep}
-                            value={collectNowByLine[item.id] ?? "0"}
-                            onChange={(event) =>
-                              setCollectNowByLine((prev) => ({ ...prev, [item.id]: event.target.value }))
-                            }
-                            aria-label={`Quantity taken now for ${item.product.name}`}
-                            style={{
-                              width: 64,
-                              padding: "6px 8px",
-                              border: "1px solid #fbbf24",
-                              borderRadius: 4,
-                              fontSize: 13,
-                              fontWeight: 600,
-                              textAlign: "center",
-                              background: "white",
-                            }}
-                          />
-                          <span style={{ fontSize: 11, color: "#92400e" }}>
-                            of {formatQuantityValue(item.quantity)} · {formatQuantityValue(leftInStore)} left in store
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })() : null}
-
                   {showBatchPicker ? (
                     <div
                       style={{
@@ -1738,21 +1694,122 @@ export default function POSSaleForm({
                       </span>
                     </label>
                     {collectLater && (
-                      <input
-                        type="tel"
-                        value={customerPhone}
-                        onChange={(e) => setCustomerPhone(e.target.value)}
-                        placeholder="Customer phone (optional)"
-                        style={{
-                          width: "100%",
-                          marginTop: 10,
-                          padding: "9px 12px",
-                          border: "1px solid #fbbf24",
-                          borderRadius: 4,
-                          fontSize: 13,
-                          background: "white",
-                        }}
-                      />
+                      <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                        <input
+                          type="tel"
+                          value={customerPhone}
+                          onChange={(e) => setCustomerPhone(e.target.value)}
+                          placeholder="Customer phone (optional)"
+                          style={{
+                            width: "100%",
+                            padding: "9px 12px",
+                            border: "1px solid #fbbf24",
+                            borderRadius: 4,
+                            fontSize: 13,
+                            background: "white",
+                          }}
+                        />
+
+                        {/* Take everything later, or let the customer take part now? */}
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>
+                            Is the customer taking any now?
+                          </div>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            {([
+                              { key: "all", label: "Leave all in store" },
+                              { key: "partial", label: "Take part now" },
+                            ] as const).map((option) => {
+                              const active = collectMode === option.key;
+                              return (
+                                <button
+                                  key={option.key}
+                                  type="button"
+                                  onClick={() => setCollectMode(option.key)}
+                                  style={{
+                                    flex: 1,
+                                    padding: "8px 10px",
+                                    borderRadius: 6,
+                                    border: active ? "1px solid #d97706" : "1px solid #e5e7eb",
+                                    background: active ? "#f59e0b" : "white",
+                                    color: active ? "white" : "#374151",
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  {option.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {collectMode === "partial" && (
+                          <div style={{ display: "grid", gap: 6 }}>
+                            {cart.map((item) => {
+                              const normalized = normalizeSaleUnitType(item.saleUnitType);
+                              const step = normalized === "piece"
+                                ? getPieceQuantityStep(item.product, fractionalSalesEnabled)
+                                : 1;
+                              const takingRaw = Number(collectNowByLine[item.id] ?? 0);
+                              const taking = Number.isFinite(takingRaw)
+                                ? Math.min(Math.max(takingRaw, 0), item.quantity)
+                                : 0;
+                              const left = Math.max(0, item.quantity - taking);
+                              return (
+                                <div
+                                  key={item.id}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: 8,
+                                    padding: "6px 8px",
+                                    borderRadius: 6,
+                                    border: "1px solid #fde68a",
+                                    background: "white",
+                                  }}
+                                >
+                                  <div style={{ minWidth: 0, flex: 1 }}>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                      {item.product.name}
+                                    </div>
+                                    <div style={{ fontSize: 10.5, color: "#92400e" }}>
+                                      {formatQuantityValue(left)} of {formatQuantityValue(item.quantity)} left in store
+                                    </div>
+                                  </div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                                    <input
+                                      type="number"
+                                      inputMode="decimal"
+                                      min={0}
+                                      max={item.quantity}
+                                      step={step}
+                                      value={collectNowByLine[item.id] ?? "0"}
+                                      onChange={(event) =>
+                                        setCollectNowByLine((prev) => ({ ...prev, [item.id]: event.target.value }))
+                                      }
+                                      aria-label={`Quantity taken now for ${item.product.name}`}
+                                      style={{
+                                        width: 56,
+                                        padding: "6px",
+                                        border: "1px solid #fbbf24",
+                                        borderRadius: 4,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                        textAlign: "center",
+                                        background: "white",
+                                      }}
+                                    />
+                                    <span style={{ fontSize: 10.5, color: "#92400e", whiteSpace: "nowrap" }}>taken</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

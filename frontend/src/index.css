@@ -244,8 +244,8 @@ label {
   }
 
   .pos-cart-items {
-    min-height: 150px;
-    max-height: 300px;
+    min-height: 200px;
+    max-height: 46vh;
   }
 }
 
@@ -1007,6 +1007,12 @@ label {
   /* Keep the charge button clear of the bottom tab bar. */
   .pos-checkout {
     bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+
+  /* Keyboard shortcuts (Ctrl+F, F4…) don't apply on touch devices — hide the
+     hint on phones so the order panel isn't cluttered. */
+  .pos-shortcuts-hint {
+    display: none;
   }
 
   /* Bigger quantity steppers for thumbs. */

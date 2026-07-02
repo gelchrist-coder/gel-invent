@@ -859,10 +859,10 @@ export default function ProductForm({
         </div>
         )}
 
-        {/* Units */}
+        {/* Pricing & Stock */}
         <div style={modalSectionStyle}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
-            Units
+            Pricing &amp; Stock
           </h3>
           <div className="grid" style={{ gap: 12 }}>
             <div className="form-row">
@@ -1178,14 +1178,15 @@ export default function ProductForm({
           </div>
         </div>
 
-        {/* Variants */}
+        {/* Variants — only shown for business types that actually use them
+            (Fashion, Cosmetics, Electronics). Simpler businesses never see this
+            section at all, so there is nothing extra to be confused by. */}
+        {canConfigureVariants && (
         <div style={modalSectionStyle}>
           <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 12px", color: "#1a2235" }}>
             Variants
           </h3>
           <div className="grid" style={{ gap: 12 }}>
-            {canConfigureVariants ? (
-              <>
                 {capabilities.variants ? (
                   <div className="form-row">
                     <label>
@@ -1260,12 +1261,6 @@ export default function ProductForm({
                     </label>
                   </div>
                 ) : null}
-              </>
-            ) : (
-              <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>
-                Variant controls are currently disabled for this business type.
-              </p>
-            )}
 
             {(capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes) ? (
               <div style={{ display: "grid", gap: 10, padding: 12, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
@@ -1337,6 +1332,7 @@ export default function ProductForm({
             ) : null}
           </div>
         </div>
+        )}
 
         {error ? <p style={{ color: "#d14343", margin: 0 }}>{error}</p> : null}
 
