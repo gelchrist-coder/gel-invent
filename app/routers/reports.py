@@ -11,7 +11,7 @@ from ..auth import get_current_active_user
 from app.permissions import ensure_permission, is_admin
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
-from app.utils.expiry import get_batch_balances
+from app.utils.expiry import get_batch_balances_bulk
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 LEGACY_EXPIRY_WARNING_DAYS = 180
@@ -136,6 +136,17 @@ def get_morning_summary(
         .group_by(Product.id)
     ).all()
 
+    # One grouped query for every product's batch balances instead of one
+    # query per product inside the loop below.
+    stocked_product_ids = [int(row.id) for row in stock_rows if _to_float(row.current_stock) > 0]
+    balances_by_product = get_batch_balances_bulk(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_ids=stocked_product_ids,
+        include_null_expiry=False,
+    )
+
     low_stock_items = []
     expiring_items = []
     for row in stock_rows:
@@ -161,13 +172,7 @@ def get_morning_summary(
             soonest_expiry_date = row.expiry_date
             soonest_days_until = (row.expiry_date - today_start.date()).days
 
-        balances = get_batch_balances(
-            db=db,
-            tenant_user_ids=tenant_user_ids,
-            branch_id=active_branch_id,
-            product_id=int(row.id),
-            include_null_expiry=False,
-        )
+        balances = balances_by_product.get(int(row.id), [])
         for batch in balances:
             if batch.balance <= 0 or batch.expiry_date is None:
                 continue

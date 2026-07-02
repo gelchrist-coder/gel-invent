@@ -16,7 +16,7 @@ from app.permissions import ensure_permission, is_admin
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.movement_reasons import classify_movement, validate_reason_and_change
-from app.utils.expiry import get_batch_balances, writeoff_expired_batches
+from app.utils.expiry import get_batch_balances, get_batch_balances_bulk, writeoff_expired_batches
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
@@ -1344,14 +1344,14 @@ def get_inventory_analytics(
     expiry_warning_days = settings.expiry_warning_days
 
     # Auto-writeoff expired batches so analytics reflect real stock.
-    writeoff_expired_batches(
+    if writeoff_expired_batches(
         db=db,
         actor_user_id=current_user.id,
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=None,
-    )
-    db.commit()
+    ):
+        db.commit()
     
     # Get all products with their stock levels
     products = db.scalars(
@@ -1420,6 +1420,45 @@ def get_inventory_analytics(
         )
     ).one()
 
+    # Prefetch batch balances and latest unit costs for ALL products in two
+    # queries. The loop below used to call get_batch_balances (twice) plus a
+    # unit-cost query per product — hundreds of round trips on big catalogs.
+    product_ids = [p.id for p in products]
+    balances_by_product = get_batch_balances_bulk(
+        db=db,
+        tenant_user_ids=tenant_user_ids,
+        branch_id=active_branch_id,
+        product_ids=product_ids,
+    )
+    all_batch_numbers = sorted({
+        b.batch_number
+        for product_balances in balances_by_product.values()
+        for b in product_balances
+    })
+    unit_cost_by_product_batch: dict[tuple[int, str], Decimal | None] = {}
+    if all_batch_numbers:
+        unit_cost_rows = db.execute(
+            select(
+                StockMovement.product_id,
+                StockMovement.batch_number,
+                StockMovement.unit_cost_price,
+            )
+            .where(
+                StockMovement.product_id.in_(product_ids),
+                StockMovement.branch_id == active_branch_id,
+                StockMovement.user_id.in_(tenant_user_ids),
+                StockMovement.batch_number.in_(all_batch_numbers),
+                StockMovement.change > 0,
+            )
+            .order_by(StockMovement.created_at.desc())
+        ).all()
+        for pid, bn, unit_cost in unit_cost_rows:
+            if bn is None:
+                continue
+            key = (int(pid), str(bn))
+            if key not in unit_cost_by_product_batch:
+                unit_cost_by_product_batch[key] = unit_cost
+
     # Calculate stock for each product
     low_stock_products = []
     expiring_batches = []
@@ -1450,45 +1489,14 @@ def get_inventory_analytics(
         # Stock value (prefer per-batch unit cost; fallback to product cost)
         if total_stock > 0:
             product_cost = Decimal(product.cost_price) if product.cost_price is not None else None
-            balances = get_batch_balances(
-                db=db,
-                tenant_user_ids=tenant_user_ids,
-                branch_id=active_branch_id,
-                product_id=product.id,
-                include_null_expiry=True,
-            )
+            balances = balances_by_product.get(product.id, [])
             tracked_total = sum((b.balance for b in balances), Decimal(0))
-
-            batch_numbers = sorted({b.batch_number for b in balances if b.batch_number})
-            unit_cost_by_batch: dict[str, Decimal | None] = {}
-            if batch_numbers:
-                rows = db.execute(
-                    select(
-                        StockMovement.batch_number,
-                        StockMovement.unit_cost_price,
-                        StockMovement.created_at,
-                    )
-                    .where(
-                        StockMovement.product_id == product.id,
-                        StockMovement.branch_id == active_branch_id,
-                        StockMovement.user_id.in_(tenant_user_ids),
-                        StockMovement.batch_number.in_(batch_numbers),
-                        StockMovement.change > 0,
-                    )
-                    .order_by(StockMovement.batch_number.asc(), StockMovement.created_at.desc())
-                ).all()
-                for bn, unit_cost, _created_at in rows:
-                    if bn is None:
-                        continue
-                    bn_str = str(bn)
-                    if bn_str not in unit_cost_by_batch:
-                        unit_cost_by_batch[bn_str] = unit_cost
 
             value = Decimal(0)
             for b in balances:
                 if b.balance <= 0:
                     continue
-                unit_cost = unit_cost_by_batch.get(b.batch_number)
+                unit_cost = unit_cost_by_product_batch.get((product.id, b.batch_number))
                 if unit_cost is None:
                     unit_cost = product_cost
                 if unit_cost is None:
@@ -1515,14 +1523,7 @@ def get_inventory_analytics(
 
         # Expiring batches (true remaining per batch)
         if total_stock > 0:
-            balances = get_batch_balances(
-                db=db,
-                tenant_user_ids=tenant_user_ids,
-                branch_id=active_branch_id,
-                product_id=product.id,
-                include_null_expiry=False,
-            )
-            for b in balances:
+            for b in balances_by_product.get(product.id, []):
                 if b.balance <= 0 or b.expiry_date is None:
                     continue
                 days_to_expiry = (b.expiry_date - today).days

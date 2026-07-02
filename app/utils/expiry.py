@@ -81,6 +81,68 @@ def get_batch_balances(
     return balances
 
 
+def get_batch_balances_bulk(
+    *,
+    db,
+    tenant_user_ids: list[int],
+    branch_id: int,
+    product_ids: list[int],
+    include_null_expiry: bool = True,
+) -> dict[int, list[BatchBalance]]:
+    """Per-batch balances for MANY products in one query.
+
+    Same aggregation as get_batch_balances, but grouped by product so hot
+    endpoints (inventory analytics, morning summary) don't issue one query per
+    product.
+    """
+    if not product_ids:
+        return {}
+
+    where = [
+        models.StockMovement.product_id.in_(product_ids),
+        models.StockMovement.branch_id == branch_id,
+        models.StockMovement.user_id.in_(tenant_user_ids),
+        models.StockMovement.batch_number.is_not(None),
+    ]
+    if not include_null_expiry:
+        where.append(models.StockMovement.expiry_date.is_not(None))
+
+    rows = db.execute(
+        select(
+            models.StockMovement.product_id,
+            models.StockMovement.batch_number,
+            models.StockMovement.expiry_date,
+            models.StockMovement.location,
+            func.coalesce(func.sum(models.StockMovement.change), 0).label("balance"),
+            func.min(models.StockMovement.created_at).label("first_seen"),
+        )
+        .where(and_(*where))
+        .group_by(
+            models.StockMovement.product_id,
+            models.StockMovement.variant_id,
+            models.StockMovement.batch_number,
+            models.StockMovement.expiry_date,
+            models.StockMovement.location,
+        )
+    ).all()
+
+    balances_by_product: dict[int, list[BatchBalance]] = {}
+    for product_id, batch_number, expiry_dt, location, balance, first_seen in rows:
+        if not batch_number:
+            continue
+        bal = balance if isinstance(balance, Decimal) else Decimal(str(balance or 0))
+        balances_by_product.setdefault(int(product_id), []).append(
+            BatchBalance(
+                batch_number=str(batch_number),
+                expiry_date=expiry_dt,
+                location=location,
+                balance=bal,
+                first_seen=first_seen.date() if hasattr(first_seen, "date") and first_seen else None,
+            )
+        )
+    return balances_by_product
+
+
 def writeoff_expired_batches(
     *,
     db,

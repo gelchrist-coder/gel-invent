@@ -420,14 +420,14 @@ def list_products(
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     # Auto-writeoff any expired batches so stock totals stay accurate.
-    writeoff_expired_batches(
+    if writeoff_expired_batches(
         db=db,
         actor_user_id=current_user.id,
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=None,
-    )
-    db.commit()
+    ):
+        db.commit()
 
     products = db.query(models.Product).options(
         selectinload(models.Product.variants),
@@ -511,14 +511,14 @@ def get_product(
     ensure_permission(current_user, "view_catalog")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
-    writeoff_expired_batches(
+    if writeoff_expired_batches(
         db=db,
         actor_user_id=current_user.id,
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=product_id,
-    )
-    db.commit()
+    ):
+        db.commit()
 
     product = db.query(models.Product).options(
         selectinload(models.Product.variants),
@@ -579,14 +579,14 @@ def record_movement(
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     # Before any new movement, write off expired batches for this product.
-    writeoff_expired_batches(
+    if writeoff_expired_batches(
         db=db,
         actor_user_id=current_user.id,
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=product_id,
-    )
-    db.commit()
+    ):
+        db.commit()
 
     product = db.query(models.Product).filter(
         models.Product.id == product_id,
