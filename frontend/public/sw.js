@@ -1,5 +1,5 @@
-const SHELL_CACHE = "gel-invent-shell-v14";
-const ASSET_CACHE = "gel-invent-assets-v14";
+const SHELL_CACHE = "gel-invent-shell-v15";
+const ASSET_CACHE = "gel-invent-assets-v15";
 const APP_SHELL_URLS = [
   "/offline.html",
   "/manifest.webmanifest",
@@ -84,6 +84,15 @@ self.addEventListener("fetch", (event) => {
   }
 
   const url = new URL(request.url);
+
+  // Only ever handle real http(s) requests. blob:/data: URLs (e.g. the temporary
+  // object URLs used while compressing an uploaded image) are page-scoped and
+  // cannot be fetched from the worker — intercepting them yields ERR_ACCESS_DENIED
+  // and breaks image uploads. Let the browser load them natively.
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return;
+  }
+
   if (url.origin !== self.location.origin) {
     return;
   }
