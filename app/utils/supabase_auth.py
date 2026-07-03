@@ -27,6 +27,15 @@ def _auth_base_url() -> str:
     base = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
     if not base:
         raise SupabaseAuthError("SUPABASE_URL is not configured")
+    if not (base.startswith("http://") or base.startswith("https://")):
+        # A misconfigured env var (e.g. the wrong variable's name pasted in by
+        # mistake) would otherwise reach urllib as a malformed URL and raise an
+        # unguarded ValueError, crashing the whole request instead of failing
+        # this one signup cleanly.
+        raise SupabaseAuthError(
+            "SUPABASE_URL is misconfigured (expected an https:// URL). "
+            "Check the environment variable value."
+        )
     return f"{base}/auth/v1"
 
 

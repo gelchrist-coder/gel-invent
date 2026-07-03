@@ -58,3 +58,5 @@ htmlcov/
 .LSOverride
 
 
+.vercel
+.env*
