@@ -306,7 +306,6 @@ export default function Sales() {
   const [receiptEmail, setReceiptEmail] = useState("");
   const [emailSending, setEmailSending] = useState(false);
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
-  const [receiptWhatsAppPhone, setReceiptWhatsAppPhone] = useState("");
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [outboxCount, setOutboxCount] = useState<number>(() => getSalesOutboxCount());
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -540,7 +539,6 @@ export default function Sales() {
     setConfirmedSales([]);
     setEmailStatus(null);
     setReceiptEmail("");
-    setReceiptWhatsAppPhone("");
     setConfirmationError(null);
     setSaleConfirmed(false);
     // Reset flag after state updates
@@ -599,76 +597,6 @@ export default function Sales() {
     window.addEventListener("systemSettingsChanged", onSettingsChanged as EventListener);
     return () => window.removeEventListener("systemSettingsChanged", onSettingsChanged as EventListener);
   }, []);
-
-  // WhatsApp receipts use the free wa.me "click to chat" link: it opens
-  // WhatsApp (app or Web) with the receipt text pre-filled so the cashier
-  // just presses send. No WhatsApp Business API, no per-message fees.
-  const buildReceiptText = (): string => {
-    const total = pendingSales.reduce((sum, sale) => sum + (Number(sale.total_price) || 0), 0);
-    const totalPaid = pendingSales.reduce((sum, sale) => sum + (Number(sale.amount_paid) || 0), 0);
-    const paymentMethod = String(pendingSales[0]?.payment_method ?? "cash");
-    const customerName = (pendingSales[0]?.customer_name || "").trim();
-
-    const textLines: string[] = [
-      `*${businessName}*`,
-      `Receipt · ${new Date().toLocaleString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}`,
-    ];
-    if (customerName) textLines.push(`Customer: ${customerName}`);
-    textLines.push("");
-
-    for (const sale of pendingSales) {
-      const product = productById.get(sale.product_id);
-      const isPack = sale.sale_unit_type === "pack" && typeof sale.pack_quantity === "number";
-      const qty = isPack ? sale.pack_quantity : Number(sale.quantity) || 0;
-      const unitPrice = Number(sale.unit_price) || 0;
-      const lineTotal = Number(sale.total_price) || 0;
-      textLines.push(product?.name ?? "Item");
-      textLines.push(`  ${qty}${isPack ? " pack" : ""} × ${receiptMoney(unitPrice)} = ${receiptMoney(lineTotal)}`);
-    }
-
-    textLines.push("", `*TOTAL: ${receiptMoney(total)}*`);
-    const taxLines = computeInclusiveTaxLines(total, salesTaxes);
-    if (taxLines.length > 0) {
-      textLines.push("Includes:");
-      taxLines.forEach((tax) => textLines.push(`  ${tax.label}: ${receiptMoney(tax.amount)}`));
-    }
-    textLines.push(`Payment: ${paymentMethod.toUpperCase()}`);
-    if (paymentMethod.toLowerCase() === "credit") {
-      textLines.push(`Paid: ${receiptMoney(totalPaid)}`, `Balance: ${receiptMoney(Math.max(0, total - totalPaid))}`);
-    }
-    if (pendingSales.some((sale) => sale.not_supplied)) {
-      textLines.push("", "Some goods are reserved in the store for pickup.");
-    }
-    textLines.push("", `Thank you for shopping with ${businessName}!`);
-    return textLines.join("\n");
-  };
-
-  // Ghana numbers are usually written 0XX XXX XXXX; wa.me wants country-code
-  // digits only (233XXXXXXXXX). Anything already international passes through.
-  const normalizeWhatsAppPhone = (raw: string): string => {
-    const digits = raw.replace(/\D/g, "");
-    if (digits.startsWith("00")) return digits.slice(2);
-    if (digits.startsWith("0") && digits.length === 10) return `233${digits.slice(1)}`;
-    return digits;
-  };
-
-  const sendReceiptToWhatsApp = () => {
-    if (pendingSales.length === 0) return;
-    const text = encodeURIComponent(buildReceiptText());
-    const phone = normalizeWhatsAppPhone(receiptWhatsAppPhone);
-    // Without a number WhatsApp opens its contact picker, so the cashier can
-    // still send the receipt by choosing the customer there.
-    const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
-    window.open(url, "_blank", "noopener,noreferrer");
-  };
-
-  // When a sale lands, prefill the WhatsApp field with the phone captured at
-  // checkout (credit / collect-later sales) so sending is one tap.
-  useEffect(() => {
-    if (saleConfirmed && pendingSales[0]?.customer_phone) {
-      setReceiptWhatsAppPhone((previous) => previous || pendingSales[0]?.customer_phone || "");
-    }
-  }, [saleConfirmed, pendingSales]);
 
   const printReceipt = () => {
     if (pendingSales.length === 0) return;
@@ -1866,74 +1794,35 @@ export default function Sales() {
                   </div>
 
                   {canSendSaleReceipts ? (
-                    <div style={{ display: "grid", gap: 10, padding: 12, border: "1px solid #dbe5f2", borderRadius: 10, background: "#ffffff" }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "#334155" }}>Send receipt to customer</div>
-
-                      {/* WhatsApp — free wa.me link with the receipt pre-written */}
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <input
-                          type="tel"
-                          value={receiptWhatsAppPhone}
-                          onChange={(e) => setReceiptWhatsAppPhone(e.target.value)}
-                          placeholder="WhatsApp number e.g. 024xxxxxxx"
-                          style={{ flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 14 }}
-                        />
-                        <button
-                          type="button"
-                          onClick={sendReceiptToWhatsApp}
-                          style={{
-                            padding: "10px 14px",
-                            border: "none",
-                            borderRadius: 8,
-                            background: "#25d366",
-                            color: "white",
-                            fontWeight: 700,
-                            cursor: "pointer",
-                            whiteSpace: "nowrap",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                          }}
-                        >
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                            <path d="M17.5 14.4c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.96-.94 1.16-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.88-.79-1.48-1.76-1.65-2.06-.17-.3-.02-.46.13-.61.14-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.68-1.62-.93-2.22-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.8.37-.27.3-1.04 1.02-1.04 2.5 0 1.47 1.07 2.9 1.22 3.1.15.2 2.1 3.2 5.1 4.49.71.3 1.27.49 1.7.63.72.23 1.37.2 1.88.12.58-.09 1.76-.72 2-1.41.25-.7.25-1.29.18-1.41-.08-.13-.28-.2-.58-.35zM12.05 21.79h-.01a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.85 9.85 0 0 1-1.51-5.26c0-5.45 4.44-9.88 9.9-9.88a9.83 9.83 0 0 1 6.99 2.9 9.82 9.82 0 0 1 2.9 7c0 5.45-4.44 9.87-9.9 9.87zm8.42-18.29A11.8 11.8 0 0 0 12.05 0C5.5 0 .16 5.33.16 11.89c0 2.1.55 4.14 1.59 5.95L.06 24l6.3-1.65a11.9 11.9 0 0 0 5.68 1.45h.01c6.55 0 11.89-5.34 11.89-11.9 0-3.18-1.24-6.16-3.47-8.4z" />
-                          </svg>
-                          WhatsApp
-                        </button>
-                      </div>
-                      <p style={{ margin: "-4px 0 0", fontSize: 11, color: "#64748b" }}>
-                        Opens WhatsApp with the receipt written for you — just press send. Leave the number empty to pick the contact there.
-                      </p>
-
-                      {/* Email — sent from the server */}
-                      <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ display: "grid", gap: 8, padding: 10, border: "1px solid #dbe5f2", borderRadius: 10, background: "#ffffff" }}>
+                      <label style={{ display: "grid", gap: 4, margin: 0, fontSize: 12, color: "#475569", fontWeight: 600 }}>
+                        Email receipt to customer
                         <input
                           type="email"
                           value={receiptEmail}
                           onChange={(e) => setReceiptEmail(e.target.value)}
                           placeholder="customer@email.com"
-                          style={{ flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 14 }}
+                          style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 14 }}
                         />
-                        <button
-                          type="button"
-                          onClick={sendReceiptToEmail}
-                          disabled={emailSending || !receiptEmail.trim()}
-                          style={{
-                            padding: "10px 14px",
-                            border: "none",
-                            borderRadius: 8,
-                            background: emailSending || !receiptEmail.trim() ? "#94a3b8" : "#2563eb",
-                            color: "white",
-                            fontWeight: 700,
-                            cursor: emailSending ? "not-allowed" : "pointer",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {emailSending ? "Sending..." : "Email"}
-                        </button>
-                      </div>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={sendReceiptToEmail}
+                        disabled={emailSending || !receiptEmail.trim()}
+                        style={{
+                          padding: "10px 12px",
+                          border: "none",
+                          borderRadius: 8,
+                          background: emailSending ? "#94a3b8" : "#2563eb",
+                          color: "white",
+                          fontWeight: 700,
+                          cursor: emailSending ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        {emailSending ? "Sending..." : "Send Receipt Email"}
+                      </button>
                       {emailStatus && (
-                        <p style={{ margin: 0, fontSize: 12, color: /sent|success/i.test(emailStatus) ? "#166534" : "#b91c1c" }}>
+                        <p style={{ margin: 0, fontSize: 12, color: emailStatus.toLowerCase().includes("success") ? "#166534" : "#b91c1c" }}>
                           {emailStatus}
                         </p>
                       )}
