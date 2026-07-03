@@ -221,6 +221,9 @@ export default function POSSaleForm({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [suspendedCarts, setSuspendedCarts] = useState<SuspendedCart[]>([]);
   const [selectedSuspendedCartId, setSelectedSuspendedCartId] = useState("");
+  // Square-style cart: rows are one compact line each; only the line being
+  // edited (tapped) expands into the full editor. Keeps many items visible.
+  const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
   const [batchOptionsByKey, setBatchOptionsByKey] = useState<Record<string, SaleBatchOption[]>>({});
   const [batchLoadingByKey, setBatchLoadingByKey] = useState<Record<string, boolean>>({});
   const [batchErrorByKey, setBatchErrorByKey] = useState<Record<string, string | null>>({});
@@ -516,10 +519,11 @@ export default function POSSaleForm({
       ));
     } else {
       // Add new item
+      const newLineId = createCartLineId();
       setCart([
         ...cart,
         {
-          id: createCartLineId(),
+          id: newLineId,
           product,
           quantity: quantityIncrement,
           saleUnitType: normalizedSaleUnitType,
@@ -528,6 +532,11 @@ export default function POSSaleForm({
           preferredBatchNumber: null,
         },
       ]);
+      // A line that still needs a variant picked can't be charged — open its
+      // editor right away so the cashier chooses before moving on.
+      if (getProductVariantOptions(product).length > 0 && !defaultVariant) {
+        setExpandedLineId(newLineId);
+      }
     }
   };
 
@@ -619,11 +628,13 @@ export default function POSSaleForm({
   // Remove item from cart
   const removeFromCart = (lineId: string) => {
     setCart(cart.filter(item => item.id !== lineId));
+    setExpandedLineId((previous) => (previous === lineId ? null : previous));
   };
 
   // Clear cart
   const clearCart = () => {
     setCart([]);
+    setExpandedLineId(null);
     setCustomerName("");
     setCustomerPhone("");
     setCollectLater(false);
@@ -1279,52 +1290,77 @@ export default function POSSaleForm({
                   && Number(item.product.active_batch_count ?? 0) > 0
                   && (variantOptions.length === 0 || item.selectedVariantId != null);
                 
+                const isExpanded = expandedLineId === item.id;
+                const needsVariantChoice = variantOptions.length > 0 && item.selectedVariantId == null;
+                const lineMeta = [
+                  selectedVariant ? selectedVariant.label : variantSummary,
+                  selectedSaleUnit ? selectedSaleUnit.label : null,
+                  item.preferredBatchNumber ? `Batch ${item.preferredBatchNumber}` : batchSummary,
+                ].filter(Boolean).join(" · ");
+
                 return (
-                <div
-                  key={item.id}
-                  style={{
-                    padding: "10px 0",
-                    borderBottom: "1px solid #f3f4f6",
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div key={item.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  {/* Compact line — tap anywhere on it to open/close the editor */}
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={isExpanded}
+                    onClick={() => setExpandedLineId(isExpanded ? null : item.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setExpandedLineId(isExpanded ? null : item.id);
+                      }
+                    }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 0", cursor: "pointer" }}
+                  >
+                    <span
+                      style={{
+                        minWidth: 36,
+                        textAlign: "center",
+                        padding: "4px 6px",
+                        borderRadius: 6,
+                        background: isExpanded ? "#1d4ed8" : "#eff6ff",
+                        color: isExpanded ? "#ffffff" : "#1d4ed8",
+                        fontSize: 12,
+                        fontWeight: 800,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {formatQuantityValue(item.quantity)}×
+                    </span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 13, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {item.product.name}
                       </div>
-                      {selectedVariant ? (
-                        <div style={{ fontSize: 11, color: "#475569", marginTop: 3 }}>Variant: {selectedVariant.label}</div>
-                      ) : variantSummary ? (
-                        <div style={{ fontSize: 11, color: "#475569", marginTop: 3 }}>{variantSummary}</div>
-                      ) : null}
-                      {selectedSaleUnit ? (
-                        <div style={{ fontSize: 11, color: "#0f766e", marginTop: 3 }}>{selectedSaleUnit.label}</div>
-                      ) : null}
-                      {batchSummary ? (
-                        <div style={{ fontSize: 11, color: "#1d4ed8", marginTop: 3 }}>{batchSummary}</div>
+                      {needsVariantChoice ? (
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309", marginTop: 2 }}>Tap to choose a variant</div>
+                      ) : lineMeta ? (
+                        <div style={{ fontSize: 11, color: "#64748b", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {lineMeta}
+                        </div>
                       ) : null}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => removeFromCart(item.id)}
-                      style={{
-                        width: 24,
-                        height: 24,
-                        background: "transparent",
-                        color: "#9ca3af",
-                        border: "none",
-                        cursor: "pointer",
-                        fontSize: 14,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
-                        marginLeft: 8,
-                      }}
+                    <div style={{ fontWeight: 700, color: "#111827", fontSize: 13.5, flexShrink: 0 }}>
+                      GHS {(unitPrice * item.quantity).toFixed(2)}
+                    </div>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#94a3b8"
+                      strokeWidth={2.4}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{ flexShrink: 0, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s ease" }}
                     >
-                      X
-                    </button>
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
                   </div>
+
+                  {isExpanded ? (
+                  <div style={{ margin: "0 0 12px", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
 
                   {(variantOptions.length > 0 || saleUnitOptions.length > 1) ? (
                     <div style={{ display: "grid", gap: 8, marginBottom: 8 }}>
@@ -1472,9 +1508,22 @@ export default function POSSaleForm({
                         +
                       </button>
                     </div>
-                    <div style={{ fontWeight: 700, color: "#111827", fontSize: 14 }}>
-                      GHS {(unitPrice * item.quantity).toFixed(2)}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeFromCart(item.id)}
+                      style={{
+                        border: "1px solid #fecaca",
+                        background: "#fff",
+                        color: "#dc2626",
+                        borderRadius: 6,
+                        padding: "6px 12px",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Remove
+                    </button>
                   </div>
 
                   {showBatchPicker ? (
@@ -1554,6 +1603,9 @@ export default function POSSaleForm({
                         </div>
                       )}
                     </div>
+                  ) : null}
+
+                  </div>
                   ) : null}
                 </div>
               );
