@@ -220,7 +220,9 @@ label {
 }
 
 .pos-cart-items {
-  flex: 1;
+  flex: 1 1 0;
+  /* The item list must never be squeezed away by a tall checkout form. */
+  min-height: 150px;
   overflow-y: auto;
   padding: 0;
 }
@@ -229,6 +231,29 @@ label {
   flex-shrink: 0;
   border-top: 1px solid #e5e7eb;
   background: white;
+}
+
+/* Checkout dock: fixed subtotal + charge button, scrollable fields between
+   them, and a height cap so the cart list above always stays visible. */
+.pos-checkout-dock {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 62%;
+  border-top: 1px solid #e5e7eb;
+  background: white;
+}
+
+.pos-order-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pos-order-fields {
+  overflow-y: auto;
+  min-height: 0;
 }
 
 @media (max-width: 900px) {

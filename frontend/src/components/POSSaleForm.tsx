@@ -1129,34 +1129,44 @@ export default function POSSaleForm({
 
       {/* Right Side - Cart & Checkout */}
       <div className="pos-right">
-        {/* Cart Header */}
+        {/* Cart Header — one slim row so it never crowds out the item list.
+            Keyboard shortcuts live in tooltips instead of a hint line. */}
         <div style={{
-          padding: "12px 14px",
+          padding: "10px 14px",
           background: "#111827",
           color: "white",
         }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>Order</span>
-            <span style={{ fontSize: 13, opacity: 0.8 }}>{formattedTotalItems} items</span>
-          </div>
-          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>Order</span>
+            <span
+              style={{
+                fontSize: 11.5,
+                fontWeight: 700,
+                background: "rgba(255,255,255,0.14)",
+                borderRadius: 999,
+                padding: "2px 9px",
+              }}
+            >
+              {formattedTotalItems}
+            </span>
+            <span style={{ flex: 1 }} />
             <button
               type="button"
               onClick={suspendCurrentCart}
+              title="Suspend this cart (Alt+S)"
               style={{
                 border: "1px solid rgba(255,255,255,0.25)",
-                borderRadius: 999,
-                background: "rgba(255,255,255,0.15)",
+                borderRadius: 7,
+                background: "rgba(255,255,255,0.12)",
                 color: "white",
-                fontSize: 11,
+                fontSize: 11.5,
                 fontWeight: 700,
-                padding: "4px 10px",
+                padding: "5px 10px",
                 cursor: "pointer",
               }}
             >
-              Suspend (Alt+S)
+              Suspend
             </button>
-
             <button
               type="button"
               onClick={() => {
@@ -1166,19 +1176,39 @@ export default function POSSaleForm({
                 }
                 showMessage("No suspended carts available.", "info");
               }}
+              title="Resume the last suspended cart (Alt+R)"
               style={{
                 border: "1px solid rgba(255,255,255,0.25)",
-                borderRadius: 999,
-                background: "rgba(255,255,255,0.08)",
+                borderRadius: 7,
+                background: "rgba(255,255,255,0.06)",
                 color: "white",
-                fontSize: 11,
+                fontSize: 11.5,
                 fontWeight: 700,
-                padding: "4px 10px",
+                padding: "5px 10px",
                 cursor: "pointer",
               }}
             >
-              Resume Last (Alt+R)
+              Resume
             </button>
+            <span
+              className="pos-shortcuts-hint"
+              title="Keyboard shortcuts: Ctrl+F search · Ctrl+B scan · Ctrl+K customer · F4 charge · Alt+S suspend · Alt+R resume"
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: "50%",
+                border: "1px solid rgba(255,255,255,0.3)",
+                display: "grid",
+                placeItems: "center",
+                fontSize: 11,
+                fontWeight: 700,
+                opacity: 0.75,
+                cursor: "help",
+                flexShrink: 0,
+              }}
+            >
+              ?
+            </span>
           </div>
 
           {suspendedCarts.length > 0 && (
@@ -1223,9 +1253,6 @@ export default function POSSaleForm({
             </div>
           )}
 
-          <div className="pos-shortcuts-hint" style={{ marginTop: 8, fontSize: 11, opacity: 0.85 }}>
-            Shortcuts: Ctrl+F search, Ctrl+B scan, Ctrl+K customer, F4 charge.
-          </div>
         </div>
 
         {/* Cart Items */}
@@ -1614,23 +1641,20 @@ export default function POSSaleForm({
           )}
         </div>
 
-        {/* Checkout Form - Always visible when cart has items */}
+        {/* Checkout dock — capped height on desktop; the fields scroll inside
+            it so the item list above never collapses to nothing. */}
         {cart.length > 0 && (
-          <div
-            style={{
-              borderTop: "1px solid #e5e7eb",
-              background: "white",
-            }}
-          >
+          <div className="pos-checkout-dock">
               <form
-                className="pos-checkout"
+                className="pos-order-form"
                 ref={checkoutFormRef}
                 onSubmit={handleSubmit}
               >
                 {/* Total */}
                 <div style={{
-                  padding: "12px 14px",
+                  padding: "10px 14px",
                   borderBottom: "1px solid #f3f4f6",
+                  flexShrink: 0,
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span style={{ fontSize: 12, color: "#6b7280" }}>Subtotal</span>
@@ -1639,7 +1663,7 @@ export default function POSSaleForm({
                 </div>
 
                 {/* Form fields */}
-                <div style={{ padding: "12px 14px" }}>
+                <div className="pos-order-fields" style={{ padding: "12px 14px" }}>
 
                 <div style={{ marginBottom: 10 }}>
                   <select
