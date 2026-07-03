@@ -22,10 +22,11 @@ export default defineConfig(({ mode }) => {
         '/api': {
           // Point local dev at the deployed backend so /api/* works without a
           // local server. Override with VITE_DEV_API_TARGET for true local dev.
+          // The combined Vercel project serves the API under /api on the same
+          // domain, so the path passes through unchanged (no rewrite).
           target: env.VITE_DEV_API_TARGET || 'https://gel-invent.vercel.app',
           changeOrigin: true,
           secure: true,
-          rewrite: (path) => path.replace(/^\/api/, ''),
         },
       },
     },
