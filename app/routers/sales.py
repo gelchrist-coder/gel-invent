@@ -6,6 +6,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
@@ -565,7 +566,25 @@ def create_sale(
         client_sale_id=payload.client_sale_id,
     )
     db.add(sale)
-    db.flush()  # Flush to get sale.id
+    try:
+        db.flush()  # Flush to get sale.id
+    except IntegrityError:
+        # Idempotency race: the offline-outbox retry and the direct POST can
+        # both pass the client_sale_id pre-check, and the loser lands on the
+        # (branch_id, client_sale_id) unique index. Return the winner's sale
+        # instead of surfacing a 500 — the sale DID happen, exactly once.
+        db.rollback()
+        if payload.client_sale_id:
+            existing = db.scalar(
+                select(models.Sale).where(
+                    models.Sale.branch_id == active_branch_id,
+                    models.Sale.user_id.in_(tenant_user_ids),
+                    models.Sale.client_sale_id == payload.client_sale_id,
+                )
+            )
+            if existing:
+                return existing
+        raise
 
     # Create or enrich customer profile for any named sale (cash/credit/partial).
     customer_creditor: models.Creditor | None = None

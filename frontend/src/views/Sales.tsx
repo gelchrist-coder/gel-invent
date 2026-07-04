@@ -310,6 +310,9 @@ export default function Sales() {
   const [receiptEmail, setReceiptEmail] = useState("");
   const [emailSending, setEmailSending] = useState(false);
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
+  // The receipt popup stays minimal (Print / Done); the email form only
+  // appears when the cashier explicitly asks for it.
+  const [showEmailReceipt, setShowEmailReceipt] = useState(false);
   const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const [outboxCount, setOutboxCount] = useState<number>(() => getSalesOutboxCount());
   const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -491,7 +494,8 @@ export default function Sales() {
   }, [syncOutboxOnce]);
 
   const handleCreateSale = async (salesArray: NewSale[]) => {
-    // Show confirmation modal instead of submitting immediately
+    // One-tap checkout: "Charge" in the cart IS the confirmation. The popup
+    // that follows is just the receipt (Print / Done).
     const receiptId = (globalThis.crypto as Crypto | undefined)?.randomUUID?.() ?? `sale_${Date.now()}`;
     const withClientIds = salesArray.map((s, idx) => ({
       ...s,
@@ -503,11 +507,11 @@ export default function Sales() {
     setReceiptEmail("");
     setConfirmationError(null);
     setShowConfirmation(true);
-    setSaleConfirmed(false); // Reset confirmed state for new sale
+    await confirmSale(withClientIds);
   };
 
-  const confirmSale = async () => {
-    if (pendingSales.length === 0) return;
+  const confirmSale = async (salesToConfirm: NewSale[]) => {
+    if (salesToConfirm.length === 0) return;
     setConfirming(true);
     setConfirmationError(null);
     try {
@@ -516,8 +520,8 @@ export default function Sales() {
       setConfirmedSales([]);
 
       // Optimistically update local stock and queue the sale.
-      const queuedItems = enqueueSales(pendingSales);
-      const updated = applyLocalSaleToCachedProducts(pendingSales);
+      const queuedItems = enqueueSales(salesToConfirm);
+      const updated = applyLocalSaleToCachedProducts(salesToConfirm);
       if (updated) setProducts(updated);
 
       if (!navigator.onLine) {
@@ -528,7 +532,7 @@ export default function Sales() {
       // Sync in background; don't block the UI.
       void (async () => {
         try {
-          const createdSales = await createSalesBulk(pendingSales);
+          const createdSales = await createSalesBulk(salesToConfirm);
           setConfirmedSales(createdSales);
           await loadData();
           setOfflineNotice(null);
@@ -552,9 +556,9 @@ export default function Sales() {
       })();
     } catch {
       // Network issue: queue sale locally and sync later.
-      enqueueSales(pendingSales);
+      enqueueSales(salesToConfirm);
       setConfirmedSales([]);
-      const updated = applyLocalSaleToCachedProducts(pendingSales);
+      const updated = applyLocalSaleToCachedProducts(salesToConfirm);
       if (updated) setProducts(updated);
       setOfflineNotice("Sale queued for sync. We'll retry automatically.");
       setSaleConfirmed(true);
@@ -573,6 +577,7 @@ export default function Sales() {
     setConfirmedSales([]);
     setEmailStatus(null);
     setReceiptEmail("");
+    setShowEmailReceipt(false);
     setConfirmationError(null);
     setSaleConfirmed(false);
     // Reset flag after state updates
@@ -1073,23 +1078,27 @@ export default function Sales() {
   };
 
   return (
-    <div className="app-shell">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h1 className="page-title" style={{ margin: 0 }}>Sales</h1>
-        <button
-          onClick={() => void loadData()}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 6,
-            border: "1px solid #d1d5db",
-            backgroundColor: "white",
-            cursor: "pointer",
-            fontSize: 14,
-          }}
-        >
-          Refresh
-        </button>
-      </div>
+    <div className={activeSalesTab === "pos" ? "app-shell app-shell--register" : "app-shell"}>
+      {/* On the POS tab every pixel goes to selling — the page title moves out
+          of the way and Refresh joins the tab bar instead. */}
+      {activeSalesTab !== "pos" && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h1 className="page-title" style={{ margin: 0 }}>Sales</h1>
+          <button
+            onClick={() => void loadData()}
+            style={{
+              padding: "8px 16px",
+              borderRadius: 6,
+              border: "1px solid #d1d5db",
+              backgroundColor: "white",
+              cursor: "pointer",
+              fontSize: 14,
+            }}
+          >
+            Refresh
+          </button>
+        </div>
+      )}
 
       {outboxCount > 0 && (
         <div className="card" style={{ marginBottom: 16, border: "1px solid #fde68a", background: "#fffbeb" }}>
@@ -1117,7 +1126,7 @@ export default function Sales() {
         </div>
       )}
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16, padding: 6, border: "1px solid #dbe5f2", borderRadius: 14, background: "linear-gradient(180deg, #f8fbff, #f1f5fb)" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: activeSalesTab === "pos" ? 10 : 16, padding: 6, border: "1px solid #dbe5f2", borderRadius: 14, background: "linear-gradient(180deg, #f8fbff, #f1f5fb)" }}>
         {salesTabs.map((tab) => {
           const isActive = activeSalesTab === tab.id;
           return (
@@ -1129,7 +1138,7 @@ export default function Sales() {
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 8,
-                padding: "10px 16px",
+                padding: activeSalesTab === "pos" ? "8px 14px" : "10px 16px",
                 border: isActive ? "1px solid #2f66d0" : "1px solid transparent",
                 borderRadius: 10,
                 background: isActive ? "linear-gradient(120deg, #2f66d0, #4a82e8)" : "transparent",
@@ -1163,16 +1172,39 @@ export default function Sales() {
             </button>
           );
         })}
+        {activeSalesTab === "pos" && (
+          <>
+            <span style={{ flex: 1 }} />
+            <button
+              onClick={() => void loadData()}
+              title="Refresh products and sales"
+              style={{
+                padding: "7px 14px",
+                borderRadius: 8,
+                border: "1px solid #d1d5db",
+                backgroundColor: "white",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#475569",
+              }}
+            >
+              Refresh
+            </button>
+          </>
+        )}
       </div>
 
-      <div style={{ marginBottom: 24, padding: "14px 16px", borderRadius: 12, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.04)" }}>
-        <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "#0f172a" }}>{activeSalesTabMeta.label}</h2>
-        <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>{activeSalesTabMeta.description}</p>
-      </div>
+      {activeSalesTab !== "pos" && (
+        <div style={{ marginBottom: 24, padding: "14px 16px", borderRadius: 12, background: "#ffffff", border: "1px solid #e2e8f0", boxShadow: "0 8px 20px rgba(15, 23, 42, 0.04)" }}>
+          <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "#0f172a" }}>{activeSalesTabMeta.label}</h2>
+          <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>{activeSalesTabMeta.description}</p>
+        </div>
+      )}
 
       {/* POS Form */}
       {activeSalesTab === "pos" && (
-      <div className="card" style={{ marginBottom: 24, padding: 16 }}>
+      <div className="card" style={{ marginBottom: 0, padding: 8 }}>
         {products.length === 0 && loading ? (
           <p style={{ margin: 0, color: "#6b7280" }}>Loading products...</p>
         ) : (
@@ -1742,6 +1774,8 @@ export default function Sales() {
               borderTop: "1px solid #e2e8f0",
             }}>
               {!saleConfirmed ? (
+                // Only reachable when the background sync REJECTED the sale
+                // (e.g. stock validation) — the normal path confirms instantly.
                 <div style={{ display: "flex", gap: 10 }}>
                   <button
                     type="button"
@@ -1765,12 +1799,12 @@ export default function Sales() {
                       opacity: confirming ? 0.6 : 1,
                     }}
                   >
-                    ← Back
+                    Close
                   </button>
 
                   <button
                     type="button"
-                    onClick={confirmSale}
+                    onClick={() => void confirmSale(pendingSales)}
                     disabled={confirming}
                     style={{
                       flex: 1,
@@ -1784,7 +1818,7 @@ export default function Sales() {
                       cursor: confirming ? "not-allowed" : "pointer",
                     }}
                   >
-                    {confirming ? "Processing..." : "Confirm Sale"}
+                    {confirming ? "Processing..." : "Try Again"}
                   </button>
                 </div>
               ) : (
@@ -1827,7 +1861,25 @@ export default function Sales() {
                     </button>
                   </div>
 
-                  {canSendSaleReceipts ? (
+                  {canSendSaleReceipts && !showEmailReceipt ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowEmailReceipt(true)}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        color: "#2563eb",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        padding: "2px 0",
+                        justifySelf: "center",
+                      }}
+                    >
+                      Email receipt to customer
+                    </button>
+                  ) : null}
+                  {canSendSaleReceipts && showEmailReceipt ? (
                     <div style={{ display: "grid", gap: 8, padding: 10, border: "1px solid #dbe5f2", borderRadius: 10, background: "#ffffff" }}>
                       <label style={{ display: "grid", gap: 4, margin: 0, fontSize: 12, color: "#475569", fontWeight: 600 }}>
                         Email receipt to customer

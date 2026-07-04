@@ -498,22 +498,26 @@ export default function Layout({
           marginLeft: isMobile ? 0 : SIDEBAR_COLLAPSED_WIDTH,
         }}
       >
-        <TopBar
-          userName={userName}
-          userRole={userRole}
-          businessName={businessName}
-          isOnline={isOnline}
-          outboxCount={outboxCount}
-          isSyncingOutbox={isSyncingOutbox}
-          canInstallApp={canInstallApp}
-          onInstallApp={onInstallApp}
-          onLogout={onLogout}
-          onNavigate={onNavigate}
-          branches={branches}
-          activeBranchId={activeBranchId}
-          onChangeBranch={onChangeBranch}
-          isMobile={isMobile}
-        />
+        {/* The Sales page runs "register mode": no app header, so the product
+            grid and cart get the full screen height. */}
+        {activeView !== "sales" && (
+          <TopBar
+            userName={userName}
+            userRole={userRole}
+            businessName={businessName}
+            isOnline={isOnline}
+            outboxCount={outboxCount}
+            isSyncingOutbox={isSyncingOutbox}
+            canInstallApp={canInstallApp}
+            onInstallApp={onInstallApp}
+            onLogout={onLogout}
+            onNavigate={onNavigate}
+            branches={branches}
+            activeBranchId={activeBranchId}
+            onChangeBranch={onChangeBranch}
+            isMobile={isMobile}
+          />
+        )}
         <div className="app-content" style={{ flex: 1 }}>{children}</div>
       </main>
 
