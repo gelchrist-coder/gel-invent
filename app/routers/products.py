@@ -288,6 +288,8 @@ class ProductUpdate(BaseModel):
     pack_cost_price: Optional[Decimal] = None
     selling_price: Optional[Decimal] = None
     pack_selling_price: Optional[Decimal] = None
+    wholesale_price: Optional[Decimal] = None
+    wholesale_min_quantity: Optional[Decimal] = None
     image: Optional[str] = None
     variants: list[schemas.ProductVariantCreate] | None = None
     unit_conversions: list[schemas.ProductUnitConversionCreate] | None = None

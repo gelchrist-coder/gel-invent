@@ -157,6 +157,8 @@ export default function ProductForm({
     packCostPrice?: string;
     sellingPrice?: string;
     packSellingPrice?: string;
+    wholesalePrice?: string;
+    wholesaleMinQty?: string;
     initialStock?: string;
     packSize?: string;
     reorderLevel?: string;
@@ -183,6 +185,8 @@ export default function ProductForm({
     packCostPrice: "",
     sellingPrice: "",
     packSellingPrice: "",
+    wholesalePrice: "",
+    wholesaleMinQty: "",
     initialStock: "0",
     packSize: "",
     reorderLevel: "10",
@@ -522,6 +526,8 @@ export default function ProductForm({
         pack_cost_price: form.packCostPrice ? parseFloat(form.packCostPrice) : undefined,
         selling_price: form.sellingPrice ? parseFloat(form.sellingPrice) : undefined,
         pack_selling_price: form.packSellingPrice ? parseFloat(form.packSellingPrice) : undefined,
+        wholesale_price: capabilities.wholesale_pricing && form.wholesalePrice ? parseFloat(form.wholesalePrice) : undefined,
+        wholesale_min_quantity: capabilities.wholesale_pricing && form.wholesaleMinQty ? parseFloat(form.wholesaleMinQty) : undefined,
         image: form.image ?? undefined,
         initial_stock: actualStock,
         variants: preparedVariants,
@@ -552,6 +558,8 @@ export default function ProductForm({
           packCostPrice: "",
           sellingPrice: "",
           packSellingPrice: "",
+          wholesalePrice: "",
+          wholesaleMinQty: "",
           initialStock: "0",
           packSize: "",
           reorderLevel: form.reorderLevel,
@@ -893,10 +901,46 @@ export default function ProductForm({
                   placeholder="0.00"
                 />
                 <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
-                  Selling price per individual piece
+                  Selling price per individual piece (retail)
                 </small>
               </label>
             </div>
+
+            {/* Wholesale tier — only for businesses that sell wholesale + retail */}
+            {capabilities.wholesale_pricing && (
+              <div className="form-row">
+                <label>
+                  Wholesale Price (Per Piece)
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={form.wholesalePrice}
+                    onChange={(e) => setForm({ ...form, wholesalePrice: e.target.value })}
+                    placeholder="0.00"
+                  />
+                  <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
+                    Price per piece when selling wholesale. Leave empty if this product has no wholesale price.
+                  </small>
+                </label>
+                <label>
+                  Wholesale Minimum Quantity
+                  <input
+                    className="input"
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={form.wholesaleMinQty}
+                    onChange={(e) => setForm({ ...form, wholesaleMinQty: e.target.value })}
+                    placeholder="e.g. 12"
+                  />
+                  <small style={{ color: "#6b7280", fontSize: 12, marginTop: 4, display: "block" }}>
+                    Smallest quantity that qualifies for the wholesale price (optional).
+                  </small>
+                </label>
+              </div>
+            )}
             
             {/* Pack Pricing - only show if unit is not pcs/unit */}
             {form.unit !== "pcs" && form.unit !== "unit" && form.packSize && (

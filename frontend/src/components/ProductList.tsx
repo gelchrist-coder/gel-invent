@@ -172,6 +172,8 @@ export default function ProductList({
       pack_cost_price: product.pack_cost_price,
       selling_price: product.selling_price,
       pack_selling_price: product.pack_selling_price,
+      wholesale_price: product.wholesale_price,
+      wholesale_min_quantity: product.wholesale_min_quantity,
       image: product.image,
     });
     setVariantDrafts(
@@ -683,6 +685,46 @@ export default function ProductList({
                   />
                 </label>
               </div>
+              {capabilities.wholesale_pricing && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <label>
+                    <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                      Wholesale Price (₵) - Per Piece
+                    </span>
+                    <input
+                      className="input"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={editForm.wholesale_price ?? ""}
+                      onChange={(e) => setEditForm({ ...editForm, wholesale_price: e.target.value ? parseFloat(e.target.value) : null })}
+                      placeholder="0.00"
+                      style={{ fontSize: 14, padding: 10 }}
+                    />
+                    <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
+                      Leave empty if this product has no wholesale price.
+                    </small>
+                  </label>
+                  <label>
+                    <span style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, display: "block" }}>
+                      Wholesale Min Quantity
+                    </span>
+                    <input
+                      className="input"
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={editForm.wholesale_min_quantity ?? ""}
+                      onChange={(e) => setEditForm({ ...editForm, wholesale_min_quantity: e.target.value ? parseFloat(e.target.value) : null })}
+                      placeholder="e.g. 12"
+                      style={{ fontSize: 14, padding: 10 }}
+                    />
+                    <small style={{ color: "#6b7280", fontSize: 12, display: "block", marginTop: 4 }}>
+                      Smallest quantity that qualifies for wholesale (optional).
+                    </small>
+                  </label>
+                </div>
+              )}
               {editForm.unit !== "pcs" && editForm.unit !== "unit" && editingProduct?.pack_size && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <label>

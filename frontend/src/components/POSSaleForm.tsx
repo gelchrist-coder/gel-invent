@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchSaleBatchOptions } from "../api";
 import { NewSale, Product, SaleBatchOption } from "../types";
-import { useAppCategories, userNeedsSupplyTracking } from "../categories";
+import { useAppCategories } from "../categories";
 import { startCameraBarcodeScan } from "../barcode-scanner";
 import { getProductBatchSummary, getProductSearchText, getProductVariantSummary } from "../product-display";
 import { useCapabilities } from "../settings";
@@ -28,6 +28,9 @@ interface CartItem {
   selectedConversionId?: number | null;
   selectedVariantId?: number | null;
   preferredBatchNumber?: string | null;
+  // "wholesale" charges the product's wholesale price (only honoured when the
+  // line meets the product's wholesale minimum quantity, if one is set).
+  priceTier?: "retail" | "wholesale";
 }
 
 const PAYMENT_METHODS = ["cash", "card", "mobile money", "bank transfer", "credit"];
@@ -41,6 +44,7 @@ type SuspendedCartLine = {
   selected_conversion_id?: number | null;
   variant_id?: number | null;
   preferred_batch_number?: string | null;
+  price_tier?: "retail" | "wholesale";
 };
 
 type SuspendedCart = {
@@ -158,16 +162,42 @@ const getCartItemBaseQuantity = (item: Pick<CartItem, "product" | "quantity" | "
   return item.quantity * Number(conversion?.base_quantity || 1);
 };
 
-const getCartItemUnitPrice = (item: Pick<CartItem, "product" | "saleUnitType" | "selectedConversionId">): number => {
+// Whether this line actually qualifies for the wholesale price: the tier must
+// be selected, the product must have a wholesale price, and the line must meet
+// the product's wholesale minimum quantity (in base pieces) when one is set.
+const cartItemUsesWholesale = (
+  item: Pick<CartItem, "product" | "quantity" | "saleUnitType" | "selectedConversionId" | "priceTier">,
+): boolean => {
+  if (item.priceTier !== "wholesale") return false;
+  const wholesalePrice = Number(item.product.wholesale_price || 0);
+  if (!(wholesalePrice > 0)) return false;
+  const minQuantity = Number(item.product.wholesale_min_quantity || 0);
+  if (minQuantity > 0 && getCartItemBaseQuantity(item) < minQuantity) return false;
+  return true;
+};
+
+const getCartItemUnitPrice = (
+  item: Pick<CartItem, "product" | "quantity" | "saleUnitType" | "selectedConversionId" | "priceTier">,
+): number => {
   const saleUnitType = normalizeSaleUnitType(item.saleUnitType).toLowerCase();
+  const wholesale = cartItemUsesWholesale(item);
+  const perPiece = wholesale
+    ? Number(item.product.wholesale_price || 0)
+    : Number(item.product.selling_price || 0);
+
   if (saleUnitType === "piece") {
-    return Number(item.product.selling_price || 0);
+    return perPiece;
   }
   if (saleUnitType === "pack") {
-    return Number(item.product.pack_selling_price || 0) || (Number(item.product.selling_price || 0) * Number(item.product.pack_size || 0));
+    // The dedicated pack price only applies to the retail tier; wholesale
+    // packs are priced from the per-piece wholesale price.
+    if (!wholesale && Number(item.product.pack_selling_price || 0) > 0) {
+      return Number(item.product.pack_selling_price || 0);
+    }
+    return perPiece * Number(item.product.pack_size || 0);
   }
   const conversion = (item.product.unit_conversions ?? []).find((entry) => entry.id === item.selectedConversionId);
-  return Number(item.product.selling_price || 0) * Number(conversion?.base_quantity || 1);
+  return perPiece * Number(conversion?.base_quantity || 1);
 };
 
 const getCartItemDisplayUnit = (item: Pick<CartItem, "saleUnitType" | "quantity">): string => {
@@ -243,9 +273,10 @@ export default function POSSaleForm({
   const userCategories = useAppCategories();
   const capabilities = useCapabilities();
   const fractionalSalesEnabled = capabilities.fractional_sales;
-  // Only businesses that sell collect-later goods (cement, feed, etc.) see the
-  // "leave in store" option, mirroring how expiry tracking is gated by type.
-  const supplyTrackingEnabled = useMemo(() => userNeedsSupplyTracking(), []);
+  // "Leave in store — collect later" is a capability: asked at registration,
+  // defaulted on for business types where it's the norm (construction, agro),
+  // and changeable in Settings.
+  const supplyTrackingEnabled = capabilities.supply_tracking;
 
   // Quantity actually free to sell. current_stock is the physical in-store count;
   // reserved goods are physically present but already paid for, so they must be
@@ -388,6 +419,7 @@ export default function POSSaleForm({
         selected_conversion_id: item.selectedConversionId ?? null,
         variant_id: item.selectedVariantId ?? null,
         preferred_batch_number: item.preferredBatchNumber ?? null,
+        price_tier: item.priceTier ?? "retail",
       })),
       customerName,
       paymentMethod,
@@ -433,6 +465,7 @@ export default function POSSaleForm({
           selectedConversionId,
           selectedVariantId: line.variant_id ?? null,
           preferredBatchNumber: line.preferred_batch_number ?? null,
+          priceTier: line.price_tier === "wholesale" ? "wholesale" : "retail",
         } as CartItem;
       })
       .filter((line): line is CartItem => line !== null);
@@ -544,6 +577,14 @@ export default function POSSaleForm({
     setCart((previousCart) => previousCart.map((item) =>
       item.id === lineId
         ? { ...item, preferredBatchNumber }
+        : item
+    ));
+  };
+
+  const updatePriceTier = (lineId: string, priceTier: "retail" | "wholesale") => {
+    setCart((previousCart) => previousCart.map((item) =>
+      item.id === lineId
+        ? { ...item, priceTier }
         : item
     ));
   };
@@ -758,6 +799,7 @@ export default function POSSaleForm({
           selectedConversionId: selectedConversion?.id ?? null,
           selectedVariantId: line.variant_id ?? null,
           preferredBatchNumber: line.preferred_batch_number ?? null,
+          priceTier: line.price_tier === "wholesale" ? "wholesale" : "retail",
         } as CartItem;
       })
       .filter((entry): entry is CartItem => entry !== null);
@@ -941,6 +983,7 @@ export default function POSSaleForm({
         sale_unit_type: item.saleUnitType,
         pack_quantity: normalizeSaleUnitType(item.saleUnitType) !== 'piece' ? item.quantity : undefined,
         preferred_batch_number: item.preferredBatchNumber || undefined,
+        price_tier: cartItemUsesWholesale(item) ? "wholesale" : undefined,
         unit_price: unitPrice,
         total_price: lineTotal,
         customer_name: paymentMethod === "credit" ? creditorName : (customerName || null),
@@ -1319,7 +1362,13 @@ export default function POSSaleForm({
                 
                 const isExpanded = expandedLineId === item.id;
                 const needsVariantChoice = variantOptions.length > 0 && item.selectedVariantId == null;
+                const wholesalePerPiece = Number(item.product.wholesale_price || 0);
+                const wholesaleMinQty = Number(item.product.wholesale_min_quantity || 0);
+                const wholesaleAvailable = capabilities.wholesale_pricing && wholesalePerPiece > 0;
+                const wholesaleQualifies = wholesaleMinQty <= 0 || pieceQuantity >= wholesaleMinQty;
+                const usingWholesale = cartItemUsesWholesale(item);
                 const lineMeta = [
+                  usingWholesale ? "Wholesale price" : null,
                   selectedVariant ? selectedVariant.label : variantSummary,
                   selectedSaleUnit ? selectedSaleUnit.label : null,
                   item.preferredBatchNumber ? `Batch ${item.preferredBatchNumber}` : batchSummary,
@@ -1446,7 +1495,56 @@ export default function POSSaleForm({
                       ) : null}
                     </div>
                   ) : null}
-                  
+
+                  {/* Retail / Wholesale price choice (wholesale businesses only) */}
+                  {wholesaleAvailable ? (
+                    <div style={{ display: "grid", gap: 5, marginBottom: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#475569" }}>Price</span>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => updatePriceTier(item.id, "retail")}
+                          style={{
+                            flex: 1,
+                            padding: "7px 10px",
+                            borderRadius: 6,
+                            border: !usingWholesale ? "1px solid #1d4ed8" : "1px solid #d1d5db",
+                            background: !usingWholesale ? "#eff6ff" : "white",
+                            color: !usingWholesale ? "#1d4ed8" : "#374151",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Retail · GHS {Number(item.product.selling_price || 0).toFixed(2)}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => wholesaleQualifies && updatePriceTier(item.id, "wholesale")}
+                          disabled={!wholesaleQualifies}
+                          style={{
+                            flex: 1,
+                            padding: "7px 10px",
+                            borderRadius: 6,
+                            border: usingWholesale ? "1px solid #047857" : "1px solid #d1d5db",
+                            background: usingWholesale ? "#ecfdf5" : "white",
+                            color: usingWholesale ? "#047857" : wholesaleQualifies ? "#374151" : "#9ca3af",
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: wholesaleQualifies ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          Wholesale · GHS {wholesalePerPiece.toFixed(2)}
+                        </button>
+                      </div>
+                      {!wholesaleQualifies && (
+                        <span style={{ fontSize: 11, color: "#b45309" }}>
+                          Wholesale price needs at least {formatQuantityValue(wholesaleMinQty)} {item.product.unit} (currently {formatQuantityValue(pieceQuantity)}).
+                        </span>
+                      )}
+                    </div>
+                  ) : null}
+
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div className="pos-stepper" style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <button

@@ -30,6 +30,7 @@ from app.utils.supabase_auth import (
     delete_auth_user,
     is_supabase_auth_sync_enabled,
 )
+from app.utils.capabilities import serialize_capability_overrides
 from app.utils.email import send_email, smtp_configured
 from app.utils.phone import is_valid_phone, normalize_phone
 from app.permissions import ensure_permission, get_effective_role_name, get_role_permissions, is_admin
@@ -67,6 +68,10 @@ class UserCreate(BaseModel):
     recaptcha_token: Optional[str] = None
     business_types: Optional[list[str]] = None
     product_categories: Optional[list[str]] = None
+    # Registration questions. None = not answered, so business-type defaults
+    # decide; an explicit answer is stored as a capability override.
+    sells_wholesale: Optional[bool] = None
+    wants_collect_later: Optional[bool] = None
     # Legacy input kept for compatibility during migration.
     categories: Optional[list[str]] = None
     branches: Optional[list[str]] = None  # Optional list of branch names
@@ -328,6 +333,15 @@ async def _parse_signup_request(request: Request) -> UserCreate:
         product_categories = _parse_list_input(form.get("product_categories"))
         categories = _parse_list_input(form.get("categories"))
         branches = _parse_list_input(form.get("branches"))
+
+        def _parse_optional_bool(value: object) -> Optional[bool]:
+            text_value = str(value or "").strip().lower()
+            if text_value in {"true", "1", "yes", "on"}:
+                return True
+            if text_value in {"false", "0", "no", "off"}:
+                return False
+            return None
+
         return UserCreate(
             email=email,
             phone=phone,
@@ -338,6 +352,8 @@ async def _parse_signup_request(request: Request) -> UserCreate:
             recaptcha_token=recaptcha_token,
             business_types=business_types,
             product_categories=product_categories,
+            sells_wholesale=_parse_optional_bool(form.get("sells_wholesale")),
+            wants_collect_later=_parse_optional_bool(form.get("wants_collect_later")),
             categories=categories,
             branches=branches,
         )
@@ -450,11 +466,20 @@ async def signup(request: Request, db: Session = Depends(get_db)):
         for branch_name in branch_names:
             db.add(Branch(owner_user_id=new_user.id, name=branch_name, is_active=True))
 
+        # Registration answers become capability overrides so the app only
+        # shows flows the owner asked for (changeable later in Settings).
+        registration_overrides: dict[str, bool] = {}
+        if user_data.sells_wholesale is not None:
+            registration_overrides["wholesale_pricing"] = bool(user_data.sells_wholesale)
+        if user_data.wants_collect_later is not None:
+            registration_overrides["supply_tracking"] = bool(user_data.wants_collect_later)
+
         # Create SystemSettings with default values
         db.add(
             SystemSettings(
                 owner_user_id=new_user.id,
                 uses_expiry_tracking=True,
+                capability_overrides=serialize_capability_overrides(registration_overrides),
             )
         )
 

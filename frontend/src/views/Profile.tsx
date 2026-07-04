@@ -85,6 +85,13 @@ export default function Profile() {
     emailNotifications: false,
   });
   const [taxes, setTaxes] = useState<TaxLine[]>([]);
+  // Feature switches asked at registration, changeable here. Saved as
+  // capability overrides (merged with any others so nothing is lost).
+  const [featureToggles, setFeatureToggles] = useState({
+    wholesale_pricing: false,
+    supply_tracking: false,
+  });
+  const [existingCapabilityOverrides, setExistingCapabilityOverrides] = useState<Record<string, boolean>>({});
 
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -204,6 +211,11 @@ export default function Profile() {
           emailNotifications: settings.email_notifications,
         });
         setTaxes(Array.isArray(settings.taxes) ? settings.taxes : []);
+        setFeatureToggles({
+          wholesale_pricing: !!settings.effective_capabilities?.wholesale_pricing,
+          supply_tracking: !!settings.effective_capabilities?.supply_tracking,
+        });
+        setExistingCapabilityOverrides(settings.capability_overrides ?? {});
         setBusinessInfo((prev) => ({
           ...prev,
           currency: String(settings.currency_code || prev.currency || "GHS"),
@@ -275,6 +287,11 @@ export default function Profile() {
           taxes: taxes
             .map((t) => ({ name: t.name.trim(), rate: Number(t.rate) || 0, enabled: !!t.enabled }))
             .filter((t) => t.name.length > 0),
+          capability_overrides: {
+            ...existingCapabilityOverrides,
+            wholesale_pricing: featureToggles.wholesale_pricing,
+            supply_tracking: featureToggles.supply_tracking,
+          },
         };
         const updated = await updateSystemSettings(payload);
 
@@ -302,6 +319,11 @@ export default function Profile() {
           emailNotifications: updated.email_notifications,
         });
         setTaxes(Array.isArray(updated.taxes) ? updated.taxes : []);
+        setFeatureToggles({
+          wholesale_pricing: !!updated.effective_capabilities?.wholesale_pricing,
+          supply_tracking: !!updated.effective_capabilities?.supply_tracking,
+        });
+        setExistingCapabilityOverrides(updated.capability_overrides ?? {});
 
         window.dispatchEvent(new CustomEvent("systemSettingsChanged", { detail: updated }));
         if (conversionMessage) {
@@ -1227,6 +1249,76 @@ export default function Profile() {
                   </div>
                 </label>
 
+              </div>
+            </div>
+
+            {/* Selling features (asked at registration, changeable here) */}
+            <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 24 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 6px", color: "#374151" }}>
+                Selling Features
+              </h3>
+              <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 16px" }}>
+                Turn these on or off depending on how your business sells. Changes apply across the app immediately after saving.
+              </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: 12,
+                    background: "#f9fafb",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 8,
+                    cursor: editing ? "pointer" : "default",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={featureToggles.wholesale_pricing}
+                    disabled={!editing}
+                    onChange={(e) => setFeatureToggles({ ...featureToggles, wholesale_pricing: e.target.checked })}
+                    style={{ width: 18, height: 18, marginTop: 1 }}
+                  />
+                  <span>
+                    <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                      Wholesale &amp; retail pricing
+                    </span>
+                    <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#6b7280" }}>
+                      Products get a second (wholesale) price and the POS lets you choose which price to charge per item.
+                    </span>
+                  </span>
+                </label>
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: 12,
+                    background: "#f9fafb",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 8,
+                    cursor: editing ? "pointer" : "default",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={featureToggles.supply_tracking}
+                    disabled={!editing}
+                    onChange={(e) => setFeatureToggles({ ...featureToggles, supply_tracking: e.target.checked })}
+                    style={{ width: 18, height: 18, marginTop: 1 }}
+                  />
+                  <span>
+                    <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                      Leave in store — collect later
+                    </span>
+                    <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#6b7280" }}>
+                      Customers can pay in full and leave goods in the store; the POS gets the reserve option and an Awaiting Supply record.
+                    </span>
+                  </span>
+                </label>
               </div>
             </div>
 

@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS: SystemSettings = {
   currency_code: "GHS",
   auto_backup: true,
   email_notifications: false,
+  taxes: [],
 };
 
 // Cache the settings to avoid repeated API calls

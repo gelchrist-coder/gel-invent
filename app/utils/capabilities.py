@@ -13,6 +13,11 @@ CAPABILITY_KEYS = (
     "unit_conversions",
     "fractional_sales",
     "length_based_sales",
+    # Sell at both wholesale and retail prices (asked at registration).
+    "wholesale_pricing",
+    # "Leave in store — collect later" reserved-goods flow (asked at
+    # registration; defaults on for business types where it's the norm).
+    "supply_tracking",
 )
 
 DEFAULT_CAPABILITIES: dict[str, bool] = {key: False for key in CAPABILITY_KEYS}
@@ -46,12 +51,14 @@ BUSINESS_TYPE_CAPABILITIES: dict[str, dict[str, bool]] = {
         "unit_conversions": True,
         "fractional_sales": True,
         "length_based_sales": True,
+        "supply_tracking": True,
     },
     "Agro": {
         "expiry_tracking": True,
         "batch_tracking": True,
         "unit_conversions": True,
         "fractional_sales": True,
+        "supply_tracking": True,
     },
     "Electronics": {
         "variants": True,

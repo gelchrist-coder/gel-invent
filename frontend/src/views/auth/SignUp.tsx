@@ -47,6 +47,9 @@ export default function SignUp({ onLogin }: SignUpProps) {
     businessTypes: [] as string[],
     hasBranches: false,
     branches: [] as string[],
+    // How the business operates — these switch app features on/off.
+    sellsWholesale: false,
+    wantsCollectLater: false,
   });
   const [branchInput, setBranchInput] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -136,6 +139,8 @@ export default function SignUp({ onLogin }: SignUpProps) {
         business_location: formData.businessLocation.trim(),
         business_types: formData.businessTypes,
         branches: formData.hasBranches ? formData.branches : [],
+        sells_wholesale: formData.sellsWholesale,
+        wants_collect_later: formData.wantsCollectLater,
         ...(captchaToken ? { recaptcha_token: captchaToken } : {}),
       };
 
@@ -300,6 +305,49 @@ export default function SignUp({ onLogin }: SignUpProps) {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* How the business operates — switches app features on/off. */}
+          <div style={{ padding: 16, background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb", display: "grid", gap: 14 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>How does your business sell?</span>
+
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={formData.sellsWholesale}
+                onChange={(e) => setFormData({ ...formData, sellsWholesale: e.target.checked })}
+                style={{ width: 18, height: 18, marginTop: 1 }}
+              />
+              <span>
+                <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                  I sell at both wholesale and retail prices
+                </span>
+                <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#94a3b8" }}>
+                  Products get a second (wholesale) price, and the POS lets you choose which price to charge.
+                </span>
+              </span>
+            </label>
+
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={formData.wantsCollectLater}
+                onChange={(e) => setFormData({ ...formData, wantsCollectLater: e.target.checked })}
+                style={{ width: 18, height: 18, marginTop: 1 }}
+              />
+              <span>
+                <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                  Customers pay and leave goods in my store to collect later
+                </span>
+                <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#94a3b8" }}>
+                  Adds the "leave in store — collect later" option at checkout and an Awaiting Supply record.
+                </span>
+              </span>
+            </label>
+
+            <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>
+              You can change both anytime in Settings.
+            </p>
           </div>
 
           {/* Branches */}

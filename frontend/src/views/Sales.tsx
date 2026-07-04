@@ -5,7 +5,7 @@ import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
 import AwaitingSupplyList from "../components/AwaitingSupplyList";
-import { userNeedsSupplyTracking } from "../categories";
+import { useCapabilities } from "../settings";
 import { SaleTransaction, formatSaleQuantityLabel, groupSalesIntoTransactions } from "../sales-transactions";
 import {
   applyLocalSaleToCachedProducts,
@@ -333,8 +333,10 @@ export default function Sales() {
   const salesPerson = userData?.name || "Sales Person";
   const canDeleteSales = hasUserPermission("delete_sales", userData);
   const canSendSaleReceipts = hasUserPermission("send_sale_receipts", userData);
-  // Only construction/agro/hardware-type businesses track collect-later goods.
-  const supplyTrackingEnabled = useMemo(() => userNeedsSupplyTracking(), []);
+  // "Leave in store — collect later" is a capability: asked at registration,
+  // defaulted on for construction/agro types, changeable in Settings.
+  const capabilities = useCapabilities();
+  const supplyTrackingEnabled = capabilities.supply_tracking;
 
   const [activeSalesTab, setActiveSalesTab] = useState<SalesTab>("pos");
   // Number of sale lines still awaiting collection — shown as a badge on the tab.

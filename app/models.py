@@ -90,6 +90,10 @@ class Product(Base):
     pack_cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     selling_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     pack_selling_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    # Wholesale tier (only used by businesses with the wholesale_pricing
+    # capability): price per piece, and the minimum quantity that qualifies.
+    wholesale_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    wholesale_min_quantity: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     # Optional product thumbnail as a compressed data URL (shown on the POS).
     image: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(

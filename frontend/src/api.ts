@@ -499,7 +499,9 @@ export type CapabilityKey =
   | "brand_shade_attributes"
   | "unit_conversions"
   | "fractional_sales"
-  | "length_based_sales";
+  | "length_based_sales"
+  | "wholesale_pricing"
+  | "supply_tracking";
 
 export type CapabilityMap = Record<CapabilityKey, boolean>;
 export type CapabilityOverrides = Partial<CapabilityMap>;
@@ -513,6 +515,8 @@ export const DEFAULT_EFFECTIVE_CAPABILITIES: CapabilityMap = {
   unit_conversions: false,
   fractional_sales: false,
   length_based_sales: false,
+  wholesale_pricing: false,
+  supply_tracking: false,
 };
 
 export type SystemSettingsUpdate = {

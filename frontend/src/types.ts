@@ -60,6 +60,8 @@ export type Product = {
   pack_cost_price?: number | null;
   selling_price?: number | null;
   pack_selling_price?: number | null;
+  wholesale_price?: number | null;
+  wholesale_min_quantity?: number | null;
   image?: string | null;
   created_at: string;
   updated_at: string;
@@ -108,6 +110,8 @@ export type NewProduct = {
   pack_cost_price?: number | null;
   selling_price?: number | null;
   pack_selling_price?: number | null;
+  wholesale_price?: number | null;
+  wholesale_min_quantity?: number | null;
   image?: string | null;
   initial_stock?: number;
   variants?: NewProductVariant[];
@@ -182,6 +186,9 @@ export type NewSale = {
   sale_unit_type?: string;
   pack_quantity?: number;
   preferred_batch_number?: string | null;
+  // Which price tier was charged (frontend-only; unit_price already reflects
+  // it). Lets "repeat sale" restore the wholesale choice.
+  price_tier?: "retail" | "wholesale";
   unit_price: number;
   total_price: number;
   customer_name?: string | null;
