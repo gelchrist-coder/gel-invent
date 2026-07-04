@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Product, Sale } from "../types";
-import { fetchAwaitingSupply, supplySale } from "../api";
+import { AWAITING_PAGE_SIZE, fetchAwaitingSupply, supplySale } from "../api";
 
 type AwaitingSupplyListProps = {
   products: Product[];
@@ -26,6 +26,9 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
   // "pending" = goods still in store; "all" = full collect-later record (kept
   // for auditing, including sales that have been fully collected).
   const [view, setView] = useState<"pending" | "all">("pending");
+  // Records are paged so the audit history never becomes one giant download.
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const productById = useMemo(() => {
     const map = new Map<number, Product>();
@@ -39,6 +42,7 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
     try {
       const data = await fetchAwaitingSupply(view === "all");
       setRows(data);
+      setHasMore(data.length >= AWAITING_PAGE_SIZE);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load reserved goods.");
     } finally {
@@ -49,6 +53,23 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const older = await fetchAwaitingSupply(view === "all", rows.length);
+      setHasMore(older.length >= AWAITING_PAGE_SIZE);
+      setRows((previous) => {
+        const knownIds = new Set(previous.map((sale) => sale.id));
+        return [...previous, ...older.filter((sale) => !knownIds.has(sale.id))];
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load more records.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, rows.length, view]);
 
   const handleSupply = async (sale: Sale, quantity?: number) => {
     setBusyId(sale.id);
@@ -301,6 +322,31 @@ export default function AwaitingSupplyList({ products, onSupplied }: AwaitingSup
               </div>
             );
           })}
+
+          {hasMore && (
+            <div style={{ display: "grid", gap: 6, justifyItems: "center", padding: "12px 0 2px" }}>
+              <button
+                type="button"
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+                style={{
+                  padding: "9px 16px",
+                  borderRadius: 8,
+                  border: "1px solid #cbd5e1",
+                  background: loadingMore ? "#f1f5f9" : "white",
+                  color: "#334155",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: loadingMore ? "wait" : "pointer",
+                }}
+              >
+                {loadingMore ? "Loading..." : "Load older records"}
+              </button>
+              <p style={{ margin: 0, fontSize: 11.5, color: "#94a3b8" }}>
+                Showing the latest {rows.length.toLocaleString()} records.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

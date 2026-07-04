@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sale, Product, NewSale } from "../types";
-import { assignSaleCustomer, fetchSalesCached, createSalesBulk, deleteSale, fetchProductsCached, fetchSystemSettingsCached, getCachedProducts, getCachedSales, isTemporaryServerDelayError, sendSalesReceiptEmail, TaxLine } from "../api";
+import { assignSaleCustomer, fetchSalesCached, fetchOlderSales, SALES_PAGE_SIZE, createSalesBulk, deleteSale, fetchProductsCached, fetchSystemSettingsCached, getCachedProducts, getCachedSales, isTemporaryServerDelayError, sendSalesReceiptEmail, TaxLine } from "../api";
 import POSSaleForm from "../components/POSSaleForm";
 import SalesList from "../components/SalesList";
 import ReturnsList from "../components/ReturnsList";
@@ -294,6 +294,10 @@ export default function Sales() {
   const cachedProducts = getCachedProducts();
   const cachedSales = getCachedSales();
   const [sales, setSales] = useState<Sale[]>(cachedSales || []);
+  // Paged sale history: the server returns the newest SALES_PAGE_SIZE rows;
+  // older pages are appended on demand so huge histories never block loading.
+  const [hasMoreSales, setHasMoreSales] = useState(false);
+  const [loadingOlderSales, setLoadingOlderSales] = useState(false);
   const [products, setProducts] = useState<Product[]>(cachedProducts || []);
   const [loading, setLoading] = useState(!cachedProducts); // Only show loading if no cache
   const [error, setError] = useState<string | null>(null);
@@ -373,18 +377,28 @@ export default function Sales() {
     }
     setError(null);
     try {
+      // A refresh delivers the newest page; keep any older pages the user has
+      // already loaded (dedup by id, newest page first).
+      const applyLatestSalesPage = (fresh: Sale[]) => {
+        setHasMoreSales(fresh.length >= SALES_PAGE_SIZE);
+        setSales((previous) => {
+          const freshIds = new Set(fresh.map((sale) => sale.id));
+          return [...fresh, ...previous.filter((sale) => !freshIds.has(sale.id))];
+        });
+      };
+
       const [productsData, salesData] = await Promise.all([
         fetchProductsCached((fresh) => {
           setProducts(fresh);
           cacheProducts(fresh);
         }),
-        fetchSalesCached((fresh) => setSales(fresh)).catch(() => []),
+        fetchSalesCached(applyLatestSalesPage).catch(() => []),
       ]);
 
       setProducts(productsData);
       cacheProducts(productsData);
       if (Array.isArray(salesData)) {
-        setSales(salesData);
+        applyLatestSalesPage(salesData);
       }
     } catch (err) {
       // If products can't be fetched, fall back to cached products so POS can still work.
@@ -406,6 +420,24 @@ export default function Sales() {
       hasLoadedOnce.current = true;
     }
   }, []);
+
+  // Fetch the next (older) page of sale history and append it.
+  const loadOlderSales = useCallback(async () => {
+    if (loadingOlderSales) return;
+    setLoadingOlderSales(true);
+    try {
+      const olderPage = await fetchOlderSales(sales.length);
+      setHasMoreSales(olderPage.length >= SALES_PAGE_SIZE);
+      setSales((previous) => {
+        const knownIds = new Set(previous.map((sale) => sale.id));
+        return [...previous, ...olderPage.filter((sale) => !knownIds.has(sale.id))];
+      });
+    } catch {
+      // Leave hasMoreSales as-is; the user can simply tap again.
+    } finally {
+      setLoadingOlderSales(false);
+    }
+  }, [loadingOlderSales, sales.length]);
 
   useEffect(() => {
     void loadData();
@@ -1917,6 +1949,31 @@ export default function Sales() {
                 onConvertWalkIn={openAssignCustomerModal}
                 onRepeatSale={handleRepeatSale}
               />
+
+              {hasMoreSales && (
+                <div style={{ display: "grid", gap: 6, justifyItems: "center", padding: "14px 0 4px" }}>
+                  <button
+                    type="button"
+                    onClick={() => void loadOlderSales()}
+                    disabled={loadingOlderSales}
+                    style={{
+                      padding: "10px 18px",
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                      background: loadingOlderSales ? "#f1f5f9" : "white",
+                      color: "#334155",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: loadingOlderSales ? "wait" : "pointer",
+                    }}
+                  >
+                    {loadingOlderSales ? "Loading older sales..." : "Load older sales"}
+                  </button>
+                  <p style={{ margin: 0, fontSize: 11.5, color: "#94a3b8" }}>
+                    Showing the latest {sales.length.toLocaleString()} records — older ones load on demand.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>

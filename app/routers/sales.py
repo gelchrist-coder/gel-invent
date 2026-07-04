@@ -988,9 +988,16 @@ def list_sales(
     active_branch_id: int = Depends(get_active_branch_id),
     awaiting_supply: bool = False,
     collect_later: bool = False,
+    limit: int = 1000,
+    offset: int = 0,
 ):
     """
-    Retrieve all sales for the current user's tenant.
+    Retrieve sales for the current user's tenant, newest first.
+
+    Results are paged (limit/offset, default 1000, max 2000 per page) so the
+    payload stays bounded as history grows into the tens of thousands —
+    clients load the latest page and request older pages on demand.
+
     When awaiting_supply is true, only sales with goods still to be handed over
     (supplied_quantity < quantity) are returned.
     When collect_later is true, every "leave in store" sale is returned — both
@@ -999,10 +1006,14 @@ def list_sales(
     """
     ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+    page_limit = max(1, min(int(limit), 2000))
+    page_offset = max(0, int(offset))
     query = (
         select(models.Sale)
         .where(models.Sale.user_id.in_(tenant_user_ids), models.Sale.branch_id == active_branch_id)
-        .order_by(models.Sale.created_at.desc())
+        # id tiebreaker keeps paging stable when several sales share a timestamp
+        # (bulk checkout writes the whole cart in the same second).
+        .order_by(models.Sale.created_at.desc(), models.Sale.id.desc())
     )
     if awaiting_supply:
         query = query.where(
@@ -1020,8 +1031,8 @@ def list_sales(
                 has_supply_log,
             )
         )
-    sales = db.scalars(query).all()
-    
+    sales = db.scalars(query.offset(page_offset).limit(page_limit)).all()
+
     creator_ids = sorted({s.user_id for s in sales})
     creators = db.execute(
         select(models.User.id, models.User.name).where(models.User.id.in_(creator_ids))

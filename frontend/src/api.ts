@@ -1110,32 +1110,45 @@ export async function deleteProduct(productId: number): Promise<void> {
 
 // Sales API
 
+// Sales are paged newest-first so the payload stays bounded no matter how
+// large the sale history grows. The app loads the latest page; older pages
+// are fetched on demand ("Load older sales" in Full History).
+export const SALES_PAGE_SIZE = 1000;
+
+const salesPageQuery = (offset = 0) => `/sales?limit=${SALES_PAGE_SIZE}&offset=${offset}`;
+
 export async function fetchSales(): Promise<Sale[]> {
   // Return cached data immediately if available
   const cached = getCached<Sale[]>("sales");
   if (cached && isCacheFresh("sales")) {
     return cached;
   }
-  
-  const data = await jsonRequest<Sale[]>("/sales");
+
+  const data = await jsonRequest<Sale[]>(salesPageQuery());
   setCache("sales", data);
   return data;
+}
+
+// Fetch an older page of sales (offset = how many are already loaded).
+// Never cached: the cache always holds the latest page only.
+export async function fetchOlderSales(offset: number): Promise<Sale[]> {
+  return jsonRequest<Sale[]>(salesPageQuery(offset));
 }
 
 // Fetch sales with background refresh
 export async function fetchSalesCached(onUpdate?: (sales: Sale[]) => void): Promise<Sale[]> {
   const cached = getCached<Sale[]>("sales");
-  
+
   if (cached) {
     // Refresh in background
-    jsonRequest<Sale[]>("/sales").then(fresh => {
+    jsonRequest<Sale[]>(salesPageQuery()).then(fresh => {
       setCache("sales", fresh);
       if (onUpdate) onUpdate(fresh);
     }).catch(() => {});
     return cached;
   }
-  
-  const data = await jsonRequest<Sale[]>("/sales");
+
+  const data = await jsonRequest<Sale[]>(salesPageQuery());
   setCache("sales", data);
   return data;
 }
@@ -1233,9 +1246,13 @@ export async function deleteSale(saleId: number): Promise<void> {
 // Collect-later ("leave in store") sales. By default only those with goods
 // still pending hand-over; pass includeCollected to also return already-
 // collected ones, so the reserved-goods record is kept for auditing.
-export async function fetchAwaitingSupply(includeCollected = false): Promise<Sale[]> {
+// Paged like the main sales list: the collected-history view grows forever,
+// so callers load the newest page and ask for older ones on demand.
+export const AWAITING_PAGE_SIZE = 500;
+
+export async function fetchAwaitingSupply(includeCollected = false, offset = 0): Promise<Sale[]> {
   const query = includeCollected ? "collect_later=true" : "awaiting_supply=true";
-  return jsonRequest<Sale[]>(`/sales?${query}`);
+  return jsonRequest<Sale[]>(`/sales?${query}&limit=${AWAITING_PAGE_SIZE}&offset=${offset}`);
 }
 
 // Record that some/all of a reserved sale's goods have been handed over. When
