@@ -5,6 +5,7 @@ import { useAppCategories } from "../categories";
 import { startCameraBarcodeScan } from "../barcode-scanner";
 import { getProductBatchSummary, getProductSearchText, getProductVariantSummary } from "../product-display";
 import { useCapabilities } from "../settings";
+import { readStoredUser } from "../user-storage";
 
 type RepeatDraft = {
   token: string;
@@ -254,6 +255,11 @@ export default function POSSaleForm({
   // Square-style cart: rows are one compact line each; only the line being
   // edited (tapped) expands into the full editor. Keeps many items visible.
   const [expandedLineId, setExpandedLineId] = useState<string | null>(null);
+  // Order-level discount — Admin only. Entered as a percentage or a fixed
+  // GHS amount; distributed across the lines at checkout so reports stay true.
+  const [discountType, setDiscountType] = useState<"percent" | "amount">("percent");
+  const [discountValue, setDiscountValue] = useState("");
+  const canApplyDiscount = (readStoredUser()?.role ?? "") === "Admin";
   const [batchOptionsByKey, setBatchOptionsByKey] = useState<Record<string, SaleBatchOption[]>>({});
   const [batchLoadingByKey, setBatchLoadingByKey] = useState<Record<string, boolean>>({});
   const [batchErrorByKey, setBatchErrorByKey] = useState<Record<string, string | null>>({});
@@ -688,12 +694,26 @@ export default function POSSaleForm({
     setCreditorName("");
     setCreditorPhone("");
     setInitialPayment(0);
+    setDiscountType("percent");
+    setDiscountValue("");
   };
 
   // Calculate totals
   const cartTotal = cart.reduce((sum, item) => {
     return sum + (getCartItemUnitPrice(item) * item.quantity);
   }, 0);
+
+  // Order discount (Admin only): clamped so it can never exceed the subtotal.
+  const parsedDiscountValue = Number(discountValue);
+  const discountAmount = canApplyDiscount && Number.isFinite(parsedDiscountValue) && parsedDiscountValue > 0
+    ? Math.min(
+        cartTotal,
+        discountType === "percent"
+          ? (cartTotal * Math.min(parsedDiscountValue, 100)) / 100
+          : parsedDiscountValue,
+      )
+    : 0;
+  const chargeTotal = Math.max(0, cartTotal - discountAmount);
 
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
   const formattedTotalItems = Number.isInteger(totalItems) ? String(totalItems) : totalItems.toFixed(2);
@@ -943,7 +963,23 @@ export default function POSSaleForm({
 
     const collectLaterActive = supplyTrackingEnabled && collectLater;
 
-    for (const item of cart) {
+    // Distribute the order discount across lines proportionally (2dp), with
+    // the rounding remainder folded into the last line so the recorded totals
+    // add up to exactly the charged amount.
+    const originalLineTotals = cart.map((item) => getCartItemUnitPrice(item) * item.quantity);
+    const originalSubtotal = originalLineTotals.reduce((sum, value) => sum + value, 0);
+    let distributedDiscount = 0;
+    const lineDiscounts = originalLineTotals.map((lineTotal, index) => {
+      if (discountAmount <= 0 || originalSubtotal <= 0) return 0;
+      if (index === cart.length - 1) {
+        return Number((discountAmount - distributedDiscount).toFixed(2));
+      }
+      const share = Number(((lineTotal / originalSubtotal) * discountAmount).toFixed(2));
+      distributedDiscount += share;
+      return share;
+    });
+
+    for (const [lineIndex, item] of cart.entries()) {
       const unitPrice = getCartItemUnitPrice(item);
       const pieceQuantity = getCartItemBaseQuantity(item);
 
@@ -969,7 +1005,13 @@ export default function POSSaleForm({
         saleNotes = notes ? `${notes} | ${creditInfo}` : creditInfo;
       }
 
-      const lineTotal = unitPrice * item.quantity;
+      const lineDiscount = lineDiscounts[lineIndex] ?? 0;
+      const lineTotal = Number((unitPrice * item.quantity - lineDiscount).toFixed(2));
+      // Leave a trace of the order discount on the first line for auditing.
+      if (lineIndex === 0 && discountAmount > 0) {
+        const discountNote = `Discount applied: -GHS ${discountAmount.toFixed(2)}${discountType === "percent" ? ` (${parsedDiscountValue}% off)` : ""}`;
+        saleNotes = saleNotes ? `${saleNotes} | ${discountNote}` : discountNote;
+      }
       const appliedPayment =
         paymentMethod === "credit" && remainingInitialPayment > 0
           ? Math.min(remainingInitialPayment, Math.max(0, lineTotal))
@@ -984,6 +1026,7 @@ export default function POSSaleForm({
         pack_quantity: normalizeSaleUnitType(item.saleUnitType) !== 'piece' ? item.quantity : undefined,
         preferred_batch_number: item.preferredBatchNumber || undefined,
         price_tier: cartItemUsesWholesale(item) ? "wholesale" : undefined,
+        discount_amount: lineDiscount > 0 ? lineDiscount : undefined,
         unit_price: unitPrice,
         total_price: lineTotal,
         customer_name: paymentMethod === "credit" ? creditorName : (customerName || null),
@@ -1013,8 +1056,8 @@ export default function POSSaleForm({
       return;
     }
 
-    if (initialPayment < 0 || initialPayment > cartTotal) {
-      showMessage(`Initial payment must be between 0 and GHS ${cartTotal.toFixed(2)}`);
+    if (initialPayment < 0 || initialPayment > chargeTotal) {
+      showMessage(`Initial payment must be between 0 and GHS ${chargeTotal.toFixed(2)}`);
       return;
     }
 
@@ -1110,15 +1153,16 @@ export default function POSSaleForm({
           ))}
         </div>
 
-        {/* Products Grid */}
+        {/* Products Grid — horizontal rows, packed densely */}
         <div style={{
           flex: 1,
           minHeight: 0,
           overflowY: "auto",
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(138px, 1fr))",
-          gap: 10,
+          gridTemplateColumns: "repeat(auto-fill, minmax(215px, 1fr))",
+          gap: 8,
           padding: "2px 2px 8px",
+          alignContent: "start",
         }}>
           {filteredProducts.map((product) => {
             const variantSummary = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes
@@ -1748,15 +1792,74 @@ export default function POSSaleForm({
                 ref={checkoutFormRef}
                 onSubmit={handleSubmit}
               >
-                {/* Total */}
+                {/* Totals: subtotal, optional admin discount, charged total */}
                 <div style={{
-                  padding: "10px 14px",
+                  padding: "8px 14px 10px",
                   borderBottom: "1px solid #f3f4f6",
                   flexShrink: 0,
+                  display: "grid",
+                  gap: 6,
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span style={{ fontSize: 12, color: "#6b7280" }}>Subtotal</span>
-                    <span style={{ fontSize: 18, fontWeight: 700, color: "#111827" }}>GHS {cartTotal.toFixed(2)}</span>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "#374151" }}>GHS {cartTotal.toFixed(2)}</span>
+                  </div>
+
+                  {canApplyDiscount && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 12, color: "#6b7280", flexShrink: 0 }}>Discount</span>
+                      <span style={{ flex: 1 }} />
+                      <div style={{ display: "flex", border: "1px solid #e5e7eb", borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
+                        {([["percent", "%"], ["amount", "GHS"]] as const).map(([type, label]) => (
+                          <button
+                            key={type}
+                            type="button"
+                            onClick={() => setDiscountType(type)}
+                            style={{
+                              padding: "4px 9px",
+                              border: "none",
+                              background: discountType === type ? "#1d4ed8" : "white",
+                              color: discountType === type ? "white" : "#6b7280",
+                              fontSize: 11,
+                              fontWeight: 700,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        max={discountType === "percent" ? 100 : cartTotal}
+                        step="0.01"
+                        value={discountValue}
+                        onChange={(e) => setDiscountValue(e.target.value)}
+                        placeholder="0"
+                        aria-label="Order discount"
+                        style={{
+                          width: 68,
+                          padding: "5px 8px",
+                          border: "1px solid #e5e7eb",
+                          borderRadius: 6,
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          textAlign: "right",
+                        }}
+                      />
+                      {discountAmount > 0 && (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>
+                          −GHS {discountAmount.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: "#111827" }}>Total</span>
+                    <span style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>GHS {chargeTotal.toFixed(2)}</span>
                   </div>
                 </div>
 
@@ -2008,7 +2111,7 @@ export default function POSSaleForm({
                       boxShadow: "0 8px 18px rgba(16, 185, 129, 0.3)",
                     }}
                   >
-                    Charge GHS {cartTotal.toFixed(2)}
+                    Charge GHS {chargeTotal.toFixed(2)}
                   </button>
                 </div>
               </form>
@@ -2157,7 +2260,7 @@ export default function POSSaleForm({
                 onChange={(e) => setInitialPayment(e.target.value === '' ? 0 : Number(e.target.value))}
                 placeholder="0.00"
                 min="0"
-                max={cartTotal}
+                max={chargeTotal}
                 step="0.01"
                 style={{
                   width: "100%",
@@ -2168,7 +2271,7 @@ export default function POSSaleForm({
                 }}
               />
               <p style={{ margin: "6px 0 0", fontSize: 12, color: "#6b7280" }}>
-                Total: GHS {cartTotal.toFixed(2)} | Remaining: GHS {(cartTotal - (initialPayment || 0)).toFixed(2)}
+                Total: GHS {chargeTotal.toFixed(2)} | Remaining: GHS {(chargeTotal - (initialPayment || 0)).toFixed(2)}
               </p>
             </div>
 

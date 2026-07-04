@@ -189,6 +189,9 @@ export type NewSale = {
   // Which price tier was charged (frontend-only; unit_price already reflects
   // it). Lets "repeat sale" restore the wholesale choice.
   price_tier?: "retail" | "wholesale";
+  // Portion of the order discount carried by this line (frontend-only;
+  // total_price is already discounted). Used for the receipt breakdown.
+  discount_amount?: number;
   unit_price: number;
   total_price: number;
   customer_name?: string | null;

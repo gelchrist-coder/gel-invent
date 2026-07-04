@@ -667,10 +667,16 @@ export default function Sales() {
         name,
         qtyLabel: formatSaleQuantityLabel(sale),
         unitPrice: Number(sale.unit_price) || 0,
-        lineTotal: Number(sale.total_price) || 0,
+        // Show the pre-discount line amount so the item lines add up to the
+        // printed Subtotal; the order discount is its own row below them.
+        lineTotal: (Number(sale.total_price) || 0) + (Number(sale.discount_amount) || 0),
         note,
       };
     });
+
+    // Order discount: lines carry their share (total is already discounted);
+    // the receipt shows original subtotal, the discount, then the total paid.
+    const discountTotal = pendingSales.reduce((sum, sale) => sum + (Number(sale.discount_amount) || 0), 0);
 
     const html = buildReceiptHtml({
       businessName,
@@ -682,7 +688,8 @@ export default function Sales() {
       cashier: salesPerson,
       customer: customerName,
       lines,
-      subtotal: total,
+      subtotal: total + discountTotal,
+      discount: discountTotal > 0 ? discountTotal : undefined,
       taxLines: computeInclusiveTaxLines(total, salesTaxes),
       total,
       paymentMethod,
@@ -1728,7 +1735,7 @@ export default function Sales() {
                         </div>
                       </div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: "#0f172a", whiteSpace: "nowrap" }}>
-                        {Number(sale.total_price).toFixed(2)}
+                        {((Number(sale.total_price) || 0) + (Number(sale.discount_amount) || 0)).toFixed(2)}
                       </div>
                     </div>
                   );
@@ -1748,6 +1755,14 @@ export default function Sales() {
                   <span>Payment</span>
                   <strong style={{ textTransform: "uppercase" }}>{pendingSales[0].payment_method}</strong>
                 </div>
+                {pendingSales.some((sale) => (sale.discount_amount ?? 0) > 0) && (
+                  <div style={{ display: "flex", justifyContent: "space-between", color: "#dc2626" }}>
+                    <span>Discount</span>
+                    <strong>
+                      −GHS {pendingSales.reduce((sum, sale) => sum + (Number(sale.discount_amount) || 0), 0).toFixed(2)}
+                    </strong>
+                  </div>
+                )}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4 }}>
                   <span style={{ fontSize: 13, letterSpacing: "0.5px", color: "#475569" }}>TOTAL</span>
                   <strong style={{ fontSize: 28, color: "#0f172a", lineHeight: 1 }}>
