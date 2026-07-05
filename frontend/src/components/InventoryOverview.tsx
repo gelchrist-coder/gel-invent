@@ -90,8 +90,19 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
 
   const formatQty = (value: number) => value.toFixed(2);
 
-  const stockIn = analytics.movement_totals?.stock_in ?? 0;
   const stockOut = analytics.movement_totals?.stock_out ?? 0;
+
+  // The cards read as two self-checking equations:
+  //   Total Stock     = Stock Left + Reserved + Stock Out   (everything handled)
+  //   Available Stock = Stock Left + Reserved               (physically in store)
+  // The backend's total_stock_left is the PHYSICAL count (movement sums), which
+  // still includes reserved collect-later goods — so sellable "Stock Left" is
+  // physical minus reserved.
+  const reserved = analytics.total_reserved ?? 0;
+  const physicalStock = analytics.total_stock_left;
+  const stockLeft = Math.max(0, physicalStock - reserved);
+  const availableStock = stockLeft + reserved;
+  const totalStock = availableStock + stockOut;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
@@ -186,9 +197,12 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
             <PackageIcon />
           </div>
           <div>
-            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Stock In</p>
+            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Total Stock</p>
             <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#059669" }}>
-              {stockIn === 0 ? formatQty(0) : `+${formatQty(stockIn)}`}
+              {formatQty(totalStock)}
+            </p>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "#94a3b8" }}>
+              Left + Reserved + Out
             </p>
           </div>
         </div>
@@ -227,7 +241,41 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
         </div>
       </div>
 
-      {/* Total Stock Left */}
+      {/* Available Stock = Stock Left + Reserved (everything physically in store) */}
+      <div
+        style={{
+          backgroundColor: "white",
+          borderRadius: 8,
+          border: "1px solid #e5e7eb",
+          padding: 20,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 8,
+              backgroundColor: "#cffafe",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#0e7490",
+            }}
+          >
+            <PackageIcon />
+          </div>
+          <div>
+            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Available Stock</p>
+            <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700, color: "#0e7490" }}>{formatQty(availableStock)}</p>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "#94a3b8" }}>
+              In store now · Left + Reserved
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Stock Left = sellable stock (physical minus reserved) */}
       <div
         style={{
           backgroundColor: "white",
@@ -252,15 +300,18 @@ export default function InventoryOverview({ analytics, usesExpiryTracking = true
             <PackageIcon />
           </div>
           <div>
-            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Total Stock Left</p>
-            <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700 }}>{formatQty(analytics.total_stock_left)}</p>
+            <p style={{ margin: 0, fontSize: 14, color: "#6b7280" }}>Stock Left</p>
+            <p style={{ margin: "4px 0 0", fontSize: 24, fontWeight: 700 }}>{formatQty(stockLeft)}</p>
+            <p style={{ margin: "2px 0 0", fontSize: 12, color: "#94a3b8" }}>
+              Free to sell (reserved not counted)
+            </p>
           </div>
         </div>
       </div>
 
       {/* Reserved (collect-later) — paid goods still physically in store.
-          Shown after Stock Left so the owner reads in → out → left → reserved.
-          Reserved is NOT part of stock-out: the goods are still in the shop. */}
+          Part of Available Stock, never part of Stock Out: the goods are
+          still in the shop until the customer collects them. */}
       {(analytics.total_reserved ?? 0) > 0 && (
         <div
           style={{
