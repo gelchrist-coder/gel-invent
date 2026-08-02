@@ -10,6 +10,7 @@ type NavItem = {
   id: string;
   label: string;
   icon: ReactNode;
+  group: "overview" | "sales" | "stock" | "procurement" | "insights" | "administration";
   requiredPermission?: FrontendPermission;
 };
 
@@ -99,16 +100,28 @@ const MoreIcon = () => (
 const BOTTOM_NAV_IDS = ["dashboard", "sales", "products", "inventory"];
 
 const NAV_ITEMS: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", icon: <DashboardIcon /> },
-  { id: "products", label: "Products", icon: <ProductsIcon /> },
-  { id: "sales", label: "Sales", icon: <SalesIcon /> },
-  { id: "invoice", label: "Invoice", icon: <InvoiceIcon /> },
-  { id: "inventory", label: "Inventory", icon: <InventoryIcon /> },
-  { id: "warehouses", label: "Warehouses", icon: <InventoryIcon />, requiredPermission: "view_warehouses" },
-  { id: "reports", label: "Reports", icon: <ReportsIcon />, requiredPermission: "view_reports" },
-  { id: "creditors", label: "Customers", icon: <CreditorsIcon /> },
-  { id: "profile", label: "Settings", icon: <ProfileIcon /> },
-  { id: "users", label: "Users", icon: <UsersIcon />, requiredPermission: "manage_employees" },
+  { id: "dashboard", label: "Dashboard", icon: <DashboardIcon />, group: "overview" },
+  { id: "sales", label: "Sales", icon: <SalesIcon />, group: "sales" },
+  { id: "invoice", label: "Invoice", icon: <InvoiceIcon />, group: "sales" },
+  { id: "creditors", label: "Customers", icon: <CreditorsIcon />, group: "sales" },
+  { id: "products", label: "Products", icon: <ProductsIcon />, group: "stock" },
+  { id: "inventory", label: "Inventory", icon: <InventoryIcon />, group: "stock" },
+  { id: "warehouses", label: "Warehouses", icon: <InventoryIcon />, group: "stock", requiredPermission: "view_warehouses" },
+  { id: "suppliers", label: "Suppliers", icon: <CreditorsIcon />, group: "procurement", requiredPermission: "view_procurement" },
+  { id: "purchases", label: "Purchases", icon: <InvoiceIcon />, group: "procurement", requiredPermission: "view_procurement" },
+  { id: "reports", label: "Reports", icon: <ReportsIcon />, group: "insights", requiredPermission: "view_reports" },
+  { id: "revenue", label: "Revenue", icon: <ReportsIcon />, group: "insights", requiredPermission: "view_revenue" },
+  { id: "users", label: "Users", icon: <UsersIcon />, group: "administration", requiredPermission: "manage_employees" },
+  { id: "profile", label: "Settings", icon: <ProfileIcon />, group: "administration" },
+];
+
+const NAV_GROUPS: Array<{ id: NavItem["group"]; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "sales", label: "Sales & Customers" },
+  { id: "stock", label: "Stock" },
+  { id: "procurement", label: "Procurement" },
+  { id: "insights", label: "Insights" },
+  { id: "administration", label: "Administration" },
 ];
 
 const SIDEBAR_EXPANDED_WIDTH = 210;
@@ -370,7 +383,16 @@ export default function Layout({
 
         {/* Navigation */}
         <nav style={{ flex: 1 }}>
-          {visibleNavItems.map((item) => (
+          {NAV_GROUPS.map((group) => {
+            const items = visibleNavItems.filter((item) => item.group === group.id);
+            if (items.length === 0) return null;
+            return <div key={group.id} style={{ marginBottom: isExpanded ? 10 : 6 }}>
+              {isExpanded ? (
+                <div style={{ padding: "7px 16px 5px", fontSize: 10, fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase", color: "rgba(255,255,255,0.38)", whiteSpace: "nowrap" }}>{group.label}</div>
+              ) : (
+                <div style={{ height: 1, margin: "6px 12px", background: "rgba(255,255,255,0.1)" }} />
+              )}
+              {items.map((item) => (
             <button
               key={item.id}
               onClick={() => handleNavigate(item.id)}
@@ -422,7 +444,9 @@ export default function Layout({
                 </span>
               )}
             </button>
-          ))}
+              ))}
+            </div>;
+          })}
         </nav>
 
         {/* User + logout pinned to the bottom of the drawer (mobile only). */}

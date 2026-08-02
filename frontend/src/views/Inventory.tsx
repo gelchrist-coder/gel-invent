@@ -13,7 +13,11 @@ import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
-type InventoryTab = "overview" | "alerts" | "actions" | "purchasing" | "returns" | "history";
+export type InventoryTab = "overview" | "alerts" | "actions" | "purchasing" | "returns" | "history";
+
+type Props = {
+  initialTab?: InventoryTab;
+};
 
 const normalizeQuantityStep = (value: number | null | undefined): number => {
   const parsed = Number(value ?? 1);
@@ -33,7 +37,7 @@ const isStepAligned = (value: number, step: number): boolean => {
   return Math.abs(value - rounded) < 0.0001;
 };
 
-export default function Inventory() {
+export default function Inventory({ initialTab = "overview" }: Props) {
   const currentUser = readStoredUser();
   const canManageCatalog = hasUserPermission("manage_catalog", currentUser);
   const canManageInventory = hasUserPermission("manage_inventory", currentUser);
@@ -45,7 +49,7 @@ export default function Inventory() {
 
   const [analytics, setAnalytics] = useState<InventoryAnalytics | null>(null);
   const [movements, setMovements] = useState<MovementHistoryRow[]>([]);
-  const [activeTab, setActiveTab] = useState<InventoryTab>("overview");
+  const [activeTab, setActiveTab] = useState<InventoryTab>(initialTab);
   const [pendingSupplierReturnPurchaseId, setPendingSupplierReturnPurchaseId] = useState<number | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);

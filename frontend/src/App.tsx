@@ -138,6 +138,7 @@ const SignUp = lazyWithRetry(() => import("./views/auth/SignUp"));
 const PasswordReset = lazyWithRetry(() => import("./views/auth/PasswordReset"));
 const Profile = lazyWithRetry(() => import("./views/Profile"));
 const Reports = lazyWithRetry(() => import("./views/Reports"));
+const Suppliers = lazyWithRetry(() => import("./views/Suppliers"));
 const RevenueAnalysis = lazyWithRetry(() => import("./views/RevenueAnalysis"));
 const Sales = lazyWithRetry(() => import("./views/Sales"));
 const UserManagement = lazyWithRetry(() => import("./views/UserManagement"));
@@ -866,8 +867,13 @@ export default function App() {
 
     if (activeView === "users" && !canManageEmployees) {
       setActiveView("dashboard");
+      return;
     }
-  }, [activeView, canManageEmployees, canViewReports, canViewRevenue, isAuthenticated]);
+
+    if ((activeView === "suppliers" || activeView === "purchases") && !canViewProcurement) {
+      setActiveView("dashboard");
+    }
+  }, [activeView, canManageEmployees, canViewProcurement, canViewReports, canViewRevenue, isAuthenticated]);
 
   // Show login page if not authenticated
   if (!isAuthenticated) {
@@ -1341,6 +1347,10 @@ export default function App() {
       }
       case "inventory":
         return <Inventory />;
+      case "suppliers":
+        return <Suppliers />;
+      case "purchases":
+        return <Inventory initialTab="purchasing" />;
       case "warehouses":
         return <Warehouses />;
       case "sales":

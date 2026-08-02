@@ -1537,6 +1537,20 @@ export async function createSupplier(payload: NewSupplier): Promise<Supplier> {
   return result;
 }
 
+export async function updateSupplier(supplierId: number, payload: Partial<NewSupplier>): Promise<Supplier> {
+  const result = await jsonRequest<Supplier>(`/inventory/suppliers/${supplierId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  invalidatePurchasingCaches();
+  return result;
+}
+
+export async function deactivateSupplier(supplierId: number): Promise<void> {
+  await jsonRequest(`/inventory/suppliers/${supplierId}`, { method: "DELETE" });
+  invalidatePurchasingCaches();
+}
+
 export async function fetchPurchases(limit: number = 100): Promise<Purchase[]> {
   const cacheKey = `purchases:${limit}`;
   const cached = getCached<Purchase[]>(cacheKey);
