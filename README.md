@@ -94,6 +94,40 @@ select id, email, created_at from auth.users order by created_at desc limit 20;
 - `POST /data/import?force=true|false` – imports a prior JSON backup (with optional replace).
 - `GET /data/export/xlsx?days=30` – downloads an Excel workbook with recent Products, Sales, and Inventory Movements.
 
+## Website warehouse integration
+
+Admins can create scoped website API keys and signed webhook endpoints from the
+Warehouses screen. API keys are shown once and should be sent server-to-server in
+the `X-API-Key` header. Never place them in browser JavaScript.
+
+Website endpoints (under `/api` on the combined Vercel deployment):
+
+- `GET /integrations/v1/warehouses` – list active fulfilment warehouses.
+- `GET /integrations/v1/availability?warehouse_id=1` – list public available-to-promise stock.
+- `POST /integrations/v1/orders` – idempotently reserve stock using `external_order_id`.
+- `GET /integrations/v1/orders/{external_order_id}` – read fulfilment status.
+
+Example order body:
+
+```json
+{
+  "warehouse_id": 1,
+  "external_order_id": "WEB-1042",
+  "customer_name": "Ama Mensah",
+  "customer_phone": "+233200000000",
+  "delivery_address": "Accra",
+  "items": [
+    { "item_id": 12, "quantity": 2, "unit_price": 25 }
+  ]
+}
+```
+
+Webhook requests include `X-GelInvent-Event`, `X-GelInvent-Delivery`,
+`X-GelInvent-Timestamp`, and `X-GelInvent-Signature`. Verify the signature as
+hex HMAC-SHA256 over `<timestamp>.<raw request body>` using the signing secret
+shown when the endpoint is created. Configure `WEBHOOK_SIGNING_SECRET` on the
+backend before creating webhook endpoints.
+
 ### Example curl flow
 ```bash
 curl -X POST http://127.0.0.1:8000/products \

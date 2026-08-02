@@ -21,6 +21,9 @@ import {
   WarehouseStock,
   FulfillmentOrder,
   FulfillmentStatus,
+  IntegrationApiKey,
+  WebhookDelivery,
+  WebhookEndpoint,
 } from "./types";
 
 function normalizeBaseUrl(url: string): string {
@@ -599,6 +602,44 @@ export async function updateFulfillmentOrderStatus(
     method: "PATCH",
     body: JSON.stringify({ status }),
   });
+}
+
+export async function fetchIntegrationApiKeys(): Promise<IntegrationApiKey[]> {
+  return jsonRequest<IntegrationApiKey[]>("/integrations/api-keys");
+}
+
+export async function createIntegrationApiKey(payload: { name: string; scopes: string[] }): Promise<IntegrationApiKey> {
+  return jsonRequest<IntegrationApiKey>("/integrations/api-keys", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function revokeIntegrationApiKey(keyId: number): Promise<void> {
+  await jsonRequest(`/integrations/api-keys/${keyId}`, { method: "DELETE" });
+}
+
+export async function fetchWebhookEndpoints(): Promise<WebhookEndpoint[]> {
+  return jsonRequest<WebhookEndpoint[]>("/integrations/webhooks");
+}
+
+export async function createWebhookEndpoint(payload: { name: string; url: string; events: string[] }): Promise<WebhookEndpoint> {
+  return jsonRequest<WebhookEndpoint>("/integrations/webhooks", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deactivateWebhookEndpoint(endpointId: number): Promise<void> {
+  await jsonRequest(`/integrations/webhooks/${endpointId}`, { method: "DELETE" });
+}
+
+export async function fetchWebhookDeliveries(): Promise<WebhookDelivery[]> {
+  return jsonRequest<WebhookDelivery[]>("/integrations/webhook-deliveries");
+}
+
+export async function retryWebhookDelivery(deliveryId: number): Promise<void> {
+  await jsonRequest(`/integrations/webhook-deliveries/${deliveryId}/retry`, { method: "POST" });
 }
 
 export type CapabilityMap = Record<CapabilityKey, boolean>;

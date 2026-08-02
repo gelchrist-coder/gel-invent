@@ -451,3 +451,37 @@ export type FulfillmentOrder = {
   cancelled_at?: string | null;
   created_at: string;
 };
+
+export type IntegrationApiKey = {
+  id: number;
+  name: string;
+  key_prefix: string;
+  scopes: string[];
+  is_active: boolean;
+  last_used_at?: string | null;
+  expires_at?: string | null;
+  created_at: string;
+  secret?: string | null;
+};
+
+export type WebhookEndpoint = {
+  id: number;
+  name: string;
+  url: string;
+  events: string[];
+  is_active: boolean;
+  created_at: string;
+  signing_secret?: string | null;
+};
+
+export type WebhookDelivery = {
+  id: number;
+  endpoint_id: number;
+  event_type: string;
+  status: "pending" | "delivered" | "failed";
+  attempts: number;
+  response_status?: number | null;
+  last_error?: string | null;
+  delivered_at?: string | null;
+  created_at: string;
+};

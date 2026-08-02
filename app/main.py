@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .database import Base, engine, ensure_critical_schema
 from .auth import get_current_active_user
 from .permissions import ensure_permission
-from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns, warehouses
+from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns, warehouses, integrations
 from . import models
 
 app = FastAPI(title="Gel Invent API", version="0.1.0")
@@ -85,6 +85,9 @@ def _ensure_warehouse_tables(conn) -> None:
     models.WarehouseStockMovement.__table__.create(bind=conn, checkfirst=True)
     models.FulfillmentOrder.__table__.create(bind=conn, checkfirst=True)
     models.FulfillmentOrderItem.__table__.create(bind=conn, checkfirst=True)
+    models.IntegrationApiKey.__table__.create(bind=conn, checkfirst=True)
+    models.WebhookEndpoint.__table__.create(bind=conn, checkfirst=True)
+    models.WebhookDelivery.__table__.create(bind=conn, checkfirst=True)
     conn.execute(text(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_warehouses_owner_lower_name_unique "
         "ON warehouses (owner_user_id, lower(trim(name)))"
@@ -689,3 +692,4 @@ app.include_router(creditors.router)
 app.include_router(reports.router)
 app.include_router(data.router)
 app.include_router(warehouses.router)
+app.include_router(integrations.router)

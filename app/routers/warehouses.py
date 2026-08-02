@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -15,6 +15,7 @@ from app.deps import get_db
 from app.permissions import ensure_permission
 from app.utils.branch import get_active_branch_id, get_owner_user_id
 from app.utils.tenant import get_tenant_user_ids
+from app.utils.webhooks import deliver_webhook, enqueue_webhook_event
 
 router = APIRouter(prefix="/warehouses", tags=["warehouses"])
 
@@ -209,6 +210,30 @@ def _serialize_order(order: models.FulfillmentOrder) -> FulfillmentOrderRead:
         cancelled_at=order.cancelled_at,
         created_at=order.created_at,
     )
+
+
+def _schedule_order_webhooks(
+    *,
+    db: Session,
+    background_tasks: BackgroundTasks,
+    owner_user_id: int,
+    event_type: str,
+    order: FulfillmentOrderRead,
+) -> None:
+    """Webhooks are best-effort and must never roll back a completed stock operation."""
+    try:
+        delivery_ids = enqueue_webhook_event(
+            db,
+            owner_user_id=owner_user_id,
+            event_type=event_type,
+            data=order.model_dump(mode="json"),
+        )
+    except Exception as exc:
+        db.rollback()
+        print(f"Webhook enqueue failed for {event_type}: {type(exc).__name__}: {exc}")
+        return
+    for delivery_id in delivery_ids:
+        background_tasks.add_task(deliver_webhook, delivery_id)
 
 
 def _get_or_create_item(
@@ -495,6 +520,7 @@ def list_fulfillment_orders(
 def create_fulfillment_order(
     warehouse_id: int,
     payload: FulfillmentOrderCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
@@ -573,7 +599,12 @@ def create_fulfillment_order(
     order.total_amount = total.quantize(Decimal("0.01"))
     db.commit()
     db.refresh(order)
-    return _serialize_order(order)
+    result = _serialize_order(order)
+    _schedule_order_webhooks(
+        db=db, background_tasks=background_tasks, owner_user_id=owner_user_id,
+        event_type="fulfillment.order.created", order=result,
+    )
+    return result
 
 
 @router.patch("/{warehouse_id}/orders/{order_id}/status", response_model=FulfillmentOrderRead)
@@ -581,6 +612,7 @@ def update_fulfillment_status(
     warehouse_id: int,
     order_id: int,
     payload: FulfillmentStatusUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
@@ -647,7 +679,12 @@ def update_fulfillment_status(
     order.status = target
     db.commit()
     db.refresh(order)
-    return _serialize_order(order)
+    result = _serialize_order(order)
+    _schedule_order_webhooks(
+        db=db, background_tasks=background_tasks, owner_user_id=owner_user_id,
+        event_type=f"fulfillment.order.{target}", order=result,
+    )
+    return result
 
 
 @router.post("/{warehouse_id}/transfers")

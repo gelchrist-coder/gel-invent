@@ -307,6 +307,57 @@ class FulfillmentOrderItem(Base):
     warehouse_item: Mapped[WarehouseStockItem] = relationship()
 
 
+class IntegrationApiKey(Base):
+    __tablename__ = "integration_api_keys"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    key_prefix: Mapped[str] = mapped_column(String(24), index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    scopes: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WebhookEndpoint(Base):
+    __tablename__ = "webhook_endpoints"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    url: Mapped[str] = mapped_column(Text)
+    events: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    endpoint_id: Mapped[int] = mapped_column(ForeignKey("webhook_endpoints.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    payload: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    response_status: Mapped[int | None] = mapped_column(Integer, default=None)
+    last_error: Mapped[str | None] = mapped_column(Text, default=None)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    endpoint: Mapped[WebhookEndpoint] = relationship()
+
+
 class Purchase(Base):
     __tablename__ = "purchases"
 
