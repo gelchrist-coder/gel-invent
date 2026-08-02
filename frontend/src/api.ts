@@ -19,6 +19,8 @@ import {
   SupplierPayment,
   Warehouse,
   WarehouseStock,
+  FulfillmentOrder,
+  FulfillmentStatus,
 } from "./types";
 
 function normalizeBaseUrl(url: string): string {
@@ -564,6 +566,38 @@ export async function transferWarehouseStock(warehouseId: number, payload: {
   return jsonRequest<{ message: string; reference: string }>(`/warehouses/${warehouseId}/transfers`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchFulfillmentOrders(warehouseId: number, status?: FulfillmentStatus): Promise<FulfillmentOrder[]> {
+  const query = status ? `?status_filter=${encodeURIComponent(status)}` : "";
+  return jsonRequest<FulfillmentOrder[]>(`/warehouses/${warehouseId}/orders${query}`);
+}
+
+export async function createFulfillmentOrder(warehouseId: number, payload: {
+  external_order_id?: string | null;
+  source?: string;
+  customer_name: string;
+  customer_phone?: string | null;
+  customer_email?: string | null;
+  delivery_address?: string | null;
+  notes?: string | null;
+  items: Array<{ item_id: number; quantity: number; unit_price?: number | null }>;
+}): Promise<FulfillmentOrder> {
+  return jsonRequest<FulfillmentOrder>(`/warehouses/${warehouseId}/orders`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateFulfillmentOrderStatus(
+  warehouseId: number,
+  orderId: number,
+  status: Exclude<FulfillmentStatus, "reserved">,
+): Promise<FulfillmentOrder> {
+  return jsonRequest<FulfillmentOrder>(`/warehouses/${warehouseId}/orders/${orderId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
   });
 }
 

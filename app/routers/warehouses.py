@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
@@ -57,6 +57,60 @@ class WarehouseStockRead(BaseModel):
     cost_price: Decimal | None
     selling_price: Decimal | None
     quantity: Decimal
+    reserved_quantity: Decimal = Decimal("0")
+    available_quantity: Decimal = Decimal("0")
+
+
+class FulfillmentOrderItemCreate(BaseModel):
+    item_id: int = Field(gt=0)
+    quantity: Decimal = Field(gt=0, decimal_places=2)
+    unit_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+
+
+class FulfillmentOrderCreate(BaseModel):
+    external_order_id: str | None = Field(default=None, max_length=120)
+    source: str = Field(default="manual", min_length=1, max_length=50)
+    customer_name: str = Field(min_length=1, max_length=255)
+    customer_phone: str | None = Field(default=None, max_length=50)
+    customer_email: str | None = Field(default=None, max_length=255)
+    delivery_address: str | None = Field(default=None, max_length=2000)
+    notes: str | None = Field(default=None, max_length=2000)
+    items: list[FulfillmentOrderItemCreate] = Field(min_length=1, max_length=100)
+
+
+class FulfillmentStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(picking|packed|dispatched|delivered|cancelled)$")
+
+
+class FulfillmentOrderItemRead(BaseModel):
+    id: int
+    item_id: int
+    sku: str
+    product_name: str
+    quantity: Decimal
+    unit_price: Decimal
+    line_total: Decimal
+
+
+class FulfillmentOrderRead(BaseModel):
+    id: int
+    warehouse_id: int
+    external_order_id: str | None
+    source: str
+    status: str
+    customer_name: str
+    customer_phone: str | None
+    customer_email: str | None
+    delivery_address: str | None
+    notes: str | None
+    total_amount: Decimal
+    items: list[FulfillmentOrderItemRead]
+    picked_at: datetime | None
+    packed_at: datetime | None
+    dispatched_at: datetime | None
+    delivered_at: datetime | None
+    cancelled_at: datetime | None
+    created_at: datetime
 
 
 class WarehouseReceiptCreate(BaseModel):
@@ -105,6 +159,56 @@ def _stock_quantity(db: Session, warehouse_id: int, item_id: int) -> Decimal:
         )
     )
     return value if isinstance(value, Decimal) else Decimal(str(value or 0))
+
+
+RESERVING_ORDER_STATUSES = ("reserved", "picking", "packed")
+
+
+def _reserved_quantity(db: Session, warehouse_id: int, item_id: int, *, exclude_order_id: int | None = None) -> Decimal:
+    query = (
+        select(func.coalesce(func.sum(models.FulfillmentOrderItem.quantity), 0))
+        .join(models.FulfillmentOrder, models.FulfillmentOrder.id == models.FulfillmentOrderItem.order_id)
+        .where(
+            models.FulfillmentOrder.warehouse_id == warehouse_id,
+            models.FulfillmentOrder.status.in_(RESERVING_ORDER_STATUSES),
+            models.FulfillmentOrderItem.warehouse_item_id == item_id,
+        )
+    )
+    if exclude_order_id is not None:
+        query = query.where(models.FulfillmentOrder.id != exclude_order_id)
+    value = db.scalar(query)
+    return value if isinstance(value, Decimal) else Decimal(str(value or 0))
+
+
+def _serialize_order(order: models.FulfillmentOrder) -> FulfillmentOrderRead:
+    return FulfillmentOrderRead(
+        id=order.id,
+        warehouse_id=order.warehouse_id,
+        external_order_id=order.external_order_id,
+        source=order.source,
+        status=order.status,
+        customer_name=order.customer_name,
+        customer_phone=order.customer_phone,
+        customer_email=order.customer_email,
+        delivery_address=order.delivery_address,
+        notes=order.notes,
+        total_amount=order.total_amount,
+        items=[FulfillmentOrderItemRead(
+            id=line.id,
+            item_id=line.warehouse_item_id,
+            sku=line.sku,
+            product_name=line.product_name,
+            quantity=line.quantity,
+            unit_price=line.unit_price,
+            line_total=line.line_total,
+        ) for line in order.items],
+        picked_at=order.picked_at,
+        packed_at=order.packed_at,
+        dispatched_at=order.dispatched_at,
+        delivered_at=order.delivered_at,
+        cancelled_at=order.cancelled_at,
+        created_at=order.created_at,
+    )
 
 
 def _get_or_create_item(
@@ -317,11 +421,17 @@ def list_warehouse_stock(
         .group_by(models.WarehouseStockItem.id)
         .order_by(models.WarehouseStockItem.name.asc())
     ).all()
-    return [WarehouseStockRead(
-        item_id=item.id, warehouse_id=item.warehouse_id, source_product_id=item.source_product_id,
-        sku=item.sku, name=item.name, unit=item.unit, category=item.category,
-        cost_price=item.cost_price, selling_price=item.selling_price, quantity=Decimal(str(quantity or 0)),
-    ) for item, quantity in rows]
+    result: list[WarehouseStockRead] = []
+    for item, quantity_value in rows:
+        quantity = Decimal(str(quantity_value or 0))
+        reserved = _reserved_quantity(db, warehouse_id, item.id)
+        result.append(WarehouseStockRead(
+            item_id=item.id, warehouse_id=item.warehouse_id, source_product_id=item.source_product_id,
+            sku=item.sku, name=item.name, unit=item.unit, category=item.category,
+            cost_price=item.cost_price, selling_price=item.selling_price, quantity=quantity,
+            reserved_quantity=reserved, available_quantity=max(Decimal("0"), quantity - reserved),
+        ))
+    return result
 
 
 @router.post("/{warehouse_id}/receipts", response_model=WarehouseStockRead)
@@ -356,7 +466,188 @@ def receive_warehouse_stock(
         sku=item.sku, name=item.name, unit=item.unit, category=item.category,
         cost_price=item.cost_price, selling_price=item.selling_price,
         quantity=_stock_quantity(db, warehouse_id, item.id),
+        reserved_quantity=_reserved_quantity(db, warehouse_id, item.id),
+        available_quantity=max(Decimal("0"), _stock_quantity(db, warehouse_id, item.id) - _reserved_quantity(db, warehouse_id, item.id)),
     )
+
+
+@router.get("/{warehouse_id}/orders", response_model=list[FulfillmentOrderRead])
+def list_fulfillment_orders(
+    warehouse_id: int,
+    status_filter: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    ensure_permission(current_user, "view_warehouses")
+    owner_user_id = get_owner_user_id(current_user)
+    _warehouse_or_404(db, owner_user_id, warehouse_id)
+    query = select(models.FulfillmentOrder).where(
+        models.FulfillmentOrder.owner_user_id == owner_user_id,
+        models.FulfillmentOrder.warehouse_id == warehouse_id,
+    )
+    if status_filter:
+        query = query.where(models.FulfillmentOrder.status == status_filter.strip().lower())
+    orders = db.scalars(query.order_by(models.FulfillmentOrder.created_at.desc(), models.FulfillmentOrder.id.desc()).limit(500)).unique().all()
+    return [_serialize_order(order) for order in orders]
+
+
+@router.post("/{warehouse_id}/orders", response_model=FulfillmentOrderRead)
+def create_fulfillment_order(
+    warehouse_id: int,
+    payload: FulfillmentOrderCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    ensure_permission(current_user, "manage_warehouses")
+    owner_user_id = get_owner_user_id(current_user)
+    _warehouse_or_404(db, owner_user_id, warehouse_id, active_only=True)
+
+    item_ids = [line.item_id for line in payload.items]
+    if len(set(item_ids)) != len(item_ids):
+        raise HTTPException(status_code=422, detail="Each warehouse item may only appear once per order")
+
+    source = payload.source.strip().lower()
+    external_order_id = _clean(payload.external_order_id)
+    if external_order_id:
+        duplicate = db.scalar(select(models.FulfillmentOrder.id).where(
+            models.FulfillmentOrder.owner_user_id == owner_user_id,
+            models.FulfillmentOrder.source == source,
+            models.FulfillmentOrder.external_order_id == external_order_id,
+        ))
+        if duplicate:
+            raise HTTPException(status_code=409, detail="This external order has already been imported")
+
+    locked_items = db.scalars(
+        select(models.WarehouseStockItem)
+        .where(
+            models.WarehouseStockItem.owner_user_id == owner_user_id,
+            models.WarehouseStockItem.warehouse_id == warehouse_id,
+            models.WarehouseStockItem.id.in_(sorted(item_ids)),
+        )
+        .order_by(models.WarehouseStockItem.id)
+        .with_for_update()
+    ).all()
+    item_by_id = {item.id: item for item in locked_items}
+    if len(item_by_id) != len(item_ids):
+        raise HTTPException(status_code=404, detail="One or more warehouse items were not found")
+
+    for line in payload.items:
+        on_hand = _stock_quantity(db, warehouse_id, line.item_id)
+        reserved = _reserved_quantity(db, warehouse_id, line.item_id)
+        available = on_hand - reserved
+        if line.quantity > available:
+            item = item_by_id[line.item_id]
+            raise HTTPException(status_code=400, detail=f"Insufficient available stock for {item.name}. Available: {available}")
+
+    order = models.FulfillmentOrder(
+        owner_user_id=owner_user_id,
+        warehouse_id=warehouse_id,
+        created_by_user_id=current_user.id,
+        external_order_id=external_order_id,
+        source=source,
+        status="reserved",
+        customer_name=payload.customer_name.strip(),
+        customer_phone=_clean(payload.customer_phone),
+        customer_email=_clean(payload.customer_email),
+        delivery_address=_clean(payload.delivery_address),
+        notes=_clean(payload.notes),
+        total_amount=Decimal("0"),
+    )
+    db.add(order)
+    db.flush()
+    total = Decimal("0")
+    for line in payload.items:
+        item = item_by_id[line.item_id]
+        unit_price = line.unit_price if line.unit_price is not None else (item.selling_price or Decimal("0"))
+        line_total = (line.quantity * unit_price).quantize(Decimal("0.01"))
+        total += line_total
+        db.add(models.FulfillmentOrderItem(
+            order_id=order.id,
+            warehouse_item_id=item.id,
+            sku=item.sku,
+            product_name=item.name,
+            quantity=line.quantity,
+            unit_price=unit_price,
+            line_total=line_total,
+        ))
+    order.total_amount = total.quantize(Decimal("0.01"))
+    db.commit()
+    db.refresh(order)
+    return _serialize_order(order)
+
+
+@router.patch("/{warehouse_id}/orders/{order_id}/status", response_model=FulfillmentOrderRead)
+def update_fulfillment_status(
+    warehouse_id: int,
+    order_id: int,
+    payload: FulfillmentStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    ensure_permission(current_user, "manage_warehouses")
+    owner_user_id = get_owner_user_id(current_user)
+    _warehouse_or_404(db, owner_user_id, warehouse_id)
+    order = db.scalar(
+        select(models.FulfillmentOrder)
+        .where(
+            models.FulfillmentOrder.id == order_id,
+            models.FulfillmentOrder.owner_user_id == owner_user_id,
+            models.FulfillmentOrder.warehouse_id == warehouse_id,
+        )
+        .with_for_update()
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="Fulfilment order not found")
+
+    target = payload.status
+    allowed = {
+        "reserved": {"picking", "cancelled"},
+        "picking": {"packed", "cancelled"},
+        "packed": {"dispatched", "cancelled"},
+        "dispatched": {"delivered"},
+        "delivered": set(),
+        "cancelled": set(),
+    }
+    if target not in allowed.get(order.status, set()):
+        raise HTTPException(status_code=409, detail=f"Cannot move order from {order.status} to {target}")
+
+    now = datetime.now(timezone.utc)
+    if target == "picking":
+        order.picked_at = now
+    elif target == "packed":
+        order.packed_at = now
+    elif target == "dispatched":
+        locked_items = db.scalars(
+            select(models.WarehouseStockItem)
+            .where(models.WarehouseStockItem.id.in_(sorted(line.warehouse_item_id for line in order.items)))
+            .order_by(models.WarehouseStockItem.id)
+            .with_for_update()
+        ).all()
+        if len(locked_items) != len(order.items):
+            raise HTTPException(status_code=409, detail="An order item is no longer available")
+        for line in order.items:
+            on_hand = _stock_quantity(db, warehouse_id, line.warehouse_item_id)
+            if line.quantity > on_hand:
+                raise HTTPException(status_code=409, detail=f"Physical stock for {line.product_name} is below the reserved quantity")
+            db.add(models.WarehouseStockMovement(
+                owner_user_id=owner_user_id,
+                warehouse_id=warehouse_id,
+                item_id=line.warehouse_item_id,
+                actor_user_id=current_user.id,
+                change=-line.quantity,
+                reason=f"Dispatched fulfilment order #{order.id}",
+                reference=order.external_order_id or f"FUL-{order.id}",
+                unit_cost_price=line.warehouse_item.cost_price,
+            ))
+        order.dispatched_at = now
+    elif target == "delivered":
+        order.delivered_at = now
+    elif target == "cancelled":
+        order.cancelled_at = now
+    order.status = target
+    db.commit()
+    db.refresh(order)
+    return _serialize_order(order)
 
 
 @router.post("/{warehouse_id}/transfers")
@@ -416,14 +707,18 @@ def transfer_warehouse_stock(
     else:
         if not payload.item_id:
             raise HTTPException(status_code=422, detail="item_id is required for warehouse-to-branch transfers")
-        item = db.scalar(select(models.WarehouseStockItem).where(
-            models.WarehouseStockItem.id == payload.item_id,
-            models.WarehouseStockItem.owner_user_id == owner_user_id,
-            models.WarehouseStockItem.warehouse_id == warehouse_id,
-        ))
+        item = db.scalar(
+            select(models.WarehouseStockItem)
+            .where(
+                models.WarehouseStockItem.id == payload.item_id,
+                models.WarehouseStockItem.owner_user_id == owner_user_id,
+                models.WarehouseStockItem.warehouse_id == warehouse_id,
+            )
+            .with_for_update()
+        )
         if not item:
             raise HTTPException(status_code=404, detail="Warehouse stock item not found")
-        available = _stock_quantity(db, warehouse_id, item.id)
+        available = _stock_quantity(db, warehouse_id, item.id) - _reserved_quantity(db, warehouse_id, item.id)
         if payload.quantity > available:
             raise HTTPException(status_code=400, detail=f"Insufficient warehouse stock. Available: {available}")
         product = _find_or_clone_branch_product(

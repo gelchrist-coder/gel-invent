@@ -415,4 +415,39 @@ export type WarehouseStock = {
   cost_price?: number | null;
   selling_price?: number | null;
   quantity: number;
+  reserved_quantity: number;
+  available_quantity: number;
+};
+
+export type FulfillmentStatus = "reserved" | "picking" | "packed" | "dispatched" | "delivered" | "cancelled";
+
+export type FulfillmentOrderItem = {
+  id: number;
+  item_id: number;
+  sku: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+};
+
+export type FulfillmentOrder = {
+  id: number;
+  warehouse_id: number;
+  external_order_id?: string | null;
+  source: string;
+  status: FulfillmentStatus;
+  customer_name: string;
+  customer_phone?: string | null;
+  customer_email?: string | null;
+  delivery_address?: string | null;
+  notes?: string | null;
+  total_amount: number;
+  items: FulfillmentOrderItem[];
+  picked_at?: string | null;
+  packed_at?: string | null;
+  dispatched_at?: string | null;
+  delivered_at?: string | null;
+  cancelled_at?: string | null;
+  created_at: string;
 };

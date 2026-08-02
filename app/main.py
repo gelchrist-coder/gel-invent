@@ -83,6 +83,8 @@ def _ensure_warehouse_tables(conn) -> None:
     models.Warehouse.__table__.create(bind=conn, checkfirst=True)
     models.WarehouseStockItem.__table__.create(bind=conn, checkfirst=True)
     models.WarehouseStockMovement.__table__.create(bind=conn, checkfirst=True)
+    models.FulfillmentOrder.__table__.create(bind=conn, checkfirst=True)
+    models.FulfillmentOrderItem.__table__.create(bind=conn, checkfirst=True)
     conn.execute(text(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_warehouses_owner_lower_name_unique "
         "ON warehouses (owner_user_id, lower(trim(name)))"
@@ -90,6 +92,11 @@ def _ensure_warehouse_tables(conn) -> None:
     conn.execute(text(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_warehouse_items_warehouse_lower_sku_unique "
         "ON warehouse_stock_items (warehouse_id, lower(trim(sku)))"
+    ))
+    conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_fulfillment_orders_owner_external_unique "
+        "ON fulfillment_orders (owner_user_id, source, external_order_id) "
+        "WHERE external_order_id IS NOT NULL"
     ))
 
 

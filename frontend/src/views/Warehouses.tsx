@@ -2,15 +2,18 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   createWarehouse,
+  createFulfillmentOrder,
   fetchBranches,
   fetchProducts,
   fetchWarehouseStock,
   fetchWarehouses,
+  fetchFulfillmentOrders,
   receiveWarehouseStock,
   transferWarehouseStock,
   updateWarehouse,
+  updateFulfillmentOrderStatus,
 } from "../api";
-import { Branch, Product, Warehouse, WarehouseStock } from "../types";
+import { Branch, FulfillmentOrder, FulfillmentStatus, Product, Warehouse, WarehouseStock } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
 const inputStyle = {
@@ -27,6 +30,7 @@ export default function Warehouses() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | null>(null);
   const [stock, setStock] = useState<WarehouseStock[]>([]);
+  const [orders, setOrders] = useState<FulfillmentOrder[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,12 +49,20 @@ export default function Warehouses() {
     quantity: "",
     notes: "",
   });
+  const [orderDraft, setOrderDraft] = useState({ customerName: "", phone: "", email: "", address: "", externalId: "" });
+  const [lineDraft, setLineDraft] = useState({ itemId: "", quantity: "" });
+  const [orderLines, setOrderLines] = useState<Array<{ itemId: number; quantity: number }>>([]);
 
   const selectedWarehouse = warehouses.find((warehouse) => warehouse.id === selectedWarehouseId) ?? null;
   const activeWarehouses = useMemo(() => warehouses.filter((warehouse) => warehouse.is_active), [warehouses]);
 
   const loadStock = useCallback(async (warehouseId: number) => {
-    setStock(await fetchWarehouseStock(warehouseId));
+    const [stockRows, orderRows] = await Promise.all([
+      fetchWarehouseStock(warehouseId),
+      fetchFulfillmentOrders(warehouseId),
+    ]);
+    setStock(stockRows);
+    setOrders(orderRows);
   }, []);
 
   const load = useCallback(async () => {
@@ -147,6 +159,58 @@ export default function Warehouses() {
     } finally { setBusy(false); }
   };
 
+  const addOrderLine = () => {
+    const itemId = Number(lineDraft.itemId);
+    const quantity = Number(lineDraft.quantity);
+    if (!itemId || quantity <= 0) return;
+    setOrderLines((current) => {
+      const existing = current.find((line) => line.itemId === itemId);
+      return existing
+        ? current.map((line) => line.itemId === itemId ? { ...line, quantity: line.quantity + quantity } : line)
+        : [...current, { itemId, quantity }];
+    });
+    setLineDraft({ itemId: "", quantity: "" });
+  };
+
+  const handleCreateOrder = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedWarehouseId || !orderDraft.customerName.trim() || orderLines.length === 0) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      await createFulfillmentOrder(selectedWarehouseId, {
+        external_order_id: orderDraft.externalId.trim() || null,
+        source: "manual",
+        customer_name: orderDraft.customerName.trim(),
+        customer_phone: orderDraft.phone.trim() || null,
+        customer_email: orderDraft.email.trim() || null,
+        delivery_address: orderDraft.address.trim() || null,
+        items: orderLines.map((line) => ({
+          item_id: line.itemId,
+          quantity: line.quantity,
+          unit_price: stock.find((item) => item.item_id === line.itemId)?.selling_price ?? 0,
+        })),
+      });
+      setOrderDraft({ customerName: "", phone: "", email: "", address: "", externalId: "" });
+      setOrderLines([]);
+      await load();
+      setMessage("Fulfilment order created and stock reserved.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create fulfilment order");
+    } finally { setBusy(false); }
+  };
+
+  const advanceOrder = async (order: FulfillmentOrder, status: Exclude<FulfillmentStatus, "reserved">) => {
+    if (!selectedWarehouseId) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      await updateFulfillmentOrderStatus(selectedWarehouseId, order.id, status);
+      await load();
+      setMessage(`Order #${order.id} moved to ${status}.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update fulfilment order");
+    } finally { setBusy(false); }
+  };
+
   if (loading) return <div className="card" style={{ margin: 16, padding: 20 }}>Loading warehouses...</div>;
 
   return (
@@ -238,16 +302,64 @@ export default function Warehouses() {
                 </div>
               ) : null}
 
+              {canManage && selectedWarehouse.is_active ? (
+                <form className="card" onSubmit={handleCreateOrder} style={{ padding: 16, display: "grid", gap: 12 }}>
+                  <div><strong>Create fulfilment order</strong><div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>Creating an order reserves stock immediately. Physical stock leaves the warehouse at dispatch.</div></div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+                    <input style={inputStyle} value={orderDraft.customerName} onChange={(e) => setOrderDraft({ ...orderDraft, customerName: e.target.value })} placeholder="Customer name" required />
+                    <input style={inputStyle} value={orderDraft.phone} onChange={(e) => setOrderDraft({ ...orderDraft, phone: e.target.value })} placeholder="Phone" />
+                    <input style={inputStyle} type="email" value={orderDraft.email} onChange={(e) => setOrderDraft({ ...orderDraft, email: e.target.value })} placeholder="Email" />
+                    <input style={inputStyle} value={orderDraft.externalId} onChange={(e) => setOrderDraft({ ...orderDraft, externalId: e.target.value })} placeholder="Website order ID (optional)" />
+                    <input style={inputStyle} value={orderDraft.address} onChange={(e) => setOrderDraft({ ...orderDraft, address: e.target.value })} placeholder="Delivery address" />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) 130px auto", gap: 8 }}>
+                    <select style={inputStyle} value={lineDraft.itemId} onChange={(e) => setLineDraft({ ...lineDraft, itemId: e.target.value })}>
+                      <option value="">Choose warehouse item</option>
+                      {stock.filter((item) => Number(item.available_quantity) > 0).map((item) => <option key={item.item_id} value={item.item_id}>{item.name} · {Number(item.available_quantity)} available</option>)}
+                    </select>
+                    <input style={inputStyle} type="number" min="0.01" step="0.01" value={lineDraft.quantity} onChange={(e) => setLineDraft({ ...lineDraft, quantity: e.target.value })} placeholder="Quantity" />
+                    <button type="button" className="button secondary" onClick={addOrderLine}>Add Item</button>
+                  </div>
+                  {orderLines.length ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{orderLines.map((line) => {
+                    const item = stock.find((row) => row.item_id === line.itemId);
+                    return <button type="button" key={line.itemId} onClick={() => setOrderLines((rows) => rows.filter((row) => row.itemId !== line.itemId))} style={{ border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "6px 10px", cursor: "pointer" }}>{item?.name || line.itemId} × {line.quantity} · remove</button>;
+                  })}</div> : null}
+                  <button className="button" disabled={busy || orderLines.length === 0}>Create &amp; Reserve Order</button>
+                </form>
+              ) : null}
+
+              <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
+                <div><strong>Fulfilment pipeline</strong><div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>{orders.filter((order) => !["delivered", "cancelled"].includes(order.status)).length} active orders</div></div>
+                {orders.length === 0 ? <div style={{ padding: 18, textAlign: "center", color: "#64748b" }}>No fulfilment orders yet.</div> : orders.map((order) => {
+                  const nextStatus: Partial<Record<FulfillmentStatus, Exclude<FulfillmentStatus, "reserved">>> = { reserved: "picking", picking: "packed", packed: "dispatched", dispatched: "delivered" };
+                  const next = nextStatus[order.status];
+                  return (
+                    <div key={order.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 14, display: "grid", gap: 9 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+                        <div><strong>Order #{order.id}{order.external_order_id ? ` · ${order.external_order_id}` : ""}</strong><div style={{ color: "#64748b", fontSize: 12 }}>{order.customer_name} · {new Date(order.created_at).toLocaleString()}</div></div>
+                        <span style={{ textTransform: "capitalize", fontWeight: 700, fontSize: 12, padding: "5px 9px", borderRadius: 999, background: order.status === "cancelled" ? "#fef2f2" : order.status === "delivered" ? "#ecfdf5" : "#eff6ff", color: order.status === "cancelled" ? "#b91c1c" : order.status === "delivered" ? "#047857" : "#1d4ed8" }}>{order.status}</span>
+                      </div>
+                      <div style={{ fontSize: 13, color: "#334155" }}>{order.items.map((item) => `${item.product_name} × ${Number(item.quantity)}`).join(" · ")}</div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <strong style={{ marginRight: "auto" }}>{Number(order.total_amount).toFixed(2)}</strong>
+                        {canManage && next ? <button className="button" disabled={busy} onClick={() => void advanceOrder(order, next)}>{next === "picking" ? "Start Picking" : next === "packed" ? "Mark Packed" : next === "dispatched" ? "Dispatch" : "Mark Delivered"}</button> : null}
+                        {canManage && ["reserved", "picking", "packed"].includes(order.status) ? <button className="button secondary" disabled={busy} onClick={() => void advanceOrder(order, "cancelled")}>Cancel</button> : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
               <div className="card" style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
-                  <thead><tr style={{ background: "#f8fafc", textAlign: "left" }}><th style={{ padding: 12 }}>Product</th><th>SKU</th><th>Category</th><th>Quantity</th><th>Value</th></tr></thead>
+                  <thead><tr style={{ background: "#f8fafc", textAlign: "left" }}><th style={{ padding: 12 }}>Product</th><th>SKU</th><th>On Hand</th><th>Reserved</th><th>Available</th><th>Value</th></tr></thead>
                   <tbody>
                     {stock.map((item) => (
                       <tr key={item.item_id} style={{ borderTop: "1px solid #e2e8f0" }}>
-                        <td style={{ padding: 12, fontWeight: 600 }}>{item.name}</td><td>{item.sku}</td><td>{item.category || "—"}</td><td>{Number(item.quantity).toLocaleString()} {item.unit}</td><td>{item.cost_price == null ? "—" : (Number(item.quantity) * Number(item.cost_price)).toFixed(2)}</td>
+                        <td style={{ padding: 12, fontWeight: 600 }}>{item.name}</td><td>{item.sku}</td><td>{Number(item.quantity).toLocaleString()}</td><td>{Number(item.reserved_quantity).toLocaleString()}</td><td style={{ fontWeight: 700 }}>{Number(item.available_quantity).toLocaleString()} {item.unit}</td><td>{item.cost_price == null ? "—" : (Number(item.quantity) * Number(item.cost_price)).toFixed(2)}</td>
                       </tr>
                     ))}
-                    {stock.length === 0 ? <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No warehouse stock yet.</td></tr> : null}
+                    {stock.length === 0 ? <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No warehouse stock yet.</td></tr> : null}
                   </tbody>
                 </table>
               </div>

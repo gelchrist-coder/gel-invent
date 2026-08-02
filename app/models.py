@@ -258,6 +258,55 @@ class WarehouseStockMovement(Base):
     item: Mapped[WarehouseStockItem] = relationship()
 
 
+class FulfillmentOrder(Base):
+    __tablename__ = "fulfillment_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id", ondelete="RESTRICT"), index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    external_order_id: Mapped[str | None] = mapped_column(String(120), index=True, default=None)
+    source: Mapped[str] = mapped_column(String(50), default="manual")
+    status: Mapped[str] = mapped_column(String(30), default="reserved", index=True)
+    customer_name: Mapped[str] = mapped_column(String(255))
+    customer_phone: Mapped[str | None] = mapped_column(String(50), default=None)
+    customer_email: Mapped[str | None] = mapped_column(String(255), default=None)
+    delivery_address: Mapped[str | None] = mapped_column(Text, default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    picked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    packed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    warehouse: Mapped[Warehouse] = relationship()
+    items: Mapped[list["FulfillmentOrderItem"]] = relationship(
+        back_populates="order", cascade="all, delete-orphan", order_by="FulfillmentOrderItem.id"
+    )
+
+
+class FulfillmentOrderItem(Base):
+    __tablename__ = "fulfillment_order_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("fulfillment_orders.id", ondelete="CASCADE"), index=True)
+    warehouse_item_id: Mapped[int] = mapped_column(ForeignKey("warehouse_stock_items.id", ondelete="RESTRICT"), index=True)
+    sku: Mapped[str] = mapped_column(String(64))
+    product_name: Mapped[str] = mapped_column(String(255))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    line_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    order: Mapped[FulfillmentOrder] = relationship(back_populates="items")
+    warehouse_item: Mapped[WarehouseStockItem] = relationship()
+
+
 class Purchase(Base):
     __tablename__ = "purchases"
 
