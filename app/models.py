@@ -49,6 +49,22 @@ class Branch(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Warehouse(Base):
+    __tablename__ = "warehouses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    address: Mapped[str | None] = mapped_column(Text, default=None)
+    contact_name: Mapped[str | None] = mapped_column(String(255), default=None)
+    phone: Mapped[str | None] = mapped_column(String(50), default=None)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
@@ -197,6 +213,49 @@ class StockMovement(Base):
     product: Mapped[Product] = relationship(back_populates="movements")
     variant: Mapped[ProductVariant | None] = relationship()
     sale: Mapped["Sale | None"] = relationship()
+
+
+class WarehouseStockItem(Base):
+    __tablename__ = "warehouse_stock_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id", ondelete="CASCADE"), index=True)
+    source_product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), index=True, default=None)
+    sku: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(255))
+    unit: Mapped[str] = mapped_column(String(32), default="unit")
+    category: Mapped[str | None] = mapped_column(String(100), default=None)
+    cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    selling_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    warehouse: Mapped[Warehouse] = relationship()
+    source_product: Mapped[Product | None] = relationship()
+
+
+class WarehouseStockMovement(Base):
+    __tablename__ = "warehouse_stock_movements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id", ondelete="CASCADE"), index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("warehouse_stock_items.id", ondelete="CASCADE"), index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), index=True, default=None)
+    change: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    reason: Mapped[str] = mapped_column(String(255))
+    reference: Mapped[str | None] = mapped_column(String(100), index=True, default=None)
+    batch_number: Mapped[str | None] = mapped_column(String(100), default=None)
+    expiry_date: Mapped[date | None] = mapped_column(Date, default=None)
+    unit_cost_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    warehouse: Mapped[Warehouse] = relationship()
+    item: Mapped[WarehouseStockItem] = relationship()
 
 
 class Purchase(Base):

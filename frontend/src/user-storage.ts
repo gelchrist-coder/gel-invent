@@ -7,6 +7,7 @@ export type FrontendPermission =
   | "manage_data"
   | "manage_employees"
   | "manage_inventory"
+  | "manage_warehouses"
   | "manage_procurement"
   | "manage_settings"
   | "process_returns"
@@ -16,6 +17,7 @@ export type FrontendPermission =
   | "view_catalog"
   | "view_creditors"
   | "view_inventory"
+  | "view_warehouses"
   | "view_procurement"
   | "view_reports"
   | "view_revenue"
@@ -32,6 +34,7 @@ const ALL_PERMISSIONS = new Set<FrontendPermission>([
   "manage_data",
   "manage_employees",
   "manage_inventory",
+  "manage_warehouses",
   "manage_procurement",
   "manage_settings",
   "process_returns",
@@ -41,6 +44,7 @@ const ALL_PERMISSIONS = new Set<FrontendPermission>([
   "view_catalog",
   "view_creditors",
   "view_inventory",
+  "view_warehouses",
   "view_procurement",
   "view_reports",
   "view_revenue",
@@ -63,6 +67,7 @@ const ROLE_PERMISSIONS: Record<EffectiveRole, readonly FrontendPermission[]> = {
     "manage_data",
     "manage_employees",
     "manage_inventory",
+    "manage_warehouses",
     "manage_procurement",
     "manage_settings",
     "process_returns",
@@ -72,6 +77,7 @@ const ROLE_PERMISSIONS: Record<EffectiveRole, readonly FrontendPermission[]> = {
     "view_catalog",
     "view_creditors",
     "view_inventory",
+    "view_warehouses",
     "view_procurement",
     "view_reports",
     "view_revenue",
@@ -81,6 +87,7 @@ const ROLE_PERMISSIONS: Record<EffectiveRole, readonly FrontendPermission[]> = {
     "manage_catalog",
     "manage_creditors",
     "manage_inventory",
+    "manage_warehouses",
     "manage_procurement",
     "process_returns",
     "process_sales",
@@ -88,6 +95,7 @@ const ROLE_PERMISSIONS: Record<EffectiveRole, readonly FrontendPermission[]> = {
     "view_catalog",
     "view_creditors",
     "view_inventory",
+    "view_warehouses",
     "view_procurement",
     "view_reports",
     "view_revenue",

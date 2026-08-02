@@ -14,7 +14,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User, PasswordResetToken, Branch, SystemSettings
+from app.models import User, PasswordResetToken, Branch, SystemSettings, Warehouse
 from app.auth import (
     create_access_token,
     get_password_rule_error,
@@ -72,6 +72,8 @@ class UserCreate(BaseModel):
     # decide; an explicit answer is stored as a capability override.
     sells_wholesale: Optional[bool] = None
     wants_collect_later: Optional[bool] = None
+    has_warehouse: Optional[bool] = None
+    warehouse_name: Optional[str] = None
     # Legacy input kept for compatibility during migration.
     categories: Optional[list[str]] = None
     branches: Optional[list[str]] = None  # Optional list of branch names
@@ -354,6 +356,8 @@ async def _parse_signup_request(request: Request) -> UserCreate:
             product_categories=product_categories,
             sells_wholesale=_parse_optional_bool(form.get("sells_wholesale")),
             wants_collect_later=_parse_optional_bool(form.get("wants_collect_later")),
+            has_warehouse=_parse_optional_bool(form.get("has_warehouse")),
+            warehouse_name=str(form.get("warehouse_name") or "").strip() or None,
             categories=categories,
             branches=branches,
         )
@@ -473,6 +477,17 @@ async def signup(request: Request, db: Session = Depends(get_db)):
             registration_overrides["wholesale_pricing"] = bool(user_data.sells_wholesale)
         if user_data.wants_collect_later is not None:
             registration_overrides["supply_tracking"] = bool(user_data.wants_collect_later)
+        if user_data.has_warehouse is not None:
+            registration_overrides["warehouse_management"] = bool(user_data.has_warehouse)
+
+        if user_data.has_warehouse:
+            db.add(
+                Warehouse(
+                    owner_user_id=new_user.id,
+                    name=(user_data.warehouse_name or "Main Warehouse").strip()[:255] or "Main Warehouse",
+                    is_active=True,
+                )
+            )
 
         # Create SystemSettings with default values
         db.add(

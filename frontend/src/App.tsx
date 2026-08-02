@@ -130,6 +130,7 @@ const ProductList = lazyWithRetry(() => import("./components/ProductList"));
 const Creditors = lazyWithRetry(() => import("./views/Creditors"));
 const Dashboard = lazyWithRetry(() => import("./views/Dashboard"));
 const Inventory = lazyWithRetry(() => import("./views/Inventory"));
+const Warehouses = lazyWithRetry(() => import("./views/Warehouses"));
 const Invoice = lazyWithRetry(() => import("./views/Invoice"));
 const LandingPage = lazyWithRetry(() => import("./views/auth/LandingPage"));
 const SignIn = lazyWithRetry(() => import("./views/auth/SignIn"));
@@ -1340,6 +1341,8 @@ export default function App() {
       }
       case "inventory":
         return <Inventory />;
+      case "warehouses":
+        return <Warehouses />;
       case "sales":
         return <Sales />;
       case "invoice":

@@ -90,6 +90,7 @@ export default function Profile() {
   const [featureToggles, setFeatureToggles] = useState({
     wholesale_pricing: false,
     supply_tracking: false,
+    warehouse_management: false,
   });
   const [existingCapabilityOverrides, setExistingCapabilityOverrides] = useState<Record<string, boolean>>({});
 
@@ -214,6 +215,7 @@ export default function Profile() {
         setFeatureToggles({
           wholesale_pricing: !!settings.effective_capabilities?.wholesale_pricing,
           supply_tracking: !!settings.effective_capabilities?.supply_tracking,
+          warehouse_management: !!settings.effective_capabilities?.warehouse_management,
         });
         setExistingCapabilityOverrides(settings.capability_overrides ?? {});
         setBusinessInfo((prev) => ({
@@ -291,6 +293,7 @@ export default function Profile() {
             ...existingCapabilityOverrides,
             wholesale_pricing: featureToggles.wholesale_pricing,
             supply_tracking: featureToggles.supply_tracking,
+            warehouse_management: featureToggles.warehouse_management,
           },
         };
         const updated = await updateSystemSettings(payload);
@@ -322,6 +325,7 @@ export default function Profile() {
         setFeatureToggles({
           wholesale_pricing: !!updated.effective_capabilities?.wholesale_pricing,
           supply_tracking: !!updated.effective_capabilities?.supply_tracking,
+          warehouse_management: !!updated.effective_capabilities?.warehouse_management,
         });
         setExistingCapabilityOverrides(updated.capability_overrides ?? {});
 
@@ -1216,6 +1220,35 @@ export default function Profile() {
                       Automatically backup database daily at midnight
                     </div>
                   </div>
+                </label>
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: 12,
+                    background: "#f9fafb",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 8,
+                    cursor: editing ? "pointer" : "default",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={featureToggles.warehouse_management}
+                    disabled={!editing}
+                    onChange={(e) => setFeatureToggles({ ...featureToggles, warehouse_management: e.target.checked })}
+                    style={{ width: 18, height: 18, marginTop: 1 }}
+                  />
+                  <span>
+                    <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                      Warehouse management
+                    </span>
+                    <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#6b7280" }}>
+                      Receive stock into separate warehouses and transfer it between warehouses and branches.
+                    </span>
+                  </span>
                 </label>
 
                 <label

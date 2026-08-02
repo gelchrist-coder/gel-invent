@@ -4,6 +4,7 @@ import TopBar from "./TopBar";
 import { Branch } from "../types";
 import appLogo from "../asset/logo.png";
 import { FrontendPermission, hasUserPermission } from "../user-storage";
+import { useCapability } from "../settings";
 
 type NavItem = {
   id: string;
@@ -103,6 +104,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "sales", label: "Sales", icon: <SalesIcon /> },
   { id: "invoice", label: "Invoice", icon: <InvoiceIcon /> },
   { id: "inventory", label: "Inventory", icon: <InventoryIcon /> },
+  { id: "warehouses", label: "Warehouses", icon: <InventoryIcon />, requiredPermission: "view_warehouses" },
   { id: "reports", label: "Reports", icon: <ReportsIcon />, requiredPermission: "view_reports" },
   { id: "creditors", label: "Customers", icon: <CreditorsIcon /> },
   { id: "profile", label: "Settings", icon: <ProfileIcon /> },
@@ -149,6 +151,7 @@ export default function Layout({
   activeBranchId,
   onChangeBranch,
 }: Props) {
+  const warehouseEnabled = useCapability("warehouse_management");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHovered, setSidebarHovered] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -190,7 +193,8 @@ export default function Layout({
   const accessUser = { role: userRole, permissions: userPermissions };
   const canManageBranches = hasUserPermission("manage_branches", accessUser);
   const visibleNavItems = NAV_ITEMS.filter(
-    (item) => !item.requiredPermission || hasUserPermission(item.requiredPermission, accessUser),
+    (item) => (item.id !== "warehouses" || warehouseEnabled)
+      && (!item.requiredPermission || hasUserPermission(item.requiredPermission, accessUser)),
   );
 
   const bottomNavItems = BOTTOM_NAV_IDS

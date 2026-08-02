@@ -17,6 +17,8 @@ import {
   StockMovement,
   Supplier,
   SupplierPayment,
+  Warehouse,
+  WarehouseStock,
 } from "./types";
 
 function normalizeBaseUrl(url: string): string {
@@ -501,7 +503,69 @@ export type CapabilityKey =
   | "fractional_sales"
   | "length_based_sales"
   | "wholesale_pricing"
-  | "supply_tracking";
+  | "supply_tracking"
+  | "warehouse_management"
+  | "online_order_fulfillment";
+
+export async function fetchWarehouses(): Promise<Warehouse[]> {
+  return jsonRequest<Warehouse[]>("/warehouses");
+}
+
+export async function createWarehouse(payload: {
+  name: string;
+  address?: string | null;
+  contact_name?: string | null;
+  phone?: string | null;
+}): Promise<Warehouse> {
+  return jsonRequest<Warehouse>("/warehouses", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateWarehouse(
+  warehouseId: number,
+  payload: Partial<Pick<Warehouse, "name" | "address" | "contact_name" | "phone" | "is_active">>,
+): Promise<Warehouse> {
+  return jsonRequest<Warehouse>(`/warehouses/${warehouseId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchWarehouseStock(warehouseId: number): Promise<WarehouseStock[]> {
+  return jsonRequest<WarehouseStock[]>(`/warehouses/${warehouseId}/stock`);
+}
+
+export async function receiveWarehouseStock(warehouseId: number, payload: {
+  product_id: number;
+  quantity: number;
+  reference?: string | null;
+  batch_number?: string | null;
+  expiry_date?: string | null;
+  unit_cost_price?: number | null;
+  notes?: string | null;
+}): Promise<WarehouseStock> {
+  return jsonRequest<WarehouseStock>(`/warehouses/${warehouseId}/receipts`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function transferWarehouseStock(warehouseId: number, payload: {
+  direction: "branch_to_warehouse" | "warehouse_to_branch";
+  quantity: number;
+  product_id?: number;
+  item_id?: number;
+  branch_id?: number;
+  reference?: string | null;
+  notes?: string | null;
+}): Promise<{ message: string; reference: string }> {
+  return jsonRequest<{ message: string; reference: string }>(`/warehouses/${warehouseId}/transfers`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
 
 export type CapabilityMap = Record<CapabilityKey, boolean>;
 export type CapabilityOverrides = Partial<CapabilityMap>;
@@ -517,6 +581,8 @@ export const DEFAULT_EFFECTIVE_CAPABILITIES: CapabilityMap = {
   length_based_sales: false,
   wholesale_pricing: false,
   supply_tracking: false,
+  warehouse_management: false,
+  online_order_fulfillment: false,
 };
 
 export type SystemSettingsUpdate = {

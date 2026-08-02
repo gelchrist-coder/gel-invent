@@ -391,3 +391,28 @@ export type NewPurchaseReturn = {
   reason?: string | null;
   notes?: string | null;
 };
+
+export type Warehouse = {
+  id: number;
+  name: string;
+  address?: string | null;
+  contact_name?: string | null;
+  phone?: string | null;
+  is_active: boolean;
+  total_skus: number;
+  total_units: number;
+  created_at: string;
+};
+
+export type WarehouseStock = {
+  item_id: number;
+  warehouse_id: number;
+  source_product_id?: number | null;
+  sku: string;
+  name: string;
+  unit: string;
+  category?: string | null;
+  cost_price?: number | null;
+  selling_price?: number | null;
+  quantity: number;
+};

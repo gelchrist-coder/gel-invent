@@ -18,6 +18,10 @@ CAPABILITY_KEYS = (
     # "Leave in store — collect later" reserved-goods flow (asked at
     # registration; defaults on for business types where it's the norm).
     "supply_tracking",
+    # Separate storage locations that receive stock and replenish branches.
+    "warehouse_management",
+    # Website/API order reservation and fulfilment (implemented in phase 2).
+    "online_order_fulfillment",
 )
 
 DEFAULT_CAPABILITIES: dict[str, bool] = {key: False for key in CAPABILITY_KEYS}

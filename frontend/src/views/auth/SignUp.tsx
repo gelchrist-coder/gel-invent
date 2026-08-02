@@ -50,6 +50,8 @@ export default function SignUp({ onLogin }: SignUpProps) {
     // How the business operates — these switch app features on/off.
     sellsWholesale: false,
     wantsCollectLater: false,
+    hasWarehouse: false,
+    warehouseName: "Main Warehouse",
   });
   const [branchInput, setBranchInput] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -141,6 +143,8 @@ export default function SignUp({ onLogin }: SignUpProps) {
         branches: formData.hasBranches ? formData.branches : [],
         sells_wholesale: formData.sellsWholesale,
         wants_collect_later: formData.wantsCollectLater,
+        has_warehouse: formData.hasWarehouse,
+        warehouse_name: formData.hasWarehouse ? formData.warehouseName.trim() || "Main Warehouse" : null,
         ...(captchaToken ? { recaptcha_token: captchaToken } : {}),
       };
 
@@ -331,6 +335,37 @@ export default function SignUp({ onLogin }: SignUpProps) {
             <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
               <input
                 type="checkbox"
+                checked={formData.hasWarehouse}
+                onChange={(e) => setFormData({ ...formData, hasWarehouse: e.target.checked })}
+                style={{ width: 18, height: 18, marginTop: 1 }}
+              />
+              <span style={{ flex: 1 }}>
+                <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                  I store stock in a warehouse or fulfil online orders separately
+                </span>
+                <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#94a3b8" }}>
+                  Adds warehouse receiving, stock visibility, and transfers between your warehouse and branches.
+                </span>
+              </span>
+            </label>
+
+            {formData.hasWarehouse ? (
+              <div style={{ marginLeft: 28 }}>
+                <FieldLabel>Warehouse Name</FieldLabel>
+                <input
+                  type="text"
+                  value={formData.warehouseName}
+                  maxLength={255}
+                  onChange={(e) => setFormData({ ...formData, warehouseName: e.target.value })}
+                  placeholder="Main Warehouse"
+                  style={{ width: "100%", padding: "10px 12px", border: "1px solid #d1d5db", borderRadius: 8 }}
+                />
+              </div>
+            ) : null}
+
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+              <input
+                type="checkbox"
                 checked={formData.wantsCollectLater}
                 onChange={(e) => setFormData({ ...formData, wantsCollectLater: e.target.checked })}
                 style={{ width: 18, height: 18, marginTop: 1 }}
@@ -346,7 +381,7 @@ export default function SignUp({ onLogin }: SignUpProps) {
             </label>
 
             <p style={{ margin: 0, fontSize: 12, color: "#94a3b8" }}>
-              You can change both anytime in Settings.
+              You can change these anytime in Settings.
             </p>
           </div>
 

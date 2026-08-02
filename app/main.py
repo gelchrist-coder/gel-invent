@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .database import Base, engine, ensure_critical_schema
 from .auth import get_current_active_user
 from .permissions import ensure_permission
-from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns
+from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns, warehouses
 from . import models
 
 app = FastAPI(title="Gel Invent API", version="0.1.0")
@@ -78,6 +78,21 @@ def _ensure_product_extension_tables(conn) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_product_unit_conversions_product_sort_order ON product_unit_conversions (product_id, sort_order, id)"))
 
 
+def _ensure_warehouse_tables(conn) -> None:
+    """Create the optional warehouse ledger without requiring full startup migrations."""
+    models.Warehouse.__table__.create(bind=conn, checkfirst=True)
+    models.WarehouseStockItem.__table__.create(bind=conn, checkfirst=True)
+    models.WarehouseStockMovement.__table__.create(bind=conn, checkfirst=True)
+    conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_warehouses_owner_lower_name_unique "
+        "ON warehouses (owner_user_id, lower(trim(name)))"
+    ))
+    conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_warehouse_items_warehouse_lower_sku_unique "
+        "ON warehouse_stock_items (warehouse_id, lower(trim(sku)))"
+    ))
+
+
 def _ensure_critical_auth_schema_sync() -> None:
     """Apply tiny, idempotent auth schema changes required for request safety.
 
@@ -85,6 +100,7 @@ def _ensure_critical_auth_schema_sync() -> None:
     minimal so endpoints that query User do not fail due to missing columns.
     """
     with engine.begin() as conn:
+        _ensure_warehouse_tables(conn)
         # Lock-light: ensure the collection-log table exists. This is its own
         # cheap, guarded step (NOT part of the heavy batch below) so adding the
         # feature never forces the ~30 ALTER statements — which take an ACCESS
@@ -665,3 +681,4 @@ app.include_router(revenue.router)
 app.include_router(creditors.router)
 app.include_router(reports.router)
 app.include_router(data.router)
+app.include_router(warehouses.router)
