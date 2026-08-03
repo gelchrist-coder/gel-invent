@@ -4,7 +4,6 @@ import { createBranchTransfer, createMovement, deleteProduct, fetchAllMovements,
 import InventoryOverview from "../components/InventoryOverview";
 import StockAlerts from "../components/StockAlerts";
 import MovementHistory from "../components/MovementHistory";
-import PurchasingPanel from "../components/PurchasingPanel";
 import ProductSearchSelect from "../components/ProductSearchSelect";
 import { getProductBatchSummary, getProductVariantSummary } from "../product-display";
 import { useCapabilities, useExpiryTracking } from "../settings";
@@ -13,11 +12,7 @@ import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type InventoryAnalytics = ComponentProps<typeof InventoryOverview>["analytics"];
 type MovementHistoryRow = ComponentProps<typeof MovementHistory>["movements"][number];
-export type InventoryTab = "overview" | "alerts" | "actions" | "purchasing" | "returns" | "history";
-
-type Props = {
-  initialTab?: InventoryTab;
-};
+export type InventoryTab = "overview" | "alerts" | "actions" | "history";
 
 const normalizeQuantityStep = (value: number | null | undefined): number => {
   const parsed = Number(value ?? 1);
@@ -37,20 +32,18 @@ const isStepAligned = (value: number, step: number): boolean => {
   return Math.abs(value - rounded) < 0.0001;
 };
 
-export default function Inventory({ initialTab = "overview" }: Props) {
+export default function Inventory() {
   const currentUser = readStoredUser();
   const canManageCatalog = hasUserPermission("manage_catalog", currentUser);
   const canManageInventory = hasUserPermission("manage_inventory", currentUser);
   const canTransferBetweenBranches = hasUserPermission("transfer_stock_between_branches", currentUser);
-  const canViewProcurement = hasUserPermission("view_procurement", currentUser);
   const canUseActionTab = canManageInventory || canManageCatalog || canTransferBetweenBranches;
   const capabilities = useCapabilities();
   const usesExpiryTracking = useExpiryTracking();
 
   const [analytics, setAnalytics] = useState<InventoryAnalytics | null>(null);
   const [movements, setMovements] = useState<MovementHistoryRow[]>([]);
-  const [activeTab, setActiveTab] = useState<InventoryTab>(initialTab);
-  const [pendingSupplierReturnPurchaseId, setPendingSupplierReturnPurchaseId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<InventoryTab>("overview");
   const [branches, setBranches] = useState<Branch[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
@@ -361,20 +354,6 @@ export default function Inventory({ initialTab = "overview" }: Props) {
             },
           ]
         : []),
-      ...(canViewProcurement
-        ? [
-            {
-              id: "purchasing" as const,
-              label: "Purchasing",
-              description: "Use this for supplier-backed restocks, invoices, payments, and recent buying activity.",
-            },
-            {
-              id: "returns" as const,
-              label: "Supplier Returns",
-              description: "Handle stock sent back to suppliers without crowding the purchasing workflow.",
-            },
-          ]
-        : []),
       {
         id: "history",
         label: "Movement History",
@@ -382,7 +361,7 @@ export default function Inventory({ initialTab = "overview" }: Props) {
         count: movements.length,
       },
     ],
-    [alertCount, canUseActionTab, canViewProcurement, movements.length],
+    [alertCount, canUseActionTab, movements.length],
   );
   const activeTabMeta = inventoryTabs.find((tab) => tab.id === activeTab) ?? inventoryTabs[0];
 
@@ -533,45 +512,6 @@ export default function Inventory({ initialTab = "overview" }: Props) {
             Use this for manual corrections and internal stock changes. For supplier-backed restocks, use Purchasing so supplier, invoice, and purchase history are captured.
           </p>
         </div>
-
-        {canViewProcurement ? (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              flexWrap: "wrap",
-              marginBottom: 16,
-              padding: 14,
-              borderRadius: 12,
-              border: "1px solid #bfdbfe",
-              background: "linear-gradient(180deg, #eff6ff, #dbeafe)",
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8", marginBottom: 4 }}>Restocking from a supplier?</div>
-              <p style={{ margin: 0, fontSize: 13, color: "#1e3a8a" }}>
-                Record supplier deliveries in Purchasing so the stock increase also keeps invoice, supplier, and cost details.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setActiveTab("purchasing")}
-              style={{
-                padding: "9px 14px",
-                borderRadius: 8,
-                border: "1px solid #2563eb",
-                background: "#2563eb",
-                color: "#ffffff",
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              Open Purchasing
-            </button>
-          </div>
-        ) : null}
 
         <div
           style={{
@@ -954,32 +894,6 @@ export default function Inventory({ initialTab = "overview" }: Props) {
           </button>
         </div>
       </div>
-      ) : null}
-
-      {activeTab === "purchasing" ? (
-        <PurchasingPanel
-          products={products}
-          initialProductId={selectedProductId}
-          usesExpiryTracking={usesExpiryTracking}
-          onPurchaseRecorded={loadData}
-          mode="purchasing"
-          onOpenReturnsView={(purchaseId) => {
-            setPendingSupplierReturnPurchaseId(purchaseId ?? null);
-            setActiveTab("returns");
-          }}
-        />
-      ) : null}
-
-      {activeTab === "returns" ? (
-        <PurchasingPanel
-          products={products}
-          initialProductId={selectedProductId}
-          usesExpiryTracking={usesExpiryTracking}
-          onPurchaseRecorded={loadData}
-          mode="returns"
-          initialReturnPurchaseId={pendingSupplierReturnPurchaseId}
-          onInitialReturnPurchaseIdHandled={() => setPendingSupplierReturnPurchaseId(null)}
-        />
       ) : null}
 
       {activeTab === "history" ? (

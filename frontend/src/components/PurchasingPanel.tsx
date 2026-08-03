@@ -35,7 +35,7 @@ const panelDataLabels: Record<keyof PanelDataErrors, string> = {
   suppliers: "Supplier directory",
   purchases: "Purchase orders",
   payments: "Payment history",
-  returns: "Purchase returns",
+  returns: "Return outwards",
 };
 
 const paymentMethodOptions = [
@@ -2457,9 +2457,9 @@ export default function PurchasingPanel({
       {isReturnsMode && !purchaseReturnsSupported ? (
         <div className="card" style={{ marginBottom: 0 }}>
           <div style={{ display: "grid", gap: 8 }}>
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Supplier Returns Unavailable</h3>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Return Outwards Unavailable</h3>
             <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>
-              This deployment does not support supplier returns yet. Upgrade the backend before using this page.
+              This deployment does not support return outwards yet. Upgrade the backend before using this page.
             </p>
           </div>
         </div>
@@ -2686,7 +2686,7 @@ export default function PurchasingPanel({
         {isReturnsMode && purchaseReturnsSupported ? (
           <div className="card" style={{ marginBottom: 0 }} ref={returnSectionRef}>
           <div style={{ marginBottom: 16 }}>
-            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Return to Supplier</h3>
+            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Record Return Outward</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
               Return stock against a specific purchase line so inventory, supplier balances, and order history stay aligned.
             </p>
@@ -2874,7 +2874,7 @@ export default function PurchasingPanel({
         {isReturnsMode && purchaseReturnsSupported ? (
           <div className="card" style={{ marginBottom: 0 }}>
           <div style={{ marginBottom: 16 }}>
-            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Recent Supplier Returns</h3>
+            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Recent Return Outwards</h3>
             <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
               Review what was sent back to suppliers and who recorded each return.
             </p>
@@ -2904,7 +2904,7 @@ export default function PurchasingPanel({
               </div>
             </div>
           ) : purchaseReturns.length === 0 ? (
-            <p style={{ margin: 0, color: "#6b7280" }}>No supplier returns recorded yet.</p>
+            <p style={{ margin: 0, color: "#6b7280" }}>No return outwards recorded yet.</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
@@ -3137,7 +3137,7 @@ export default function PurchasingPanel({
 
                       {orderReturns.length === 0 ? (
                         <div style={{ padding: 12, borderRadius: 10, border: "1px dashed #cbd5e1", background: "#f8fafc", color: "#64748b", fontSize: 13 }}>
-                          No supplier returns recorded for this order yet.
+                          No return outwards recorded for this order yet.
                         </div>
                       ) : (
                         <div style={{ display: "grid", gap: 8 }}>
@@ -3197,7 +3197,7 @@ export default function PurchasingPanel({
                             cursor: order.nextReturnPurchase ? "pointer" : "not-allowed",
                           }}
                         >
-                          {order.nextReturnPurchase ? "Open Supplier Returns" : "No Returnable Items"}
+                          {order.nextReturnPurchase ? "Open Return Outwards" : "No Returnable Items"}
                         </button>
                       ) : null}
                       <button
