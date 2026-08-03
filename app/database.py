@@ -72,6 +72,50 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 _critical_schema_ready = False
 _critical_schema_lock = threading.Lock()
 
+_WAREHOUSE_PURCHASE_COLUMNS: dict[str, dict[str, str]] = {
+    "purchases": {
+        "warehouse_id": "INTEGER REFERENCES warehouses(id) ON DELETE CASCADE",
+        "warehouse_item_id": "INTEGER REFERENCES warehouse_stock_items(id) ON DELETE SET NULL",
+        "warehouse_stock_movement_id": "INTEGER REFERENCES warehouse_stock_movements(id) ON DELETE SET NULL",
+    },
+    "supplier_payments": {
+        "warehouse_id": "INTEGER REFERENCES warehouses(id) ON DELETE CASCADE",
+    },
+    "purchase_returns": {
+        "warehouse_id": "INTEGER REFERENCES warehouses(id) ON DELETE CASCADE",
+        "warehouse_item_id": "INTEGER REFERENCES warehouse_stock_items(id) ON DELETE SET NULL",
+        "warehouse_stock_movement_id": "INTEGER REFERENCES warehouse_stock_movements(id) ON DELETE SET NULL",
+    },
+}
+
+
+def ensure_warehouse_purchase_schema() -> None:
+    """Synchronously install columns required by every procurement query.
+
+    A fast information-schema check avoids taking table locks after rollout.
+    This guard must complete before a serverless instance accepts requests;
+    background startup work can be frozen before its DDL is committed.
+    """
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name IN "
+                "('purchases', 'supplier_payments', 'purchase_returns')"
+            )
+        ).all()
+        present = {(str(row.table_name), str(row.column_name)) for row in rows}
+        missing = [
+            (table_name, column_name, column_type)
+            for table_name, columns in _WAREHOUSE_PURCHASE_COLUMNS.items()
+            for column_name, column_type in columns.items()
+            if (table_name, column_name) not in present
+        ]
+        for table_name, column_name, column_type in missing:
+            conn.execute(
+                text(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}")
+            )
+
 
 def ensure_critical_schema() -> None:
     """Best-effort runtime schema guard for columns queried on every request.
@@ -88,6 +132,7 @@ def ensure_critical_schema() -> None:
             return
 
         try:
+            ensure_warehouse_purchase_schema()
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
@@ -97,14 +142,6 @@ def ensure_critical_schema() -> None:
                 conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
                 conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
                 conn.execute(text("ALTER TABLE system_settings ALTER COLUMN uses_expiry_tracking SET DEFAULT FALSE"))
-                conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id) ON DELETE CASCADE"))
-                conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS warehouse_item_id INTEGER REFERENCES warehouse_stock_items(id) ON DELETE SET NULL"))
-                conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS warehouse_stock_movement_id INTEGER REFERENCES warehouse_stock_movements(id) ON DELETE SET NULL"))
-                conn.execute(text("ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id) ON DELETE CASCADE"))
-                conn.execute(text("ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id) ON DELETE CASCADE"))
-                conn.execute(text("ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS warehouse_item_id INTEGER REFERENCES warehouse_stock_items(id) ON DELETE SET NULL"))
-                conn.execute(text("ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS warehouse_stock_movement_id INTEGER REFERENCES warehouse_stock_movements(id) ON DELETE SET NULL"))
-
             _critical_schema_ready = True
         except Exception as exc:
             # Keep requests flowing; retry on next request.
