@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, importData, TaxLine, updateBranch, updateBusinessLogo, updateMyBusinessProfile, updateSystemSettings } from "../api";
-import { Branch } from "../types";
+import { changePassword, clearAllData, clearClientOperationalData, convertBusinessCurrency, createWarehouse, deleteBranch, deleteMyAccount, exportData, exportDataXlsx, fetchBranches, fetchSystemSettings, fetchWarehouses, importData, TaxLine, updateBranch, updateBusinessLogo, updateMyBusinessProfile, updateSystemSettings, updateWarehouse } from "../api";
+import { Branch, Warehouse } from "../types";
 import { getStoredBusinessLogo, hasUserPermission, readStoredUser, setStoredBusinessLogo } from "../user-storage";
 import { compressImageToDataUrl } from "../image";
 
@@ -164,6 +164,15 @@ export default function Profile() {
   const [branchSaving, setBranchSaving] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
 
+  // Warehouse creation and activation are deliberately kept in owner settings,
+  // away from the day-to-day warehouse operations screen.
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [warehouseName, setWarehouseName] = useState("");
+  const [warehouseAddress, setWarehouseAddress] = useState("");
+  const [warehouseSaving, setWarehouseSaving] = useState(false);
+  const [warehouseError, setWarehouseError] = useState<string | null>(null);
+  const [warehouseMessage, setWarehouseMessage] = useState<string | null>(null);
+
   const managedBranches = useMemo(() => branches, [branches]);
 
   const todayStamp = useMemo(() => {
@@ -236,8 +245,17 @@ export default function Profile() {
           // Branches optional
         }
       }
+
+      if (canManageSettings) {
+        try {
+          const warehouseData = await fetchWarehouses();
+          setWarehouses(warehouseData);
+        } catch (error) {
+          setWarehouseError(error instanceof Error ? error.message : "Could not load warehouses");
+        }
+      }
     })();
-  }, [canManageBranches]);
+  }, [canManageBranches, canManageSettings]);
 
   useEffect(() => {
     if (activeTab === "business" && !canManageBusinessProfile) {
@@ -546,6 +564,62 @@ export default function Profile() {
       setBranchError(error instanceof Error ? error.message : "Failed to delete branch");
     } finally {
       setBranchSaving(false);
+    }
+  };
+
+  const handleCreateWarehouse = async () => {
+    const name = warehouseName.trim();
+    if (!name) {
+      setWarehouseError("Warehouse name cannot be empty");
+      return;
+    }
+
+    setWarehouseSaving(true);
+    setWarehouseError(null);
+    setWarehouseMessage(null);
+    try {
+      await createWarehouse({ name, address: warehouseAddress.trim() || null });
+      setWarehouseName("");
+      setWarehouseAddress("");
+      setWarehouses(await fetchWarehouses());
+      setWarehouseMessage(`Warehouse “${name}” created.`);
+      window.dispatchEvent(new CustomEvent("warehousesChanged"));
+    } catch (error) {
+      setWarehouseError(error instanceof Error ? error.message : "Could not create warehouse");
+    } finally {
+      setWarehouseSaving(false);
+    }
+  };
+
+  const handleWarehouseStatusChange = async (warehouse: Warehouse) => {
+    const action = warehouse.is_active ? "deactivate" : "reactivate";
+    if (warehouse.is_active) {
+      const confirmed = confirm(
+        `Deactivate “${warehouse.name}”?\n\nThis will stop new warehouse operations, but it will not delete its stock or history.`,
+      );
+      if (!confirmed) return;
+
+      const typedName = prompt(`For safety, type the warehouse name exactly:\n${warehouse.name}`);
+      if (typedName !== warehouse.name) {
+        setWarehouseMessage("Deactivation cancelled because the warehouse name did not match.");
+        return;
+      }
+    } else if (!confirm(`Reactivate “${warehouse.name}” and allow warehouse operations again?`)) {
+      return;
+    }
+
+    setWarehouseSaving(true);
+    setWarehouseError(null);
+    setWarehouseMessage(null);
+    try {
+      const updated = await updateWarehouse(warehouse.id, { is_active: !warehouse.is_active });
+      setWarehouses((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      setWarehouseMessage(`Warehouse “${warehouse.name}” ${action}d.`);
+      window.dispatchEvent(new CustomEvent("warehousesChanged"));
+    } catch (error) {
+      setWarehouseError(error instanceof Error ? error.message : `Could not ${action} warehouse`);
+    } finally {
+      setWarehouseSaving(false);
     }
   };
 
@@ -1518,6 +1592,120 @@ export default function Profile() {
                 </button>
               )}
             </div>
+
+            {/* Owner-only structural warehouse controls */}
+            {canManageSettings && (
+              <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 24 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 6px", color: "#374151" }}>
+                  Warehouse Administration
+                </h3>
+                <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 16px", maxWidth: 720 }}>
+                  Owner-only controls for creating and changing warehouse availability. Deactivating a warehouse never deletes its stock or history, and requires two confirmations.
+                </p>
+
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleCreateWarehouse();
+                  }}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+                    gap: 10,
+                    alignItems: "end",
+                    padding: 14,
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: 8,
+                  }}
+                >
+                  <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Warehouse name</span>
+                    <input
+                      className="input"
+                      value={warehouseName}
+                      onChange={(event) => setWarehouseName(event.target.value)}
+                      placeholder="e.g. Main Warehouse"
+                      disabled={warehouseSaving}
+                      required
+                    />
+                  </label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Address (optional)</span>
+                    <input
+                      className="input"
+                      value={warehouseAddress}
+                      onChange={(event) => setWarehouseAddress(event.target.value)}
+                      placeholder="Warehouse location"
+                      disabled={warehouseSaving}
+                    />
+                  </label>
+                  <button type="submit" className="button" disabled={warehouseSaving} style={{ minHeight: 40 }}>
+                    {warehouseSaving ? "Saving..." : "Add Warehouse"}
+                  </button>
+                </form>
+
+                {warehouseError && (
+                  <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "#fef2f2", color: "#b91c1c", fontSize: 13 }}>
+                    {warehouseError}
+                  </div>
+                )}
+                {warehouseMessage && (
+                  <div style={{ marginTop: 10, padding: 10, borderRadius: 8, background: "#ecfdf5", color: "#047857", fontSize: 13 }}>
+                    {warehouseMessage}
+                  </div>
+                )}
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+                  {warehouses.length === 0 ? (
+                    <div style={{ padding: 14, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8, color: "#6b7280", fontSize: 14 }}>
+                      No warehouses created yet.
+                    </div>
+                  ) : warehouses.map((warehouse) => (
+                    <div
+                      key={warehouse.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        padding: 14,
+                        background: "#f9fafb",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div style={{ minWidth: 180 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <strong style={{ fontSize: 14, color: "#374151" }}>{warehouse.name}</strong>
+                          <span style={{ padding: "3px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: warehouse.is_active ? "#dcfce7" : "#e2e8f0", color: warehouse.is_active ? "#166534" : "#475569" }}>
+                            {warehouse.is_active ? "Active" : "Inactive"}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 3 }}>
+                          {warehouse.address || "No address saved"} · {warehouse.total_skus} SKUs · {Number(warehouse.total_units).toLocaleString()} units
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="button"
+                        disabled={warehouseSaving}
+                        onClick={() => void handleWarehouseStatusChange(warehouse)}
+                        style={{
+                          background: warehouse.is_active ? "#fff" : "#166534",
+                          color: warehouse.is_active ? "#b91c1c" : "#fff",
+                          border: warehouse.is_active ? "1px solid #fecaca" : "1px solid #166534",
+                          fontSize: 13,
+                        }}
+                      >
+                        {warehouse.is_active ? "Deactivate" : "Reactivate"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Branch Management */}
             {canManageBranches && (

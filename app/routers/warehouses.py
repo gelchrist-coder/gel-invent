@@ -472,7 +472,7 @@ def create_warehouse(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    ensure_permission(current_user, "manage_warehouses")
+    ensure_permission(current_user, "manage_settings")
     if get_effective_role_name(current_user) == "Warehouse":
         raise HTTPException(status_code=403, detail="Warehouse users cannot create warehouses")
     owner_user_id = get_owner_user_id(current_user)
@@ -503,7 +503,7 @@ def update_warehouse(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
-    ensure_permission(current_user, "manage_warehouses")
+    ensure_permission(current_user, "manage_settings")
     if get_effective_role_name(current_user) == "Warehouse":
         raise HTTPException(status_code=403, detail="Warehouse users cannot change warehouse settings")
     owner_user_id = get_owner_user_id(current_user)

@@ -2,7 +2,6 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   createWarehouseItem,
-  createWarehouse,
   createFulfillmentOrder,
   fetchWarehouseDestinationBranches,
   fetchProducts,
@@ -11,7 +10,6 @@ import {
   fetchFulfillmentOrders,
   receiveWarehouseStock,
   transferWarehouseStock,
-  updateWarehouse,
   updateFulfillmentOrderStatus,
 } from "../api";
 import ProductForm from "../components/ProductForm";
@@ -42,10 +40,7 @@ export default function Warehouses() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
   const [showAddProduct, setShowAddProduct] = useState(false);
-  const [warehouseName, setWarehouseName] = useState("");
-  const [warehouseAddress, setWarehouseAddress] = useState("");
   const [receipt, setReceipt] = useState({ itemId: "", quantity: "", reference: "" });
   const [transfer, setTransfer] = useState({
     direction: (isWarehouseUser ? "warehouse_to_branch" : "branch_to_warehouse") as "branch_to_warehouse" | "warehouse_to_branch",
@@ -110,21 +105,6 @@ export default function Warehouses() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load warehouse stock");
     }
-  };
-
-  const handleCreate = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!warehouseName.trim()) return;
-    setBusy(true); setError(null); setMessage(null);
-    try {
-      const created = await createWarehouse({ name: warehouseName.trim(), address: warehouseAddress.trim() || null });
-      setWarehouseName(""); setWarehouseAddress(""); setShowCreate(false);
-      await load();
-      await selectWarehouse(created.id);
-      setMessage("Warehouse created.");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create warehouse");
-    } finally { setBusy(false); }
   };
 
   const handleAddWarehouseProduct = async (payload: NewProduct) => {
@@ -240,23 +220,13 @@ export default function Warehouses() {
           <h1 style={{ margin: 0, fontSize: 26 }}>Warehouses</h1>
           <p style={{ margin: "5px 0 0", color: "#64748b" }}>Receive stock centrally and move it to or from your branches.</p>
         </div>
-        {canManage && !isWarehouseUser ? <button className="button" onClick={() => setShowCreate((value) => !value)}>Add Warehouse</button> : null}
       </div>
 
       {error ? <div style={{ padding: 12, borderRadius: 8, background: "#fef2f2", color: "#b91c1c" }}>{error}</div> : null}
       {message ? <div style={{ padding: 12, borderRadius: 8, background: "#ecfdf5", color: "#047857" }}>{message}</div> : null}
 
-      {showCreate ? (
-        <form className="card" onSubmit={handleCreate} style={{ padding: 16, display: "grid", gap: 10, maxWidth: 620 }}>
-          <strong>Create warehouse</strong>
-          <input style={inputStyle} value={warehouseName} onChange={(e) => setWarehouseName(e.target.value)} placeholder="Warehouse name" required />
-          <input style={inputStyle} value={warehouseAddress} onChange={(e) => setWarehouseAddress(e.target.value)} placeholder="Address (optional)" />
-          <button className="button" disabled={busy}>Save Warehouse</button>
-        </form>
-      ) : null}
-
       {warehouses.length === 0 ? (
-        <div className="card" style={{ padding: 28, textAlign: "center", color: "#64748b" }}>No warehouses yet. Add one to begin receiving stock.</div>
+        <div className="card" style={{ padding: 28, textAlign: "center", color: "#64748b" }}>No warehouses are configured. The business owner can create one in System Settings.</div>
       ) : (
         <>
           <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
@@ -276,7 +246,9 @@ export default function Warehouses() {
             <>
               <div className="card" style={{ padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                 <div><strong>{selectedWarehouse.name}</strong><div style={{ color: "#64748b", fontSize: 13 }}>{selectedWarehouse.address || "No address saved"}</div></div>
-                {canManage && !isWarehouseUser ? <button className="button secondary" onClick={() => void updateWarehouse(selectedWarehouse.id, { is_active: !selectedWarehouse.is_active }).then(load)}>{selectedWarehouse.is_active ? "Deactivate" : "Reactivate"}</button> : null}
+                <span style={{ padding: "5px 9px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: selectedWarehouse.is_active ? "#dcfce7" : "#f1f5f9", color: selectedWarehouse.is_active ? "#166534" : "#475569" }}>
+                  {selectedWarehouse.is_active ? "Active" : "Inactive"}
+                </span>
               </div>
 
               {canManage && selectedWarehouse.is_active ? (
