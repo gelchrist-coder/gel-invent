@@ -23,7 +23,7 @@ export type FrontendPermission =
   | "view_revenue"
   | "view_runtime_health";
 
-type EffectiveRole = "Admin" | "Manager" | "Sales" | "Warehouse";
+type EffectiveRole = "Admin" | "Manager" | "Sales" | "Custom" | "Warehouse";
 
 const ALL_PERMISSIONS = new Set<FrontendPermission>([
   "delete_sales",
@@ -55,6 +55,7 @@ const ROLE_ALIASES: Record<string, EffectiveRole> = {
   admin: "Admin",
   manager: "Manager",
   sales: "Sales",
+  custom: "Custom",
   warehouse: "Warehouse",
   "warehouse manager": "Warehouse",
 };
@@ -103,14 +104,12 @@ const ROLE_PERMISSIONS: Record<EffectiveRole, readonly FrontendPermission[]> = {
     "view_revenue",
   ],
   Sales: [
-    "manage_creditors",
-    "process_returns",
     "process_sales",
     "send_sale_receipts",
     "view_catalog",
-    "view_creditors",
     "view_inventory",
   ],
+  Custom: [],
   Warehouse: [
     "manage_warehouses",
     "view_warehouses",
@@ -178,7 +177,7 @@ function normalizePermissions(
     }
   }
 
-  if (normalized.size > 0) {
+  if (Array.isArray(permissions)) {
     return Array.from(normalized).sort();
   }
 

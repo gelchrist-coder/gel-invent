@@ -173,6 +173,7 @@ def _ensure_critical_auth_schema_sync() -> None:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_types TEXT"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS product_categories TEXT"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS permission_overrides JSONB"))
         conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS capability_overrides TEXT"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode VARCHAR(128)"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS measurement_type VARCHAR(32) DEFAULT 'count'"))
@@ -266,6 +267,7 @@ def _run_startup_migrations_sync() -> None:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS categories TEXT"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS business_types TEXT"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS product_categories TEXT"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS permission_overrides JSONB"))
         conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS capability_overrides TEXT"))
         conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
 

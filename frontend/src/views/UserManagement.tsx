@@ -1,7 +1,102 @@
-import { useState, useEffect } from "react";
+import { Fragment, useState, useEffect } from "react";
 import { API_BASE, buildAuthHeaders, createBranch, fetchBranches, fetchWarehouses, resilientFetch } from "../api";
 import { Branch, Warehouse } from "../types";
-import { hasUserPermission, readStoredUser } from "../user-storage";
+import { FrontendPermission, hasUserPermission, readStoredUser } from "../user-storage";
+
+type ResponsibilityKey = "sales" | "products" | "inventory" | "customers" | "returns" | "procurement" | "reports" | "revenue" | "warehouses";
+
+const RESPONSIBILITIES: Array<{
+  key: ResponsibilityKey;
+  label: string;
+  description: string;
+  permissions: FrontendPermission[];
+}> = [
+  { key: "sales", label: "Sales & Invoices", description: "Create sales, issue invoices, and send receipts.", permissions: ["process_sales", "send_sale_receipts", "view_catalog", "view_inventory"] },
+  { key: "products", label: "Products", description: "View, add, and edit the product catalogue.", permissions: ["view_catalog", "manage_catalog"] },
+  { key: "inventory", label: "Inventory", description: "View stock and record inventory adjustments.", permissions: ["view_catalog", "view_inventory", "manage_inventory"] },
+  { key: "customers", label: "Customers & Credit", description: "View and manage customer credit accounts.", permissions: ["view_creditors", "manage_creditors"] },
+  { key: "returns", label: "Sales Returns", description: "Process customer returns and refunds.", permissions: ["process_sales", "process_returns", "view_catalog", "view_inventory"] },
+  { key: "procurement", label: "Purchases & Suppliers", description: "Manage suppliers, purchases, payments, and return outwards.", permissions: ["view_procurement", "manage_procurement"] },
+  { key: "reports", label: "Reports", description: "View operational sales and inventory reports.", permissions: ["view_reports"] },
+  { key: "revenue", label: "Revenue", description: "View revenue and profitability analysis.", permissions: ["view_revenue"] },
+  { key: "warehouses", label: "Warehouses", description: "Operate warehouses and transfer warehouse stock.", permissions: ["view_warehouses", "manage_warehouses"] },
+];
+
+const ALL_RESPONSIBILITY_KEYS = RESPONSIBILITIES.map((responsibility) => responsibility.key);
+
+function defaultResponsibilities(role: string): ResponsibilityKey[] {
+  if (role === "Manager") return [...ALL_RESPONSIBILITY_KEYS];
+  if (role === "Warehouse") return ["warehouses"];
+  if (role === "Custom") return [];
+  return ["sales"];
+}
+
+function permissionsForResponsibilities(keys: ResponsibilityKey[]): FrontendPermission[] {
+  const selected = new Set(keys);
+  return Array.from(new Set(
+    RESPONSIBILITIES
+      .filter((responsibility) => selected.has(responsibility.key))
+      .flatMap((responsibility) => responsibility.permissions),
+  )).sort();
+}
+
+function responsibilitiesForPermissions(permissions: string[]): ResponsibilityKey[] {
+  const available = new Set(permissions);
+  return RESPONSIBILITIES
+    .filter((responsibility) => responsibility.permissions.every((permission) => available.has(permission)))
+    .map((responsibility) => responsibility.key);
+}
+
+function ResponsibilityPicker({
+  selected,
+  onChange,
+  warehouseOnly = false,
+}: {
+  selected: ResponsibilityKey[];
+  onChange: (next: ResponsibilityKey[]) => void;
+  warehouseOnly?: boolean;
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+      {RESPONSIBILITIES.map((responsibility) => {
+        const checked = selected.includes(responsibility.key);
+        const disabled = warehouseOnly && responsibility.key !== "warehouses";
+        return (
+          <label
+            key={responsibility.key}
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 10,
+              padding: 12,
+              border: checked ? "1px solid #93c5fd" : "1px solid #e2e8f0",
+              borderRadius: 8,
+              background: checked ? "#eff6ff" : "#fff",
+              opacity: disabled ? 0.45 : 1,
+              cursor: disabled ? "not-allowed" : "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={disabled}
+              onChange={() => onChange(
+                checked
+                  ? selected.filter((key) => key !== responsibility.key)
+                  : [...selected, responsibility.key],
+              )}
+              style={{ width: 17, height: 17, marginTop: 1 }}
+            />
+            <span>
+              <strong style={{ display: "block", fontSize: 13, color: "#1f2937" }}>{responsibility.label}</strong>
+              <span style={{ display: "block", marginTop: 3, fontSize: 11, lineHeight: 1.4, color: "#64748b" }}>{responsibility.description}</span>
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
 
 type Employee = {
   id: number;
@@ -9,6 +104,7 @@ type Employee = {
   phone?: string | null;
   name: string;
   role: string;
+  permissions: string[];
   branch_id?: number | null;
   warehouse_id?: number | null;
   is_active: boolean;
@@ -35,7 +131,10 @@ export default function UserManagement() {
     role: "Sales",
     branch_id: "" as "" | number,
     warehouse_id: "" as "" | number,
+    responsibilities: defaultResponsibilities("Sales"),
   });
+  const [editingAccessEmployeeId, setEditingAccessEmployeeId] = useState<number | null>(null);
+  const [editingResponsibilities, setEditingResponsibilities] = useState<ResponsibilityKey[]>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -107,6 +206,7 @@ export default function UserManagement() {
         email: formData.email,
         password: formData.password,
         role: formData.role,
+        permissions: permissionsForResponsibilities(formData.responsibilities),
       };
       if (formData.phone.trim()) {
         payload.phone = formData.phone.trim();
@@ -126,7 +226,16 @@ export default function UserManagement() {
 
       if (response.ok) {
         setSuccess("Employee added successfully!");
-        setFormData((prev) => ({ name: "", email: "", phone: "", password: "", role: "Sales", branch_id: prev.branch_id, warehouse_id: prev.warehouse_id }));
+        setFormData((prev) => ({
+          name: "",
+          email: "",
+          phone: "",
+          password: "",
+          role: "Sales",
+          branch_id: prev.branch_id,
+          warehouse_id: prev.warehouse_id,
+          responsibilities: defaultResponsibilities("Sales"),
+        }));
         setShowAddForm(false);
         loadEmployees();
       } else {
@@ -179,6 +288,34 @@ export default function UserManagement() {
       if (response.ok) loadEmployees();
     } catch (err) {
       console.error("Error changing employee warehouse:", err);
+    }
+  };
+
+  const openEmployeeAccess = (employee: Employee) => {
+    setEditingAccessEmployeeId(employee.id);
+    setEditingResponsibilities(responsibilitiesForPermissions(employee.permissions ?? []));
+    setError("");
+    setSuccess("");
+  };
+
+  const saveEmployeeAccess = async (employee: Employee) => {
+    try {
+      const response = await resilientFetch(`${API_BASE}/employees/${employee.id}`, {
+        method: "PATCH",
+        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ permissions: permissionsForResponsibilities(editingResponsibilities) }),
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.detail || "Failed to update employee responsibilities");
+        return;
+      }
+      setEditingAccessEmployeeId(null);
+      setEditingResponsibilities([]);
+      setSuccess(`${employee.name}'s responsibilities were updated.`);
+      await loadEmployees();
+    } catch {
+      setError("Network error. Please try again.");
     }
   };
 
@@ -415,7 +552,10 @@ export default function UserManagement() {
                 </label>
                 <select
                   value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                  onChange={(e) => {
+                    const role = e.target.value;
+                    setFormData({ ...formData, role, responsibilities: defaultResponsibilities(role) });
+                  }}
                   style={{
                     width: "100%",
                     padding: 10,
@@ -427,8 +567,28 @@ export default function UserManagement() {
                   <option value="Sales">Sales Personnel</option>
                   <option value="Manager">Manager</option>
                   <option value="Warehouse">Warehouse User</option>
+                  <option value="Custom">Custom Employee</option>
                 </select>
               </div>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#1f2937" }}>Responsibilities</div>
+                <div style={{ marginTop: 4, color: "#64748b", fontSize: 12 }}>
+                  The primary role selects a safe default. Add or remove responsibilities to control which areas this employee can use.
+                </div>
+              </div>
+              <ResponsibilityPicker
+                selected={formData.responsibilities}
+                warehouseOnly={formData.role === "Warehouse"}
+                onChange={(responsibilities) => setFormData({ ...formData, responsibilities })}
+              />
+              {formData.responsibilities.length === 0 && (
+                <div style={{ marginTop: 8, color: "#b45309", fontSize: 12 }}>
+                  This employee will only be able to sign in and view their account until a responsibility is selected.
+                </div>
+              )}
             </div>
 
             <div style={{ marginBottom: 20 }}>
@@ -509,8 +669,8 @@ export default function UserManagement() {
           <p style={{ margin: 0, color: "#5f6475" }}>Add your first sales personnel to get started</p>
         </div>
       ) : (
-        <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.08)", overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.08)", overflowX: "auto" }}>
+          <table style={{ width: "100%", minWidth: 920, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#f9fbff", borderBottom: "2px solid #e6e9f2" }}>
                 <th style={{ padding: 16, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#5f6475" }}>
@@ -538,7 +698,8 @@ export default function UserManagement() {
             </thead>
             <tbody>
               {employees.map((employee) => (
-                <tr key={employee.id} style={{ borderBottom: "1px solid #e6e9f2" }}>
+                <Fragment key={employee.id}>
+                <tr style={{ borderBottom: "1px solid #e6e9f2" }}>
                   <td style={{ padding: 16, fontSize: 14 }}>{employee.name}</td>
                   <td style={{ padding: 16, fontSize: 14, color: "#5f6475" }}>{employee.email}</td>
                   <td style={{ padding: 16, fontSize: 14, color: "#5f6475" }}>{employee.phone || "-"}</td>
@@ -605,6 +766,22 @@ export default function UserManagement() {
                     </span>
                   </td>
                   <td style={{ padding: 16 }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => editingAccessEmployeeId === employee.id ? setEditingAccessEmployeeId(null) : openEmployeeAccess(employee)}
+                      style={{
+                        padding: "6px 12px",
+                        background: editingAccessEmployeeId === employee.id ? "#dbeafe" : "#eff6ff",
+                        color: "#1d4ed8",
+                        border: "1px solid #bfdbfe",
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {editingAccessEmployeeId === employee.id ? "Close Access" : "Manage Access"}
+                    </button>
                     <button
                       onClick={() => handleToggleActive(employee.id, employee.is_active)}
                       style={{
@@ -621,8 +798,39 @@ export default function UserManagement() {
                     >
                       {employee.is_active ? "Deactivate" : "Activate"}
                     </button>
+                    </div>
                   </td>
                 </tr>
+                {editingAccessEmployeeId === employee.id && (
+                  <tr style={{ background: "#f8fafc", borderBottom: "1px solid #dbeafe" }}>
+                    <td colSpan={7} style={{ padding: 18 }}>
+                      <div style={{ marginBottom: 12 }}>
+                        <strong style={{ display: "block", fontSize: 14, color: "#1f2937" }}>Responsibilities for {employee.name}</strong>
+                        <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#64748b" }}>
+                          Changes take effect the next time this employee refreshes or signs in.
+                        </span>
+                      </div>
+                      <ResponsibilityPicker
+                        selected={editingResponsibilities}
+                        warehouseOnly={employee.role === "Warehouse"}
+                        onChange={setEditingResponsibilities}
+                      />
+                      <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
+                        <button
+                          type="button"
+                          onClick={() => setEditingAccessEmployeeId(null)}
+                          style={{ padding: "8px 14px", border: "1px solid #cbd5e1", background: "#fff", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}
+                        >
+                          Cancel
+                        </button>
+                        <button type="button" className="button" onClick={() => void saveEmployeeAccess(employee)}>
+                          Save Responsibilities
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

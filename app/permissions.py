@@ -36,6 +36,7 @@ ROLE_ALIASES: Final[dict[str, str]] = {
     "admin": "Admin",
     "manager": "Manager",
     "sales": "Sales",
+    "custom": "Custom",
     "warehouse": "Warehouse",
     "warehouse manager": "Warehouse",
 }
@@ -84,19 +85,36 @@ ROLE_PERMISSIONS: Final[dict[str, tuple[PermissionName, ...]]] = {
         "view_revenue",
     ),
     "Sales": (
-        "manage_creditors",
-        "process_returns",
         "process_sales",
         "send_sale_receipts",
         "view_catalog",
-        "view_creditors",
         "view_inventory",
     ),
+    "Custom": (),
     "Warehouse": (
         "manage_warehouses",
         "view_warehouses",
     ),
 }
+
+# Business owners keep sensitive administration permissions to themselves.
+# Every other permission can be delegated as an employee responsibility.
+OWNER_ONLY_PERMISSIONS: Final[frozenset[PermissionName]] = frozenset({
+    "delete_sales",
+    "manage_branches",
+    "manage_business_profile",
+    "manage_data",
+    "manage_employees",
+    "manage_settings",
+    "transfer_stock_between_branches",
+    "view_runtime_health",
+})
+DELEGATABLE_PERMISSIONS: Final[frozenset[PermissionName]] = frozenset(
+    permission
+    for role_permissions in ROLE_PERMISSIONS.values()
+    for permission in role_permissions
+    if permission not in OWNER_ONLY_PERMISSIONS
+)
 
 
 def get_effective_role_name(user_or_role: models.User | str | None, *, created_by: int | None = None) -> str:
@@ -117,12 +135,19 @@ def get_effective_role_name(user_or_role: models.User | str | None, *, created_b
 
 def get_role_permissions(user_or_role: models.User | str | None, *, created_by: int | None = None) -> list[str]:
     role_name = get_effective_role_name(user_or_role, created_by=created_by)
+    if isinstance(user_or_role, models.User) and role_name != "Admin":
+        overrides = getattr(user_or_role, "permission_overrides", None)
+        if isinstance(overrides, list):
+            return sorted({
+                permission
+                for permission in overrides
+                if isinstance(permission, str) and permission in DELEGATABLE_PERMISSIONS
+            })
     return sorted(ROLE_PERMISSIONS[role_name])
 
 
 def has_permission(user: models.User, permission: PermissionName) -> bool:
-    role_name = get_effective_role_name(user)
-    return permission in ROLE_PERMISSIONS[role_name]
+    return permission in get_role_permissions(user)
 
 
 def ensure_permission(user: models.User, permission: PermissionName, detail: str | None = None) -> None:

@@ -10,10 +10,42 @@ import { useAppCategories } from "./categories";
 import { updateMyCategories } from "./api";
 import { Branch, NewProduct, Product, ProductUpdate, Supplier } from "./types";
 import { useExpiryTracking } from "./settings";
-import { getDisplayBusinessName, getEffectiveUserRole, hasUserPermission, readStoredUser, setStoredBusinessLogo } from "./user-storage";
+import { FrontendPermission, getDisplayBusinessName, getEffectiveUserRole, hasUserPermission, readStoredUser, setStoredBusinessLogo, StoredUser } from "./user-storage";
 import { fetchBusinessLogo } from "./api";
 
 const LAZY_IMPORT_RETRY_KEY = "gel-invent:lazy-import-retry";
+
+const VIEW_PERMISSIONS: Partial<Record<string, FrontendPermission>> = {
+  dashboard: "view_reports",
+  sales: "process_sales",
+  invoice: "process_sales",
+  creditors: "view_creditors",
+  products: "manage_catalog",
+  inventory: "manage_inventory",
+  warehouses: "view_warehouses",
+  suppliers: "view_procurement",
+  purchases: "view_procurement",
+  reports: "view_reports",
+  revenue: "view_revenue",
+  users: "manage_employees",
+};
+
+function getDefaultEmployeeView(user: StoredUser | null): string {
+  if (!user) return "dashboard";
+  if (user.role === "Warehouse") return "warehouses";
+  if (user.role === "Admin" || user.role === "Manager") return "dashboard";
+  const candidates: Array<[string, FrontendPermission]> = [
+    ["sales", "process_sales"],
+    ["products", "manage_catalog"],
+    ["inventory", "manage_inventory"],
+    ["creditors", "view_creditors"],
+    ["purchases", "view_procurement"],
+    ["reports", "view_reports"],
+    ["revenue", "view_revenue"],
+    ["warehouses", "view_warehouses"],
+  ];
+  return candidates.find(([, permission]) => hasUserPermission(permission, user))?.[0] ?? "profile";
+}
 
 function isRecoverableLazyLoadError(error: unknown): boolean {
   if (!(error instanceof Error)) {
@@ -192,7 +224,7 @@ export default function App() {
   const [outboxCount, setOutboxCount] = useState(() => getSalesOutboxCount());
   const [isSyncingOutbox, setIsSyncingOutbox] = useState(false);
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [activeView, setActiveView] = useState(() => readStoredUser()?.role === "Warehouse" ? "warehouses" : "dashboard");
+  const [activeView, setActiveView] = useState(() => getDefaultEmployeeView(readStoredUser()));
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -425,6 +457,7 @@ export default function App() {
           setBusinessName(getDisplayBusinessName(me));
           setUserRole(getEffectiveUserRole(me));
           setCurrentUserId(me.id || null);
+          setActiveView(getDefaultEmployeeView(me));
 
           // Employees are locked to their assigned branch.
           if (!hasUserPermission("manage_branches", me)) {
@@ -830,7 +863,7 @@ export default function App() {
       }
     }
 
-    setActiveView(user?.role === "Warehouse" ? "warehouses" : "dashboard");
+    setActiveView(getDefaultEmployeeView(user));
     setIsAuthenticated(true);
     // Leave the public auth route (e.g. /login, /signup) for the app shell.
     navigate("/", { replace: true });
@@ -876,25 +909,16 @@ export default function App() {
       return;
     }
 
-    if (activeView === "reports" && !canViewReports) {
-      setActiveView("dashboard");
+    if (activeView === "dashboard" && storedUser?.role !== "Admin" && storedUser?.role !== "Manager") {
+      setActiveView(getDefaultEmployeeView(storedUser));
       return;
     }
 
-    if (activeView === "revenue" && !canViewRevenue) {
-      setActiveView("dashboard");
-      return;
+    const requiredPermission = VIEW_PERMISSIONS[activeView];
+    if (requiredPermission && !hasUserPermission(requiredPermission, storedUser)) {
+      setActiveView(getDefaultEmployeeView(storedUser));
     }
-
-    if (activeView === "users" && !canManageEmployees) {
-      setActiveView("dashboard");
-      return;
-    }
-
-    if ((activeView === "suppliers" || activeView === "purchases") && !canViewProcurement) {
-      setActiveView("dashboard");
-    }
-  }, [activeView, canManageEmployees, canViewProcurement, canViewReports, canViewRevenue, isAuthenticated, isWarehouseUser]);
+  }, [activeView, currentUserId, isAuthenticated, isWarehouseUser, userRole]);
 
   // Show login page if not authenticated
   if (!isAuthenticated) {

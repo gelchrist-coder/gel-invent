@@ -100,12 +100,12 @@ const MoreIcon = () => (
 const BOTTOM_NAV_IDS = ["dashboard", "sales", "products", "inventory"];
 
 const NAV_ITEMS: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", icon: <DashboardIcon />, group: "overview" },
-  { id: "sales", label: "Sales", icon: <SalesIcon />, group: "sales" },
-  { id: "invoice", label: "Invoice", icon: <InvoiceIcon />, group: "sales" },
-  { id: "creditors", label: "Customers", icon: <CreditorsIcon />, group: "sales" },
-  { id: "products", label: "Products", icon: <ProductsIcon />, group: "stock" },
-  { id: "inventory", label: "Inventory", icon: <InventoryIcon />, group: "stock" },
+  { id: "dashboard", label: "Dashboard", icon: <DashboardIcon />, group: "overview", requiredPermission: "view_reports" },
+  { id: "sales", label: "Sales", icon: <SalesIcon />, group: "sales", requiredPermission: "process_sales" },
+  { id: "invoice", label: "Invoice", icon: <InvoiceIcon />, group: "sales", requiredPermission: "process_sales" },
+  { id: "creditors", label: "Customers", icon: <CreditorsIcon />, group: "sales", requiredPermission: "view_creditors" },
+  { id: "products", label: "Products", icon: <ProductsIcon />, group: "stock", requiredPermission: "manage_catalog" },
+  { id: "inventory", label: "Inventory", icon: <InventoryIcon />, group: "stock", requiredPermission: "manage_inventory" },
   { id: "warehouses", label: "Warehouses", icon: <InventoryIcon />, group: "stock", requiredPermission: "view_warehouses" },
   { id: "suppliers", label: "Suppliers", icon: <CreditorsIcon />, group: "procurement", requiredPermission: "view_procurement" },
   { id: "purchases", label: "Purchases", icon: <InvoiceIcon />, group: "procurement", requiredPermission: "view_procurement" },
@@ -207,7 +207,8 @@ export default function Layout({
   const canManageBranches = hasUserPermission("manage_branches", accessUser);
   const isWarehouseUser = userRole.trim().toLowerCase() === "warehouse";
   const visibleNavItems = NAV_ITEMS.filter(
-    (item) => (!isWarehouseUser || item.id === "warehouses")
+    (item) => (item.id !== "dashboard" || userRole === "Admin" || userRole === "Manager")
+      && (!isWarehouseUser || item.id === "warehouses")
       && (item.id !== "warehouses" || warehouseEnabled || isWarehouseUser)
       && (!item.requiredPermission || hasUserPermission(item.requiredPermission, accessUser)),
   );

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User, Branch, Warehouse
 from app.auth import get_current_active_user, get_password_hash, get_password_rule_error
-from app.permissions import ensure_permission
+from app.permissions import DELEGATABLE_PERMISSIONS, ROLE_PERMISSIONS, ensure_permission, get_role_permissions
 from app.utils.branch import get_owner_user_id
 from app.utils.supabase_auth import (
     SupabaseAuthError,
@@ -22,6 +22,7 @@ router = APIRouter(prefix="/employees", tags=["employees"])
 EMPLOYEE_ROLE_LOOKUP = {
     "sales": "Sales",
     "manager": "Manager",
+    "custom": "Custom",
     "warehouse": "Warehouse",
     "warehouse manager": "Warehouse",
 }
@@ -46,6 +47,7 @@ class EmployeeCreate(BaseModel):
     role: str = "Sales"  # Default role for employees
     branch_id: Optional[int] = None
     warehouse_id: Optional[int] = None
+    permissions: Optional[List[str]] = None
 
 
 class EmployeeResponse(BaseModel):
@@ -56,6 +58,7 @@ class EmployeeResponse(BaseModel):
     role: str
     branch_id: Optional[int] = None
     warehouse_id: Optional[int] = None
+    permissions: List[str]
     is_active: bool
     created_at: Optional[datetime] = None
 
@@ -70,6 +73,62 @@ class EmployeeUpdate(BaseModel):
     branch_id: Optional[int] = None
     warehouse_id: Optional[int] = None
     phone: Optional[str] = None
+    permissions: Optional[List[str]] = None
+
+
+PERMISSION_DEPENDENCIES = {
+    "manage_catalog": {"view_catalog"},
+    "manage_creditors": {"view_creditors"},
+    "manage_inventory": {"view_catalog", "view_inventory"},
+    "manage_procurement": {"view_procurement"},
+    "manage_warehouses": {"view_warehouses"},
+    "process_returns": {"process_sales", "view_catalog", "view_inventory"},
+    "process_sales": {"view_catalog", "view_inventory"},
+    "send_sale_receipts": {"process_sales", "view_catalog", "view_inventory"},
+}
+
+
+def _normalize_employee_permissions(permissions: Optional[List[str]], role: str) -> Optional[list[str]]:
+    if permissions is None:
+        return None
+
+    requested = {str(permission).strip() for permission in permissions if str(permission).strip()}
+    invalid = sorted(requested - DELEGATABLE_PERMISSIONS)
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Permissions cannot be delegated: {', '.join(invalid)}")
+
+    if role == "Warehouse":
+        warehouse_permissions = set(ROLE_PERMISSIONS["Warehouse"])
+        if requested - warehouse_permissions:
+            raise HTTPException(status_code=400, detail="Warehouse users can only receive warehouse responsibilities")
+
+    resolved = set(requested)
+    while True:
+        dependencies = {
+            dependency
+            for permission in resolved
+            for dependency in PERMISSION_DEPENDENCIES.get(permission, set())
+        }
+        next_resolved = resolved | dependencies
+        if next_resolved == resolved:
+            break
+        resolved = next_resolved
+    return sorted(resolved)
+
+
+def _serialize_employee(employee: User) -> EmployeeResponse:
+    return EmployeeResponse(
+        id=employee.id,
+        email=employee.email,
+        phone=employee.phone,
+        name=employee.name,
+        role=employee.role,
+        branch_id=employee.branch_id,
+        warehouse_id=employee.warehouse_id,
+        permissions=get_role_permissions(employee),
+        is_active=employee.is_active,
+        created_at=employee.created_at,
+    )
 
 
 @router.post("", response_model=EmployeeResponse, status_code=status.HTTP_201_CREATED)
@@ -84,6 +143,7 @@ def create_employee(
     email = str(employee_data.email).strip().lower()
     phone = normalize_phone(employee_data.phone)
     role = _normalize_employee_role(employee_data.role)
+    permission_overrides = _normalize_employee_permissions(employee_data.permissions, role)
     password_rule_error = get_password_rule_error(employee_data.password)
     if employee_data.phone and not is_valid_phone(employee_data.phone):
         raise HTTPException(status_code=400, detail="Phone number is invalid")
@@ -169,6 +229,7 @@ def create_employee(
         name=employee_data.name.strip(),
         hashed_password=hashed_password,
         role=role,
+        permission_overrides=permission_overrides,
         created_by=current_user.id,
         branch_id=branch_id,
         warehouse_id=warehouse_id,
@@ -190,7 +251,7 @@ def create_employee(
 
     db.refresh(new_employee)
     
-    return new_employee
+    return _serialize_employee(new_employee)
 
 
 @router.get("", response_model=List[EmployeeResponse])
@@ -203,7 +264,7 @@ def list_employees(
     
     # Get all employees created by this owner
     employees = db.query(User).filter(User.created_by == current_user.id).all()
-    return employees
+    return [_serialize_employee(employee) for employee in employees]
 
 
 @router.get("/{employee_id}", response_model=EmployeeResponse)
@@ -226,7 +287,7 @@ def get_employee(
             detail="Employee not found"
         )
     
-    return employee
+    return _serialize_employee(employee)
 
 
 @router.patch("/{employee_id}", response_model=EmployeeResponse)
@@ -255,6 +316,10 @@ def update_employee(
         employee.name = employee_data.name
     if employee_data.role is not None:
         employee.role = _normalize_employee_role(employee_data.role)
+        if "permissions" not in employee_data.model_fields_set:
+            employee.permission_overrides = None
+    if "permissions" in employee_data.model_fields_set:
+        employee.permission_overrides = _normalize_employee_permissions(employee_data.permissions, employee.role)
     if employee_data.is_active is not None:
         employee.is_active = employee_data.is_active
     if employee_data.branch_id is not None:
@@ -305,7 +370,7 @@ def update_employee(
     db.commit()
     db.refresh(employee)
     
-    return employee
+    return _serialize_employee(employee)
 
 
 @router.delete("/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)

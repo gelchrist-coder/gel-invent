@@ -18,6 +18,9 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255))
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(50), default="Admin")
+    # Null uses the primary role's preset. A JSON list stores the owner's
+    # explicit per-employee responsibility selection (including an empty list).
+    permission_overrides: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), default=None)
     # Branch assignment for employees (Admin users can access all branches)
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="SET NULL"), index=True, default=None)
