@@ -111,7 +111,9 @@ const ROLE_PERMISSIONS: Record<EffectiveRole, readonly FrontendPermission[]> = {
   ],
   Custom: [],
   Warehouse: [
+    "manage_procurement",
     "manage_warehouses",
+    "view_procurement",
     "view_warehouses",
   ],
 };

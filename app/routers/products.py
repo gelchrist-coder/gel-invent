@@ -14,6 +14,7 @@ from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.movement_reasons import validate_reason_and_change
 from app.utils.expiry import writeoff_expired_batches
+from app.utils.capabilities import get_effective_capabilities_for_user
 
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -422,7 +423,7 @@ def list_products(
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     # Auto-writeoff any expired batches so stock totals stay accurate.
-    if writeoff_expired_batches(
+    if get_effective_capabilities_for_user(db, current_user).get("expiry_tracking") and writeoff_expired_batches(
         db=db,
         actor_user_id=current_user.id,
         tenant_user_ids=tenant_user_ids,
@@ -513,7 +514,7 @@ def get_product(
     ensure_permission(current_user, "view_catalog")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
-    if writeoff_expired_batches(
+    if get_effective_capabilities_for_user(db, current_user).get("expiry_tracking") and writeoff_expired_batches(
         db=db,
         actor_user_id=current_user.id,
         tenant_user_ids=tenant_user_ids,
@@ -581,7 +582,10 @@ def record_movement(
     tenant_user_ids = get_tenant_user_ids(current_user, db)
 
     # Before any new movement, write off expired batches for this product.
-    if writeoff_expired_batches(
+    expiry_tracking_enabled = bool(
+        get_effective_capabilities_for_user(db, current_user).get("expiry_tracking")
+    )
+    if expiry_tracking_enabled and writeoff_expired_batches(
         db=db,
         actor_user_id=current_user.id,
         tenant_user_ids=tenant_user_ids,
@@ -604,7 +608,7 @@ def record_movement(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error)
 
     # New Stock requires explicit expiry date only if the product is perishable (has an expiry date)
-    if (payload.reason or "").strip().lower() == "new stock" and product.expiry_date is not None and payload.expiry_date is None:
+    if expiry_tracking_enabled and (payload.reason or "").strip().lower() == "new stock" and product.expiry_date is not None and payload.expiry_date is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Expiry date is required for New Stock of perishable products")
 
     if payload.change < 0:

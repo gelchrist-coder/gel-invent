@@ -138,6 +138,7 @@ class SupplierDetailRead(BaseModel):
 
 class PurchaseReturnCreate(BaseModel):
     purchase_id: int = Field(..., gt=0)
+    warehouse_id: int | None = Field(default=None, gt=0)
     quantity_returned: Decimal = Field(..., gt=0, decimal_places=2)
     return_date: date | None = Field(default=None)
     reason: str | None = Field(default=None, max_length=255)
@@ -145,16 +146,20 @@ class PurchaseReturnCreate(BaseModel):
 
 
 class PurchaseOrderItemCreate(BaseModel):
-    product_id: int = Field(..., gt=0)
+    product_id: int | None = Field(default=None, gt=0)
+    warehouse_item_id: int | None = Field(default=None, gt=0)
     variant_id: int | None = Field(default=None, gt=0)
     quantity: Decimal = Field(..., gt=0, decimal_places=2)
     unit_cost_price: Decimal = Field(..., ge=0, decimal_places=2)
     unit_selling_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    batch_number: str | None = Field(default=None, max_length=100)
     expiry_date: date | None = Field(default=None)
 
 
 class PurchaseCreate(BaseModel):
-    product_id: int = Field(..., gt=0)
+    product_id: int | None = Field(default=None, gt=0)
+    warehouse_id: int | None = Field(default=None, gt=0)
+    warehouse_item_id: int | None = Field(default=None, gt=0)
     variant_id: int | None = Field(default=None, gt=0)
     supplier_id: int | None = Field(default=None, gt=0)
     supplier_name: str | None = Field(default=None, max_length=255)
@@ -166,11 +171,13 @@ class PurchaseCreate(BaseModel):
     payment_method: str | None = Field(default=None, max_length=50)
     purchase_date: date | None = Field(default=None)
     due_date: date | None = Field(default=None)
+    batch_number: str | None = Field(default=None, max_length=100)
     expiry_date: date | None = Field(default=None)
     notes: str | None = Field(default=None, max_length=1000)
 
 
 class PurchaseOrderCreate(BaseModel):
+    warehouse_id: int | None = Field(default=None, gt=0)
     supplier_id: int | None = Field(default=None, gt=0)
     supplier_name: str | None = Field(default=None, max_length=255)
     invoice_number: str | None = Field(default=None, max_length=100)
@@ -184,6 +191,11 @@ class PurchaseOrderCreate(BaseModel):
 
 class PurchaseRead(BaseModel):
     id: int
+    branch_id: int | None = None
+    warehouse_id: int | None = None
+    warehouse_item_id: int | None = None
+    destination_type: Literal["branch", "warehouse"] = "branch"
+    destination_name: str | None = None
     order_number: str | None = None
     supplier_id: int | None = None
     supplier_name: str
@@ -192,6 +204,7 @@ class PurchaseRead(BaseModel):
     product_name: str
     product_sku: str
     stock_movement_id: int | None = None
+    warehouse_stock_movement_id: int | None = None
     invoice_number: str | None = None
     quantity: Decimal
     unit_cost_price: Decimal
@@ -212,6 +225,10 @@ class PurchaseRead(BaseModel):
 
 class PurchaseOrderRead(BaseModel):
     order_number: str
+    branch_id: int | None = None
+    warehouse_id: int | None = None
+    destination_type: Literal["branch", "warehouse"] = "branch"
+    destination_name: str | None = None
     supplier_id: int | None = None
     supplier_name: str
     invoice_number: str | None = None
@@ -232,6 +249,7 @@ class PurchaseOrderRead(BaseModel):
 class SupplierPaymentCreate(BaseModel):
     purchase_id: int | None = Field(default=None, gt=0)
     order_number: str | None = Field(default=None, max_length=80)
+    warehouse_id: int | None = Field(default=None, gt=0)
     amount: Decimal = Field(..., gt=0, decimal_places=2)
     payment_method: str = Field(..., min_length=1, max_length=50)
     payment_date: date | None = Field(default=None)
@@ -240,6 +258,8 @@ class SupplierPaymentCreate(BaseModel):
 
 class SupplierPaymentRead(BaseModel):
     id: int
+    branch_id: int | None = None
+    warehouse_id: int | None = None
     supplier_id: int | None = None
     supplier_name: str
     purchase_id: int | None = None
@@ -258,10 +278,13 @@ class SupplierPaymentRead(BaseModel):
 
 class PurchaseReturnRead(BaseModel):
     id: int
+    branch_id: int | None = None
+    warehouse_id: int | None = None
     supplier_id: int | None = None
     supplier_name: str
     purchase_id: int
     product_id: int | None = None
+    warehouse_item_id: int | None = None
     order_number: str | None = None
     purchase_invoice_number: str | None = None
     product_name: str | None = None

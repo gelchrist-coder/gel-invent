@@ -139,9 +139,41 @@ def resolve_effective_capabilities(
             continue
         capabilities.update(mapped)
 
-    # Preserve the legacy settings toggle while capability resolution rolls out.
-    if uses_expiry_tracking is not None and uses_expiry_tracking:
-        capabilities["expiry_tracking"] = True
+    # The original column defaulted to true for every tenant, so treating true
+    # as an override would incorrectly enable expiry for every business type.
+    # A legacy false value is still respected; explicit capability overrides
+    # below are the authoritative owner choice in either direction.
+    if uses_expiry_tracking is False:
+        capabilities["expiry_tracking"] = False
 
     capabilities.update(normalize_capability_overrides(capability_overrides))
     return capabilities
+
+
+def get_effective_capabilities_for_user(db, user) -> dict[str, bool]:
+    """Resolve tenant capabilities for backend validation and stock logic."""
+    from sqlalchemy import select
+
+    from app import models
+
+    owner_user_id = int(user.created_by or user.id)
+    owner = db.get(models.User, owner_user_id)
+    settings = db.scalar(
+        select(models.SystemSettings).where(models.SystemSettings.owner_user_id == owner_user_id)
+    )
+
+    business_types: list[str] = []
+    raw_business_types = getattr(owner, "business_types", None) if owner else None
+    if raw_business_types:
+        try:
+            parsed = json.loads(raw_business_types)
+            if isinstance(parsed, list):
+                business_types = [str(value).strip() for value in parsed if str(value).strip()]
+        except Exception:
+            business_types = []
+
+    return resolve_effective_capabilities(
+        business_types=business_types,
+        capability_overrides=getattr(settings, "capability_overrides", None) if settings else None,
+        uses_expiry_tracking=getattr(settings, "uses_expiry_tracking", None) if settings else None,
+    )

@@ -88,6 +88,7 @@ export default function Profile() {
   // Feature switches asked at registration, changeable here. Saved as
   // capability overrides (merged with any others so nothing is lost).
   const [featureToggles, setFeatureToggles] = useState({
+    expiry_tracking: false,
     variants: false,
     wholesale_pricing: false,
     supply_tracking: false,
@@ -223,6 +224,7 @@ export default function Profile() {
         });
         setTaxes(Array.isArray(settings.taxes) ? settings.taxes : []);
         setFeatureToggles({
+          expiry_tracking: !!settings.effective_capabilities?.expiry_tracking,
           variants: !!settings.effective_capabilities?.variants,
           wholesale_pricing: !!settings.effective_capabilities?.wholesale_pricing,
           supply_tracking: !!settings.effective_capabilities?.supply_tracking,
@@ -300,6 +302,7 @@ export default function Profile() {
         const previousCurrency = (systemSettings.currencyCode || "GHS").toUpperCase();
         const nextCapabilityOverrides: Record<string, boolean> = {
           ...existingCapabilityOverrides,
+          expiry_tracking: featureToggles.expiry_tracking,
           variants: featureToggles.variants,
           wholesale_pricing: featureToggles.wholesale_pricing,
           supply_tracking: featureToggles.supply_tracking,
@@ -316,7 +319,7 @@ export default function Profile() {
         const payload = {
           low_stock_threshold: Number(systemSettings.lowStockThreshold) || 0,
           expiry_warning_days: Number(systemSettings.expiryWarningDays) || 0,
-          uses_expiry_tracking: true,
+          uses_expiry_tracking: featureToggles.expiry_tracking,
           currency_code: selectedCurrency,
           auto_backup: systemSettings.autoBackup,
           email_notifications: systemSettings.emailNotifications,
@@ -1225,6 +1228,35 @@ export default function Profile() {
               <h3 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 16px", color: "#374151" }}>
                 Inventory Alerts
               </h3>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  padding: 12,
+                  marginBottom: 16,
+                  background: "#f9fafb",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  cursor: editing ? "pointer" : "default",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={featureToggles.expiry_tracking}
+                  disabled={!editing}
+                  onChange={(e) => setFeatureToggles({ ...featureToggles, expiry_tracking: e.target.checked })}
+                  style={{ width: 18, height: 18, marginTop: 1 }}
+                />
+                <span>
+                  <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                    Expiry tracking
+                  </span>
+                  <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#6b7280" }}>
+                    Require expiry dates, show expiry alerts, and issue expiring stock first. Enable this only when your products need it.
+                  </span>
+                </span>
+              </label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <span style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>
@@ -1255,10 +1287,10 @@ export default function Profile() {
                     onChange={(e) =>
                       setSystemSettings({ ...systemSettings, expiryWarningDays: e.target.value })
                     }
-                    disabled={!editing}
+                    disabled={!editing || !featureToggles.expiry_tracking}
                     className="input"
                     min="0"
-                    style={{ backgroundColor: editing ? "white" : "#f9fafb" }}
+                    style={{ backgroundColor: editing && featureToggles.expiry_tracking ? "white" : "#f9fafb" }}
                   />
                   <small style={{ fontSize: 12, color: "#6b7280" }}>
                     Mark products as expiring when within this many days

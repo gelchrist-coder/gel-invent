@@ -256,6 +256,11 @@ export type SupplierUpdate = {
 
 export type Purchase = {
   id: number;
+  branch_id?: number | null;
+  warehouse_id?: number | null;
+  warehouse_item_id?: number | null;
+  destination_type?: "branch" | "warehouse";
+  destination_name?: string | null;
   order_number?: string | null;
   supplier_id?: number | null;
   supplier_name: string;
@@ -264,6 +269,7 @@ export type Purchase = {
   product_name: string;
   product_sku: string;
   stock_movement_id?: number | null;
+  warehouse_stock_movement_id?: number | null;
   invoice_number?: string | null;
   quantity: number;
   unit_cost_price: number;
@@ -281,7 +287,9 @@ export type Purchase = {
 };
 
 export type NewPurchase = {
-  product_id: number;
+  product_id?: number | null;
+  warehouse_id?: number | null;
+  warehouse_item_id?: number | null;
   variant_id?: number | null;
   supplier_id?: number | null;
   supplier_name?: string | null;
@@ -293,20 +301,24 @@ export type NewPurchase = {
   payment_method?: string | null;
   purchase_date?: string | null;
   due_date?: string | null;
+  batch_number?: string | null;
   expiry_date?: string | null;
   notes?: string | null;
 };
 
 export type NewPurchaseOrderItem = {
-  product_id: number;
+  product_id?: number | null;
+  warehouse_item_id?: number | null;
   variant_id?: number | null;
   quantity: number;
   unit_cost_price: number;
   unit_selling_price?: number | null;
+  batch_number?: string | null;
   expiry_date?: string | null;
 };
 
 export type NewPurchaseOrder = {
+  warehouse_id?: number | null;
   supplier_id?: number | null;
   supplier_name?: string | null;
   invoice_number?: string | null;
@@ -320,6 +332,10 @@ export type NewPurchaseOrder = {
 
 export type PurchaseOrder = {
   order_number: string;
+  branch_id?: number | null;
+  warehouse_id?: number | null;
+  destination_type?: "branch" | "warehouse";
+  destination_name?: string | null;
   supplier_id?: number | null;
   supplier_name: string;
   invoice_number?: string | null;
@@ -339,6 +355,8 @@ export type PurchaseOrder = {
 
 export type SupplierPayment = {
   id: number;
+  branch_id?: number | null;
+  warehouse_id?: number | null;
   supplier_id?: number | null;
   supplier_name: string;
   purchase_id?: number | null;
@@ -355,10 +373,13 @@ export type SupplierPayment = {
 
 export type PurchaseReturn = {
   id: number;
+  branch_id?: number | null;
+  warehouse_id?: number | null;
   supplier_id?: number | null;
   supplier_name: string;
   purchase_id: number;
   product_id?: number | null;
+  warehouse_item_id?: number | null;
   order_number?: string | null;
   purchase_invoice_number?: string | null;
   product_name?: string | null;
@@ -381,6 +402,7 @@ export type SupplierDetail = {
 export type NewSupplierPayment = {
   purchase_id?: number | null;
   order_number?: string | null;
+  warehouse_id?: number | null;
   amount: number;
   payment_method: string;
   payment_date?: string | null;
@@ -389,6 +411,7 @@ export type NewSupplierPayment = {
 
 export type NewPurchaseReturn = {
   purchase_id: number;
+  warehouse_id?: number | null;
   quantity_returned: number;
   return_date?: string | null;
   reason?: string | null;
@@ -412,14 +435,44 @@ export type WarehouseStock = {
   warehouse_id: number;
   source_product_id?: number | null;
   sku: string;
+  barcode?: string | null;
   name: string;
+  description?: string | null;
   unit: string;
+  measurement_type?: "count" | "weight" | "volume" | "length";
+  allows_fractional_sales?: boolean;
+  quantity_step?: number;
+  pack_size?: number | null;
   category?: string | null;
+  supplier?: string | null;
+  expiry_date?: string | null;
   cost_price?: number | null;
+  pack_cost_price?: number | null;
   selling_price?: number | null;
+  pack_selling_price?: number | null;
+  wholesale_price?: number | null;
+  wholesale_min_quantity?: number | null;
+  image?: string | null;
   quantity: number;
   reserved_quantity: number;
   available_quantity: number;
+};
+
+export type WarehouseMovement = {
+  id: number;
+  warehouse_id: number;
+  item_id: number;
+  item_name: string;
+  sku: string;
+  change: number;
+  reason: string;
+  reference?: string | null;
+  batch_number?: string | null;
+  expiry_date?: string | null;
+  unit_cost_price?: number | null;
+  branch_name?: string | null;
+  actor_name?: string | null;
+  created_at: string;
 };
 
 export type FulfillmentStatus = "reserved" | "picking" | "packed" | "dispatched" | "delivered" | "cancelled";

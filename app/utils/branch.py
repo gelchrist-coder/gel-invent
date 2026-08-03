@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app import models
 from app.deps import get_db
 from app.auth import get_current_active_user
-from app.permissions import is_admin
+from app.permissions import get_effective_role_name, is_admin
 
 
 def get_owner_user_id(current_user: models.User) -> int:
@@ -66,6 +66,10 @@ def resolve_active_branch_id(
 
     # Employees are locked to a single branch.
     if not is_admin(current_user):
+        if get_effective_role_name(current_user) == "Warehouse":
+            # Warehouse-only employees still need a branch context for a few
+            # shared dependencies, but must not be silently assigned to one.
+            return int(get_preferred_default_branch(db, owner_user_id).id)
         if current_user.branch_id:
             assigned_branch = (
                 db.query(models.Branch)

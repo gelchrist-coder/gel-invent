@@ -338,11 +338,16 @@ class Purchase(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id", ondelete="CASCADE"), index=True, default=None)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True, default=None)
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), index=True, default=None)
+    warehouse_item_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse_stock_items.id", ondelete="SET NULL"), index=True, default=None)
     variant_id: Mapped[int | None] = mapped_column(ForeignKey("product_variants.id", ondelete="SET NULL"), index=True, default=None)
     stock_movement_id: Mapped[int | None] = mapped_column(
         ForeignKey("stock_movements.id", ondelete="SET NULL"), index=True, default=None
+    )
+    warehouse_stock_movement_id: Mapped[int | None] = mapped_column(
+        ForeignKey("warehouse_stock_movements.id", ondelete="SET NULL"), index=True, default=None
     )
     order_number: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
     supplier_name: Mapped[str] = mapped_column(String(255))
@@ -363,6 +368,9 @@ class Purchase(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     product: Mapped[Product | None] = relationship()
+    warehouse: Mapped[Warehouse | None] = relationship()
+    warehouse_item: Mapped[WarehouseStockItem | None] = relationship()
+    warehouse_stock_movement: Mapped[WarehouseStockMovement | None] = relationship()
     variant: Mapped[ProductVariant | None] = relationship()
     supplier: Mapped[Supplier | None] = relationship()
     stock_movement: Mapped[StockMovement | None] = relationship()
@@ -374,6 +382,7 @@ class SupplierPayment(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id", ondelete="CASCADE"), index=True, default=None)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True, default=None)
     purchase_id: Mapped[int | None] = mapped_column(ForeignKey("purchases.id", ondelete="SET NULL"), index=True, default=None)
     order_number: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
@@ -393,11 +402,16 @@ class PurchaseReturn(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id", ondelete="CASCADE"), index=True, default=None)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), index=True, default=None)
     purchase_id: Mapped[int] = mapped_column(ForeignKey("purchases.id", ondelete="CASCADE"), index=True)
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), index=True, default=None)
+    warehouse_item_id: Mapped[int | None] = mapped_column(ForeignKey("warehouse_stock_items.id", ondelete="SET NULL"), index=True, default=None)
     stock_movement_id: Mapped[int | None] = mapped_column(
         ForeignKey("stock_movements.id", ondelete="SET NULL"), index=True, default=None
+    )
+    warehouse_stock_movement_id: Mapped[int | None] = mapped_column(
+        ForeignKey("warehouse_stock_movements.id", ondelete="SET NULL"), index=True, default=None
     )
     order_number: Mapped[str | None] = mapped_column(String(80), index=True, default=None)
     quantity_returned: Mapped[Decimal] = mapped_column(Numeric(14, 2))
@@ -555,7 +569,7 @@ class SystemSettings(Base):
     )
     low_stock_threshold: Mapped[int] = mapped_column(Integer, default=10)
     expiry_warning_days: Mapped[int] = mapped_column(Integer, default=45)
-    uses_expiry_tracking: Mapped[bool] = mapped_column(Boolean, default=True)
+    uses_expiry_tracking: Mapped[bool] = mapped_column(Boolean, default=False)
     capability_overrides: Mapped[str | None] = mapped_column(Text, default=None)
     currency_code: Mapped[str] = mapped_column(String(3), default="GHS")
     auto_backup: Mapped[bool] = mapped_column(Boolean, default=True)

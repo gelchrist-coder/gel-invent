@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -15,6 +15,8 @@ from app.deps import get_db
 from app.permissions import ensure_permission, get_effective_role_name
 from app.utils.branch import get_owner_user_id
 from app.utils.tenant import get_tenant_user_ids
+from app.utils.warehouse_stock import allocate_warehouse_outbound
+from app.utils.capabilities import get_effective_capabilities_for_user
 
 router = APIRouter(prefix="/warehouses", tags=["warehouses"])
 
@@ -56,14 +58,44 @@ class WarehouseStockRead(BaseModel):
     warehouse_id: int
     source_product_id: int | None
     sku: str
+    barcode: str | None = None
     name: str
+    description: str | None = None
     unit: str
+    measurement_type: str = "count"
+    allows_fractional_sales: bool = False
+    quantity_step: Decimal = Decimal("1")
+    pack_size: int | None = None
     category: str | None
+    supplier: str | None = None
+    expiry_date: date | None = None
     cost_price: Decimal | None
+    pack_cost_price: Decimal | None = None
     selling_price: Decimal | None
+    pack_selling_price: Decimal | None = None
+    wholesale_price: Decimal | None = None
+    wholesale_min_quantity: Decimal | None = None
+    image: str | None = None
     quantity: Decimal
     reserved_quantity: Decimal = Decimal("0")
     available_quantity: Decimal = Decimal("0")
+
+
+class WarehouseMovementRead(BaseModel):
+    id: int
+    warehouse_id: int
+    item_id: int
+    item_name: str
+    sku: str
+    change: Decimal
+    reason: str
+    reference: str | None
+    batch_number: str | None
+    expiry_date: date | None
+    unit_cost_price: Decimal | None
+    branch_name: str | None
+    actor_name: str | None
+    created_at: datetime
 
 
 class WarehouseVariantCreate(BaseModel):
@@ -240,6 +272,41 @@ def _reserved_quantity(db: Session, warehouse_id: int, item_id: int, *, exclude_
         query = query.where(models.FulfillmentOrder.id != exclude_order_id)
     value = db.scalar(query)
     return value if isinstance(value, Decimal) else Decimal(str(value or 0))
+
+
+def _serialize_stock_item(
+    item: models.WarehouseStockItem,
+    *,
+    quantity: Decimal,
+    reserved: Decimal,
+) -> WarehouseStockRead:
+    return WarehouseStockRead(
+        item_id=item.id,
+        warehouse_id=item.warehouse_id,
+        source_product_id=item.source_product_id,
+        sku=item.sku,
+        barcode=item.barcode,
+        name=item.name,
+        description=item.description,
+        unit=item.unit,
+        measurement_type=item.measurement_type,
+        allows_fractional_sales=item.allows_fractional_sales,
+        quantity_step=item.quantity_step,
+        pack_size=item.pack_size,
+        category=item.category,
+        supplier=item.supplier,
+        expiry_date=item.expiry_date,
+        cost_price=item.cost_price,
+        pack_cost_price=item.pack_cost_price,
+        selling_price=item.selling_price,
+        pack_selling_price=item.pack_selling_price,
+        wholesale_price=item.wholesale_price,
+        wholesale_min_quantity=item.wholesale_min_quantity,
+        image=item.image,
+        quantity=quantity,
+        reserved_quantity=reserved,
+        available_quantity=max(Decimal("0"), quantity - reserved),
+    )
 
 
 def _serialize_order(order: models.FulfillmentOrder) -> FulfillmentOrderRead:
@@ -552,13 +619,57 @@ def list_warehouse_stock(
     for item, quantity_value in rows:
         quantity = Decimal(str(quantity_value or 0))
         reserved = _reserved_quantity(db, warehouse_id, item.id)
-        result.append(WarehouseStockRead(
-            item_id=item.id, warehouse_id=item.warehouse_id, source_product_id=item.source_product_id,
-            sku=item.sku, name=item.name, unit=item.unit, category=item.category,
-            cost_price=item.cost_price, selling_price=item.selling_price, quantity=quantity,
-            reserved_quantity=reserved, available_quantity=max(Decimal("0"), quantity - reserved),
-        ))
+        result.append(_serialize_stock_item(item, quantity=quantity, reserved=reserved))
     return result
+
+
+@router.get("/{warehouse_id}/movements", response_model=list[WarehouseMovementRead])
+def list_warehouse_movements(
+    warehouse_id: int,
+    limit: int = Query(default=250, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    ensure_permission(current_user, "view_warehouses")
+    owner_user_id = get_owner_user_id(current_user)
+    _warehouse_or_404(db, owner_user_id, warehouse_id, current_user=current_user)
+    movements = db.scalars(
+        select(models.WarehouseStockMovement)
+        .where(
+            models.WarehouseStockMovement.owner_user_id == owner_user_id,
+            models.WarehouseStockMovement.warehouse_id == warehouse_id,
+        )
+        .order_by(models.WarehouseStockMovement.created_at.desc(), models.WarehouseStockMovement.id.desc())
+        .limit(limit)
+    ).all()
+    item_ids = sorted({movement.item_id for movement in movements})
+    actor_ids = sorted({movement.actor_user_id for movement in movements if movement.actor_user_id is not None})
+    branch_ids = sorted({movement.branch_id for movement in movements if movement.branch_id is not None})
+    items = db.execute(select(models.WarehouseStockItem.id, models.WarehouseStockItem.name, models.WarehouseStockItem.sku).where(models.WarehouseStockItem.id.in_(item_ids))).all() if item_ids else []
+    actors = db.execute(select(models.User.id, models.User.name).where(models.User.id.in_(actor_ids))).all() if actor_ids else []
+    branches = db.execute(select(models.Branch.id, models.Branch.name).where(models.Branch.id.in_(branch_ids))).all() if branch_ids else []
+    item_by_id = {int(row.id): row for row in items}
+    actor_name_by_id = {int(row.id): row.name for row in actors}
+    branch_name_by_id = {int(row.id): row.name for row in branches}
+    return [
+        WarehouseMovementRead(
+            id=movement.id,
+            warehouse_id=movement.warehouse_id,
+            item_id=movement.item_id,
+            item_name=item_by_id[movement.item_id].name if movement.item_id in item_by_id else "Removed product",
+            sku=item_by_id[movement.item_id].sku if movement.item_id in item_by_id else "—",
+            change=movement.change,
+            reason=movement.reason,
+            reference=movement.reference,
+            batch_number=movement.batch_number,
+            expiry_date=movement.expiry_date,
+            unit_cost_price=movement.unit_cost_price,
+            branch_name=branch_name_by_id.get(int(movement.branch_id)) if movement.branch_id is not None else None,
+            actor_name=actor_name_by_id.get(int(movement.actor_user_id)) if movement.actor_user_id is not None else None,
+            created_at=movement.created_at,
+        )
+        for movement in movements
+    ]
 
 
 @router.post("/{warehouse_id}/items", response_model=WarehouseStockRead, status_code=201)
@@ -630,12 +741,7 @@ def create_warehouse_item(
     db.commit()
     db.refresh(item)
     quantity = _stock_quantity(db, warehouse_id, item.id)
-    return WarehouseStockRead(
-        item_id=item.id, warehouse_id=item.warehouse_id, source_product_id=None,
-        sku=item.sku, name=item.name, unit=item.unit, category=item.category,
-        cost_price=item.cost_price, selling_price=item.selling_price,
-        quantity=quantity, reserved_quantity=Decimal("0"), available_quantity=quantity,
-    )
+    return _serialize_stock_item(item, quantity=quantity, reserved=Decimal("0"))
 
 
 @router.post("/{warehouse_id}/receipts", response_model=WarehouseStockRead)
@@ -668,6 +774,11 @@ def receive_warehouse_stock(
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
         item = _get_or_create_item(db, owner_user_id=owner_user_id, warehouse_id=warehouse_id, product=product)
+    expiry_tracking_enabled = bool(
+        get_effective_capabilities_for_user(db, current_user).get("expiry_tracking")
+    )
+    if expiry_tracking_enabled and item.expiry_date is not None and payload.expiry_date is None:
+        raise HTTPException(status_code=400, detail=f"Expiry date is required when receiving stock for {item.name}")
     reason = "Warehouse receipt" + (f": {payload.notes.strip()}" if payload.notes and payload.notes.strip() else "")
     db.add(models.WarehouseStockMovement(
         owner_user_id=owner_user_id, warehouse_id=warehouse_id, item_id=item.id,
@@ -678,14 +789,9 @@ def receive_warehouse_stock(
     ))
     db.commit()
     db.refresh(item)
-    return WarehouseStockRead(
-        item_id=item.id, warehouse_id=item.warehouse_id, source_product_id=item.source_product_id,
-        sku=item.sku, name=item.name, unit=item.unit, category=item.category,
-        cost_price=item.cost_price, selling_price=item.selling_price,
-        quantity=_stock_quantity(db, warehouse_id, item.id),
-        reserved_quantity=_reserved_quantity(db, warehouse_id, item.id),
-        available_quantity=max(Decimal("0"), _stock_quantity(db, warehouse_id, item.id) - _reserved_quantity(db, warehouse_id, item.id)),
-    )
+    quantity = _stock_quantity(db, warehouse_id, item.id)
+    reserved = _reserved_quantity(db, warehouse_id, item.id)
+    return _serialize_stock_item(item, quantity=quantity, reserved=reserved)
 
 
 @router.get("/{warehouse_id}/orders", response_model=list[FulfillmentOrderRead])
@@ -847,16 +953,27 @@ def update_fulfillment_status(
             on_hand = _stock_quantity(db, warehouse_id, line.warehouse_item_id)
             if line.quantity > on_hand:
                 raise HTTPException(status_code=409, detail=f"Physical stock for {line.product_name} is below the reserved quantity")
-            db.add(models.WarehouseStockMovement(
-                owner_user_id=owner_user_id,
+            lot_slices = allocate_warehouse_outbound(
+                db,
                 warehouse_id=warehouse_id,
                 item_id=line.warehouse_item_id,
-                actor_user_id=current_user.id,
-                change=-line.quantity,
-                reason=f"Dispatched fulfilment order #{order.id}",
-                reference=order.external_order_id or f"FUL-{order.id}",
-                unit_cost_price=line.warehouse_item.cost_price,
-            ))
+                quantity=line.quantity,
+            )
+            if not lot_slices:
+                raise HTTPException(status_code=409, detail=f"Stock ledger for {line.product_name} is below the reserved quantity")
+            for lot in lot_slices:
+                db.add(models.WarehouseStockMovement(
+                    owner_user_id=owner_user_id,
+                    warehouse_id=warehouse_id,
+                    item_id=line.warehouse_item_id,
+                    actor_user_id=current_user.id,
+                    change=-lot.quantity,
+                    reason=f"Dispatched fulfilment order #{order.id}",
+                    reference=order.external_order_id or f"FUL-{order.id}",
+                    batch_number=lot.batch_number,
+                    expiry_date=lot.expiry_date,
+                    unit_cost_price=lot.unit_cost_price if lot.unit_cost_price is not None else line.warehouse_item.cost_price,
+                ))
         order.dispatched_at = now
     elif target == "delivered":
         order.delivered_at = now
@@ -945,17 +1062,29 @@ def transfer_warehouse_stock(
             db, tenant_user_ids=tenant_user_ids, actor_user_id=current_user.id,
             branch_id=branch_id, item=item,
         )
-        db.add(models.WarehouseStockMovement(
-            owner_user_id=owner_user_id, warehouse_id=warehouse_id, item_id=item.id,
-            actor_user_id=current_user.id, branch_id=branch_id, change=-payload.quantity,
-            reason=f"Transfer out to branch {branch.name}{note}", reference=reference,
-            unit_cost_price=item.cost_price,
-        ))
-        db.add(models.StockMovement(
-            user_id=current_user.id, branch_id=branch_id, product_id=product.id,
-            change=payload.quantity, reason=f"Transfer in from warehouse {warehouse.name}{note}",
-            unit_cost_price=item.cost_price, unit_selling_price=item.selling_price,
-        ))
+        lot_slices = allocate_warehouse_outbound(
+            db,
+            warehouse_id=warehouse_id,
+            item_id=item.id,
+            quantity=payload.quantity,
+        )
+        if not lot_slices:
+            raise HTTPException(status_code=409, detail="Warehouse stock ledger is below the requested transfer quantity")
+        for lot in lot_slices:
+            unit_cost = lot.unit_cost_price if lot.unit_cost_price is not None else item.cost_price
+            db.add(models.WarehouseStockMovement(
+                owner_user_id=owner_user_id, warehouse_id=warehouse_id, item_id=item.id,
+                actor_user_id=current_user.id, branch_id=branch_id, change=-lot.quantity,
+                reason=f"Transfer out to branch {branch.name}{note}", reference=reference,
+                batch_number=lot.batch_number, expiry_date=lot.expiry_date,
+                unit_cost_price=unit_cost,
+            ))
+            db.add(models.StockMovement(
+                user_id=current_user.id, branch_id=branch_id, product_id=product.id,
+                change=lot.quantity, reason=f"Transfer in from warehouse {warehouse.name}{note}",
+                batch_number=lot.batch_number, expiry_date=lot.expiry_date,
+                unit_cost_price=unit_cost, unit_selling_price=item.selling_price,
+            ))
 
     db.commit()
     return {

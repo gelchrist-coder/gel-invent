@@ -6,6 +6,7 @@ import {
   fetchWarehouseDestinationBranches,
   fetchProducts,
   fetchWarehouseStock,
+  fetchWarehouseMovements,
   fetchWarehouses,
   fetchFulfillmentOrders,
   receiveWarehouseStock,
@@ -13,7 +14,9 @@ import {
   updateFulfillmentOrderStatus,
 } from "../api";
 import ProductForm from "../components/ProductForm";
-import { Branch, FulfillmentOrder, FulfillmentStatus, NewProduct, Product, Warehouse, WarehouseStock } from "../types";
+import PurchasingPanel from "../components/PurchasingPanel";
+import { useExpiryTracking } from "../settings";
+import { Branch, FulfillmentOrder, FulfillmentStatus, NewProduct, Product, Warehouse, WarehouseMovement, WarehouseStock } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
 const inputStyle = {
@@ -27,13 +30,16 @@ const inputStyle = {
 
 export default function Warehouses() {
   const currentUser = readStoredUser();
+  const usesExpiryTracking = useExpiryTracking();
   const canManage = hasUserPermission("manage_warehouses", currentUser);
+  const canPurchase = hasUserPermission("manage_procurement", currentUser);
   const canViewBranchStock = hasUserPermission("view_inventory", currentUser) && hasUserPermission("view_catalog", currentUser);
   const isWarehouseUser = currentUser?.role === "Warehouse";
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | null>(null);
   const [stock, setStock] = useState<WarehouseStock[]>([]);
   const [orders, setOrders] = useState<FulfillmentOrder[]>([]);
+  const [movements, setMovements] = useState<WarehouseMovement[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +47,8 @@ export default function Warehouses() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
-  const [receipt, setReceipt] = useState({ itemId: "", quantity: "", reference: "" });
+  const [activeTab, setActiveTab] = useState<"overview" | "stock" | "purchases" | "transfers" | "orders" | "movements">("overview");
+  const [receipt, setReceipt] = useState({ itemId: "", quantity: "", reference: "", batchNumber: "", expiryDate: "", unitCost: "", notes: "" });
   const [transfer, setTransfer] = useState({
     direction: (isWarehouseUser ? "warehouse_to_branch" : "branch_to_warehouse") as "branch_to_warehouse" | "warehouse_to_branch",
     productId: "",
@@ -55,15 +62,58 @@ export default function Warehouses() {
   const [orderLines, setOrderLines] = useState<Array<{ itemId: number; quantity: number }>>([]);
 
   const selectedWarehouse = warehouses.find((warehouse) => warehouse.id === selectedWarehouseId) ?? null;
+  const selectedReceiptItem = stock.find((item) => String(item.item_id) === receipt.itemId) ?? null;
   const activeWarehouses = useMemo(() => warehouses.filter((warehouse) => warehouse.is_active), [warehouses]);
+  const warehouseProducts = useMemo<Product[]>(() => stock.map((item) => ({
+    id: item.item_id,
+    sku: item.sku,
+    barcode: item.barcode,
+    name: item.name,
+    description: item.description,
+    unit: item.unit,
+    measurement_type: item.measurement_type,
+    allows_fractional_sales: item.allows_fractional_sales,
+    quantity_step: item.quantity_step,
+    pack_size: item.pack_size,
+    category: item.category,
+    supplier: item.supplier,
+    expiry_date: item.expiry_date,
+    cost_price: item.cost_price,
+    pack_cost_price: item.pack_cost_price,
+    selling_price: item.selling_price,
+    pack_selling_price: item.pack_selling_price,
+    wholesale_price: item.wholesale_price,
+    wholesale_min_quantity: item.wholesale_min_quantity,
+    image: item.image,
+    created_at: "",
+    updated_at: "",
+    current_stock: item.quantity,
+    reserved_stock: item.reserved_quantity,
+    variants: [],
+    unit_conversions: [],
+  })), [stock]);
+  const totalStockValue = useMemo(
+    () => stock.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.cost_price || 0), 0),
+    [stock],
+  );
+  const lowStockCount = useMemo(
+    () => stock.filter((item) => Number(item.available_quantity || 0) <= 5).length,
+    [stock],
+  );
+  const activeOrderCount = useMemo(
+    () => orders.filter((order) => !["delivered", "cancelled"].includes(order.status)).length,
+    [orders],
+  );
 
   const loadStock = useCallback(async (warehouseId: number) => {
-    const [stockRows, orderRows] = await Promise.all([
+    const [stockRows, orderRows, movementRows] = await Promise.all([
       fetchWarehouseStock(warehouseId),
       fetchFulfillmentOrders(warehouseId),
+      fetchWarehouseMovements(warehouseId),
     ]);
     setStock(stockRows);
     setOrders(orderRows);
+    setMovements(movementRows);
   }, []);
 
   const load = useCallback(async () => {
@@ -99,6 +149,7 @@ export default function Warehouses() {
 
   const selectWarehouse = async (warehouseId: number) => {
     setSelectedWarehouseId(warehouseId);
+    setActiveTab("overview");
     setError(null);
     try {
       await loadStock(warehouseId);
@@ -128,8 +179,12 @@ export default function Warehouses() {
         item_id: Number(receipt.itemId),
         quantity: Number(receipt.quantity),
         reference: receipt.reference.trim() || null,
+        batch_number: receipt.batchNumber.trim() || null,
+        expiry_date: receipt.expiryDate || null,
+        unit_cost_price: receipt.unitCost.trim() ? Number(receipt.unitCost) : null,
+        notes: receipt.notes.trim() || null,
       });
-      setReceipt({ itemId: "", quantity: "", reference: "" });
+      setReceipt({ itemId: "", quantity: "", reference: "", batchNumber: "", expiryDate: "", unitCost: "", notes: "" });
       await load();
       setMessage("Stock received into the warehouse.");
     } catch (cause) {
@@ -213,171 +268,98 @@ export default function Warehouses() {
 
   if (loading) return <div className="card" style={{ margin: 16, padding: 20 }}>Loading warehouses...</div>;
 
+  const tabs = [
+    { id: "overview" as const, label: "Overview" },
+    { id: "stock" as const, label: "Stock" },
+    ...(canPurchase && selectedWarehouse?.is_active ? [{ id: "purchases" as const, label: "Purchases" }] : []),
+    { id: "transfers" as const, label: "Transfers" },
+    { id: "orders" as const, label: "Fulfilment" },
+    { id: "movements" as const, label: "History" },
+  ];
+
+  const stockTable = (
+    <div className="card warehouse-table-wrap">
+      <table className="warehouse-table table-cards">
+        <thead><tr><th>Product</th><th>SKU</th><th>On hand</th><th>Reserved</th><th>Available</th><th>Stock value</th></tr></thead>
+        <tbody>
+          {stock.map((item) => (
+            <tr key={item.item_id}>
+              <td data-label="Product"><strong>{item.name}</strong><small>{item.category || "Uncategorised"}{item.supplier ? ` · ${item.supplier}` : ""}</small></td>
+              <td data-label="SKU">{item.sku}</td>
+              <td data-label="On hand">{Number(item.quantity).toLocaleString()}</td>
+              <td data-label="Reserved">{Number(item.reserved_quantity).toLocaleString()}</td>
+              <td data-label="Available"><strong>{Number(item.available_quantity).toLocaleString()} {item.unit}</strong></td>
+              <td data-label="Stock value">{item.cost_price == null ? "—" : `GHS ${(Number(item.quantity) * Number(item.cost_price)).toFixed(2)}`}</td>
+            </tr>
+          ))}
+          {stock.length === 0 ? <tr><td colSpan={6} className="warehouse-empty td-full">No warehouse stock yet. Add a product or create a supplier purchase.</td></tr> : null}
+        </tbody>
+      </table>
+    </div>
+  );
+
   return (
-    <div style={{ padding: 16, display: "grid", gap: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 26 }}>Warehouses</h1>
-          <p style={{ margin: "5px 0 0", color: "#64748b" }}>Receive stock centrally and move it to or from your branches.</p>
-        </div>
+    <div className="app-shell warehouse-page">
+      <div className="page-header">
+        <div><h1 className="page-title">Warehouse Operations</h1><p className="text-muted" style={{ margin: "5px 0 0" }}>Purchase centrally, control stock, transfer to branches, and keep a complete movement trail.</p></div>
       </div>
+      {error ? <div className="warehouse-alert warehouse-alert--error">{error}</div> : null}
+      {message ? <div className="warehouse-alert warehouse-alert--success">{message}</div> : null}
 
-      {error ? <div style={{ padding: 12, borderRadius: 8, background: "#fef2f2", color: "#b91c1c" }}>{error}</div> : null}
-      {message ? <div style={{ padding: 12, borderRadius: 8, background: "#ecfdf5", color: "#047857" }}>{message}</div> : null}
-
-      {warehouses.length === 0 ? (
-        <div className="card" style={{ padding: 28, textAlign: "center", color: "#64748b" }}>No warehouses are configured. The business owner can create one in System Settings.</div>
-      ) : (
+      {warehouses.length === 0 ? <div className="card warehouse-empty">No warehouses are configured. The business owner can create one in Settings.</div> : (
         <>
-          <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
-            {warehouses.map((warehouse) => (
-              <button
-                key={warehouse.id}
-                onClick={() => void selectWarehouse(warehouse.id)}
-                style={{ minWidth: 190, textAlign: "left", padding: 14, borderRadius: 10, cursor: "pointer", border: selectedWarehouseId === warehouse.id ? "2px solid #2563eb" : "1px solid #cbd5e1", background: "#fff", opacity: warehouse.is_active ? 1 : 0.6 }}
-              >
-                <strong style={{ display: "block" }}>{warehouse.name}</strong>
-                <span style={{ display: "block", marginTop: 5, fontSize: 12, color: "#64748b" }}>{warehouse.total_skus} SKUs · {Number(warehouse.total_units).toLocaleString()} units</span>
-              </button>
-            ))}
+          <div className="warehouse-selector" role="tablist" aria-label="Warehouses">
+            {warehouses.map((warehouse) => <button key={warehouse.id} type="button" onClick={() => void selectWarehouse(warehouse.id)} className={selectedWarehouseId === warehouse.id ? "warehouse-selector__item active" : "warehouse-selector__item"}>
+              <strong>{warehouse.name}</strong><span>{warehouse.total_skus} SKUs · {Number(warehouse.total_units).toLocaleString()} units</span>
+            </button>)}
           </div>
 
-          {selectedWarehouse ? (
-            <>
-              <div className="card" style={{ padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                <div><strong>{selectedWarehouse.name}</strong><div style={{ color: "#64748b", fontSize: 13 }}>{selectedWarehouse.address || "No address saved"}</div></div>
-                <span style={{ padding: "5px 9px", borderRadius: 999, fontSize: 12, fontWeight: 700, background: selectedWarehouse.is_active ? "#dcfce7" : "#f1f5f9", color: selectedWarehouse.is_active ? "#166534" : "#475569" }}>
-                  {selectedWarehouse.is_active ? "Active" : "Inactive"}
-                </span>
-              </div>
+          {selectedWarehouse ? <>
+            <div className="card warehouse-hero">
+              <div><span className="warehouse-eyebrow">CENTRAL STOCK LOCATION</span><h2>{selectedWarehouse.name}</h2><p>{selectedWarehouse.address || "No address saved"}</p></div>
+              <span className={selectedWarehouse.is_active ? "warehouse-status active" : "warehouse-status"}>{selectedWarehouse.is_active ? "Active" : "Inactive"}</span>
+            </div>
 
-              {canManage && selectedWarehouse.is_active ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
-                  <div className="card" style={{ padding: 16, display: "grid", gap: 10, alignContent: "start" }}>
-                    <div><strong>Add product to warehouse</strong><div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>Use the complete product flow for details, pricing, variants, units, and opening stock.</div></div>
-                    <button type="button" className="button" disabled={busy} onClick={() => setShowAddProduct(true)}>Open Product Form</button>
-                  </div>
+            <div className="warehouse-kpis">
+              <div className="card"><span>Products</span><strong>{stock.length}</strong><small>Warehouse SKUs</small></div>
+              <div className="card"><span>Available units</span><strong>{stock.reduce((sum, item) => sum + Number(item.available_quantity || 0), 0).toLocaleString()}</strong><small>After reservations</small></div>
+              <div className="card"><span>Stock value</span><strong>GHS {totalStockValue.toFixed(2)}</strong><small>At recorded cost</small></div>
+              <div className="card"><span>Attention</span><strong>{lowStockCount + activeOrderCount}</strong><small>{lowStockCount} low stock · {activeOrderCount} active orders</small></div>
+            </div>
 
-                  <form className="card" onSubmit={handleReceipt} style={{ padding: 16, display: "grid", gap: 10 }}>
-                    <div><strong>Receive stock</strong><div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>Increase stock for a product already listed in this warehouse.</div></div>
-                    <select style={inputStyle} value={receipt.itemId} onChange={(e) => setReceipt({ ...receipt, itemId: e.target.value })} required>
-                      <option value="">Choose warehouse product</option>
-                      {stock.map((item) => <option key={item.item_id} value={item.item_id}>{item.name} ({item.sku})</option>)}
-                    </select>
-                    <input style={inputStyle} type="number" min="0.01" step="0.01" value={receipt.quantity} onChange={(e) => setReceipt({ ...receipt, quantity: e.target.value })} placeholder="Quantity" required />
-                    <input style={inputStyle} value={receipt.reference} onChange={(e) => setReceipt({ ...receipt, reference: e.target.value })} placeholder="Supplier reference (optional)" />
-                    <button className="button" disabled={busy}>Receive Stock</button>
-                  </form>
+            <div className="warehouse-tabs" role="tablist">
+              {tabs.map((tab) => <button key={tab.id} type="button" className={activeTab === tab.id ? "active" : ""} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}
+            </div>
 
-                  <form className="card" onSubmit={handleTransfer} style={{ padding: 16, display: "grid", gap: 10 }}>
-                    <strong>Transfer stock</strong>
-                    <select style={inputStyle} value={transfer.direction} onChange={(e) => setTransfer({ ...transfer, direction: e.target.value as typeof transfer.direction })}>
-                      {canViewBranchStock ? <option value="branch_to_warehouse">Branch → Warehouse</option> : null}
-                      <option value="warehouse_to_branch">Warehouse → Branch</option>
-                    </select>
-                    <select style={inputStyle} value={transfer.branchId} onChange={(e) => setTransfer({ ...transfer, branchId: e.target.value })} required disabled={transfer.direction === "branch_to_warehouse"}>
-                      <option value="">Choose branch</option>
-                      {branches
-                        .filter((branch) => transfer.direction === "warehouse_to_branch" || String(branch.id) === (localStorage.getItem("activeBranchId") || String(branches[0]?.id ?? "")))
-                        .map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-                    </select>
-                    {transfer.direction === "branch_to_warehouse" ? (
-                      <select style={inputStyle} value={transfer.productId} onChange={(e) => setTransfer({ ...transfer, productId: e.target.value })} required>
-                        <option value="">Choose branch product</option>
-                        {products.map((product) => <option key={product.id} value={product.id}>{product.name} ({product.sku}) · {Number(product.current_stock || 0)} available</option>)}
-                      </select>
-                    ) : (
-                      <select style={inputStyle} value={transfer.itemId} onChange={(e) => setTransfer({ ...transfer, itemId: e.target.value })} required>
-                        <option value="">Choose warehouse stock</option>
-                        {stock.filter((item) => Number(item.quantity) > 0).map((item) => <option key={item.item_id} value={item.item_id}>{item.name} ({item.sku}) · {Number(item.quantity)} available</option>)}
-                      </select>
-                    )}
-                    <input style={inputStyle} type="number" min="0.01" step="0.01" value={transfer.quantity} onChange={(e) => setTransfer({ ...transfer, quantity: e.target.value })} placeholder="Quantity" required />
-                    <input style={inputStyle} value={transfer.notes} onChange={(e) => setTransfer({ ...transfer, notes: e.target.value })} placeholder="Transfer note (optional)" />
-                    <button className="button" disabled={busy}>Transfer Stock</button>
-                  </form>
-                </div>
-              ) : null}
+            {activeTab === "overview" ? <div className="warehouse-overview-grid">
+              <div className="card warehouse-flow-card"><span className="warehouse-eyebrow">WAREHOUSE-FIRST FLOW</span><h3>Supplier → Warehouse → Branch → Sale</h3><p>Record supplier deliveries in Purchases, verify them in warehouse stock, then transfer only the quantities each branch needs.</p><div className="warehouse-flow"><span>Purchase</span><b>→</b><span>Receive</span><b>→</b><span>Transfer</span><b>→</b><span>Sell</span></div></div>
+              <div className="card warehouse-actions-card"><h3>Quick actions</h3>{canPurchase && selectedWarehouse.is_active ? <button className="button" onClick={() => setActiveTab("purchases")}>Record supplier purchase</button> : null}<button className="button secondary" onClick={() => setActiveTab("transfers")}>Transfer to a branch</button><button className="button secondary" onClick={() => setActiveTab("stock")}>Review warehouse stock</button></div>
+              <div style={{ gridColumn: "1 / -1" }}>{stockTable}</div>
+            </div> : null}
 
-              {canManage && selectedWarehouse.is_active ? (
-                <form className="card" onSubmit={handleCreateOrder} style={{ padding: 16, display: "grid", gap: 12 }}>
-                  <div><strong>Create fulfilment order</strong><div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>Creating an order reserves stock immediately. Physical stock leaves the warehouse at dispatch.</div></div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-                    <input style={inputStyle} value={orderDraft.customerName} onChange={(e) => setOrderDraft({ ...orderDraft, customerName: e.target.value })} placeholder="Customer name" required />
-                    <input style={inputStyle} value={orderDraft.phone} onChange={(e) => setOrderDraft({ ...orderDraft, phone: e.target.value })} placeholder="Phone" />
-                    <input style={inputStyle} type="email" value={orderDraft.email} onChange={(e) => setOrderDraft({ ...orderDraft, email: e.target.value })} placeholder="Email" />
-                    <input style={inputStyle} value={orderDraft.externalId} onChange={(e) => setOrderDraft({ ...orderDraft, externalId: e.target.value })} placeholder="Order reference (optional)" />
-                    <input style={inputStyle} value={orderDraft.address} onChange={(e) => setOrderDraft({ ...orderDraft, address: e.target.value })} placeholder="Delivery address" />
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) 130px auto", gap: 8 }}>
-                    <select style={inputStyle} value={lineDraft.itemId} onChange={(e) => setLineDraft({ ...lineDraft, itemId: e.target.value })}>
-                      <option value="">Choose warehouse item</option>
-                      {stock.filter((item) => Number(item.available_quantity) > 0).map((item) => <option key={item.item_id} value={item.item_id}>{item.name} · {Number(item.available_quantity)} available</option>)}
-                    </select>
-                    <input style={inputStyle} type="number" min="0.01" step="0.01" value={lineDraft.quantity} onChange={(e) => setLineDraft({ ...lineDraft, quantity: e.target.value })} placeholder="Quantity" />
-                    <button type="button" className="button secondary" onClick={addOrderLine}>Add Item</button>
-                  </div>
-                  {orderLines.length ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{orderLines.map((line) => {
-                    const item = stock.find((row) => row.item_id === line.itemId);
-                    return <button type="button" key={line.itemId} onClick={() => setOrderLines((rows) => rows.filter((row) => row.itemId !== line.itemId))} style={{ border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "6px 10px", cursor: "pointer" }}>{item?.name || line.itemId} × {line.quantity} · remove</button>;
-                  })}</div> : null}
-                  <button className="button" disabled={busy || orderLines.length === 0}>Create &amp; Reserve Order</button>
-                </form>
-              ) : null}
+            {activeTab === "stock" ? <div style={{ display: "grid", gap: 16 }}>
+              {canManage && selectedWarehouse.is_active ? <div className="warehouse-form-grid">
+                <div className="card warehouse-action-panel"><h3>Add warehouse product</h3><p>Create the complete product record before supplier deliveries or transfers arrive.</p><button type="button" className="button" disabled={busy} onClick={() => setShowAddProduct(true)}>Add Product</button></div>
+                <form className="card warehouse-action-panel" onSubmit={handleReceipt}><h3>Manual stock receipt</h3><p>Use this for opening balances or non-purchase adjustments. Supplier deliveries belong in Purchases.</p><select style={inputStyle} value={receipt.itemId} onChange={(e) => setReceipt({ ...receipt, itemId: e.target.value, expiryDate: "" })} required><option value="">Choose warehouse product</option>{stock.map((item) => <option key={item.item_id} value={item.item_id}>{item.name} ({item.sku})</option>)}</select><div className="warehouse-form-grid"><input style={inputStyle} type="number" min="0.01" step="0.01" value={receipt.quantity} onChange={(e) => setReceipt({ ...receipt, quantity: e.target.value })} placeholder="Quantity" required />{usesExpiryTracking ? <><input style={inputStyle} value={receipt.batchNumber} onChange={(e) => setReceipt({ ...receipt, batchNumber: e.target.value })} placeholder="Batch / lot (optional)" /><label>{selectedReceiptItem?.expiry_date ? "Expiry date (required)" : "Expiry date"}<input style={inputStyle} type="date" value={receipt.expiryDate} onChange={(e) => setReceipt({ ...receipt, expiryDate: e.target.value })} required={Boolean(selectedReceiptItem?.expiry_date)} /></label></> : null}<input style={inputStyle} type="number" min="0" step="0.01" value={receipt.unitCost} onChange={(e) => setReceipt({ ...receipt, unitCost: e.target.value })} placeholder="Unit cost (optional)" /><input style={inputStyle} value={receipt.reference} onChange={(e) => setReceipt({ ...receipt, reference: e.target.value })} placeholder="Reference (optional)" /><input style={inputStyle} value={receipt.notes} onChange={(e) => setReceipt({ ...receipt, notes: e.target.value })} placeholder="Adjustment note (optional)" /></div><button className="button" disabled={busy}>Receive Stock</button></form>
+              </div> : null}
+              {stockTable}
+            </div> : null}
 
-              <div className="card" style={{ padding: 16, display: "grid", gap: 12 }}>
-                <div><strong>Fulfilment pipeline</strong><div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>{orders.filter((order) => !["delivered", "cancelled"].includes(order.status)).length} active orders</div></div>
-                {orders.length === 0 ? <div style={{ padding: 18, textAlign: "center", color: "#64748b" }}>No fulfilment orders yet.</div> : orders.map((order) => {
-                  const nextStatus: Partial<Record<FulfillmentStatus, Exclude<FulfillmentStatus, "reserved">>> = { reserved: "picking", picking: "packed", packed: "dispatched", dispatched: "delivered" };
-                  const next = nextStatus[order.status];
-                  return (
-                    <div key={order.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 14, display: "grid", gap: 9 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-                        <div><strong>Order #{order.id}{order.external_order_id ? ` · ${order.external_order_id}` : ""}</strong><div style={{ color: "#64748b", fontSize: 12 }}>{order.customer_name} · {new Date(order.created_at).toLocaleString()}</div></div>
-                        <span style={{ textTransform: "capitalize", fontWeight: 700, fontSize: 12, padding: "5px 9px", borderRadius: 999, background: order.status === "cancelled" ? "#fef2f2" : order.status === "delivered" ? "#ecfdf5" : "#eff6ff", color: order.status === "cancelled" ? "#b91c1c" : order.status === "delivered" ? "#047857" : "#1d4ed8" }}>{order.status}</span>
-                      </div>
-                      <div style={{ fontSize: 13, color: "#334155" }}>{order.items.map((item) => `${item.product_name} × ${Number(item.quantity)}`).join(" · ")}</div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <strong style={{ marginRight: "auto" }}>{Number(order.total_amount).toFixed(2)}</strong>
-                        {canManage && next ? <button className="button" disabled={busy} onClick={() => void advanceOrder(order, next)}>{next === "picking" ? "Start Picking" : next === "packed" ? "Mark Packed" : next === "dispatched" ? "Dispatch" : "Mark Delivered"}</button> : null}
-                        {canManage && ["reserved", "picking", "packed"].includes(order.status) ? <button className="button secondary" disabled={busy} onClick={() => void advanceOrder(order, "cancelled")}>Cancel</button> : null}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+            {activeTab === "purchases" && canPurchase && selectedWarehouse.is_active ? <PurchasingPanel key={`warehouse-purchases-${selectedWarehouse.id}`} products={warehouseProducts} warehouseId={selectedWarehouse.id} destinationLabel={`${selectedWarehouse.name} Warehouse`} usesExpiryTracking={usesExpiryTracking} onPurchaseRecorded={() => loadStock(selectedWarehouse.id)} mode="purchasing" /> : null}
 
-              <div className="card" style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
-                  <thead><tr style={{ background: "#f8fafc", textAlign: "left" }}><th style={{ padding: 12 }}>Product</th><th>SKU</th><th>On Hand</th><th>Reserved</th><th>Available</th><th>Value</th></tr></thead>
-                  <tbody>
-                    {stock.map((item) => (
-                      <tr key={item.item_id} style={{ borderTop: "1px solid #e2e8f0" }}>
-                        <td style={{ padding: 12, fontWeight: 600 }}>{item.name}</td><td>{item.sku}</td><td>{Number(item.quantity).toLocaleString()}</td><td>{Number(item.reserved_quantity).toLocaleString()}</td><td style={{ fontWeight: 700 }}>{Number(item.available_quantity).toLocaleString()} {item.unit}</td><td>{item.cost_price == null ? "—" : (Number(item.quantity) * Number(item.cost_price)).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                    {stock.length === 0 ? <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: "#64748b" }}>No warehouse stock yet.</td></tr> : null}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : null}
+            {activeTab === "transfers" ? <form className="card warehouse-action-panel warehouse-transfer-form" onSubmit={handleTransfer}><div><span className="warehouse-eyebrow">CONTROLLED MOVEMENT</span><h3>Transfer stock</h3><p>Every transfer creates matching warehouse and branch audit entries.</p></div><div className="warehouse-form-grid"><label>Direction<select style={inputStyle} value={transfer.direction} onChange={(e) => setTransfer({ ...transfer, direction: e.target.value as typeof transfer.direction })}>{canViewBranchStock ? <option value="branch_to_warehouse">Branch → Warehouse</option> : null}<option value="warehouse_to_branch">Warehouse → Branch</option></select></label><label>Branch<select style={inputStyle} value={transfer.branchId} onChange={(e) => setTransfer({ ...transfer, branchId: e.target.value })} required><option value="">Choose branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>{transfer.direction === "branch_to_warehouse" ? <label>Branch product<select style={inputStyle} value={transfer.productId} onChange={(e) => setTransfer({ ...transfer, productId: e.target.value })} required><option value="">Choose product</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} · {Number(product.current_stock || 0)} available</option>)}</select></label> : <label>Warehouse product<select style={inputStyle} value={transfer.itemId} onChange={(e) => setTransfer({ ...transfer, itemId: e.target.value })} required><option value="">Choose stock</option>{stock.filter((item) => Number(item.available_quantity) > 0).map((item) => <option key={item.item_id} value={item.item_id}>{item.name} · {Number(item.available_quantity)} available</option>)}</select></label>}<label>Quantity<input style={inputStyle} type="number" min="0.01" step="0.01" value={transfer.quantity} onChange={(e) => setTransfer({ ...transfer, quantity: e.target.value })} required /></label><label>Note<input style={inputStyle} value={transfer.notes} onChange={(e) => setTransfer({ ...transfer, notes: e.target.value })} placeholder="Optional" /></label></div><button className="button" disabled={busy}>Complete Transfer</button></form> : null}
+
+            {activeTab === "orders" ? <div style={{ display: "grid", gap: 16 }}>
+              {canManage && selectedWarehouse.is_active ? <form className="card warehouse-action-panel" onSubmit={handleCreateOrder}><div><h3>Create fulfilment order</h3><p>Stock is reserved immediately and leaves on dispatch.</p></div><div className="warehouse-form-grid"><input style={inputStyle} value={orderDraft.customerName} onChange={(e) => setOrderDraft({ ...orderDraft, customerName: e.target.value })} placeholder="Customer name" required /><input style={inputStyle} value={orderDraft.phone} onChange={(e) => setOrderDraft({ ...orderDraft, phone: e.target.value })} placeholder="Phone" /><input style={inputStyle} type="email" value={orderDraft.email} onChange={(e) => setOrderDraft({ ...orderDraft, email: e.target.value })} placeholder="Email" /><input style={inputStyle} value={orderDraft.externalId} onChange={(e) => setOrderDraft({ ...orderDraft, externalId: e.target.value })} placeholder="Order reference" /><input style={inputStyle} value={orderDraft.address} onChange={(e) => setOrderDraft({ ...orderDraft, address: e.target.value })} placeholder="Delivery address" /></div><div className="warehouse-order-line"><select style={inputStyle} value={lineDraft.itemId} onChange={(e) => setLineDraft({ ...lineDraft, itemId: e.target.value })}><option value="">Choose warehouse item</option>{stock.filter((item) => Number(item.available_quantity) > 0).map((item) => <option key={item.item_id} value={item.item_id}>{item.name} · {Number(item.available_quantity)} available</option>)}</select><input style={inputStyle} type="number" min="0.01" step="0.01" value={lineDraft.quantity} onChange={(e) => setLineDraft({ ...lineDraft, quantity: e.target.value })} placeholder="Quantity" /><button type="button" className="button secondary" onClick={addOrderLine}>Add</button></div>{orderLines.length ? <div className="warehouse-line-chips">{orderLines.map((line) => { const item = stock.find((row) => row.item_id === line.itemId); return <button type="button" key={line.itemId} onClick={() => setOrderLines((rows) => rows.filter((row) => row.itemId !== line.itemId))}>{item?.name || line.itemId} × {line.quantity} · remove</button>; })}</div> : null}<button className="button" disabled={busy || orderLines.length === 0}>Create &amp; Reserve Order</button></form> : null}
+              <div className="card warehouse-action-panel"><h3>Fulfilment pipeline</h3>{orders.length === 0 ? <div className="warehouse-empty">No fulfilment orders yet.</div> : orders.map((order) => { const nextStatus: Partial<Record<FulfillmentStatus, Exclude<FulfillmentStatus, "reserved">>> = { reserved: "picking", picking: "packed", packed: "dispatched", dispatched: "delivered" }; const next = nextStatus[order.status]; return <div key={order.id} className="warehouse-order-card"><div><strong>Order #{order.id}{order.external_order_id ? ` · ${order.external_order_id}` : ""}</strong><small>{order.customer_name} · {new Date(order.created_at).toLocaleString()}</small></div><span className={`warehouse-order-status ${order.status}`}>{order.status}</span><p>{order.items.map((item) => `${item.product_name} × ${Number(item.quantity)}`).join(" · ")}</p><div className="warehouse-order-actions"><strong>GHS {Number(order.total_amount).toFixed(2)}</strong>{canManage && next ? <button className="button" disabled={busy} onClick={() => void advanceOrder(order, next)}>{next === "picking" ? "Start Picking" : next === "packed" ? "Mark Packed" : next === "dispatched" ? "Dispatch" : "Mark Delivered"}</button> : null}{canManage && ["reserved", "picking", "packed"].includes(order.status) ? <button className="button secondary" disabled={busy} onClick={() => void advanceOrder(order, "cancelled")}>Cancel</button> : null}</div></div>; })}</div>
+            </div> : null}
+
+            {activeTab === "movements" ? <div className="card warehouse-table-wrap"><table className="warehouse-table table-cards"><thead><tr><th>Date</th><th>Product</th><th>Movement</th><th>Reason</th><th>Reference</th><th>By</th></tr></thead><tbody>{movements.map((movement) => <tr key={movement.id}><td data-label="Date">{new Date(movement.created_at).toLocaleString()}</td><td data-label="Product"><strong>{movement.item_name}</strong><small>{movement.sku}</small></td><td data-label="Movement"><strong style={{ color: Number(movement.change) >= 0 ? "#047857" : "#b91c1c" }}>{Number(movement.change) >= 0 ? "+" : ""}{Number(movement.change).toLocaleString()}</strong></td><td data-label="Reason">{movement.reason}</td><td data-label="Reference">{movement.reference || "—"}{movement.branch_name ? <small>{movement.branch_name}</small> : null}</td><td data-label="By">{movement.actor_name || "System"}</td></tr>)}{movements.length === 0 ? <tr><td colSpan={6} className="warehouse-empty td-full">No warehouse movements yet.</td></tr> : null}</tbody></table></div> : null}
+          </> : null}
         </>
       )}
       {activeWarehouses.length === 0 && warehouses.length > 0 ? <p style={{ color: "#92400e" }}>All warehouses are inactive.</p> : null}
-      {showAddProduct ? (
-        <div onClick={() => setShowAddProduct(false)} style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15, 23, 42, 0.5)", display: "flex", justifyContent: "center", alignItems: "center", padding: 18 }}>
-          <div onClick={(event) => event.stopPropagation()} style={{ width: "min(880px, 100%)", maxHeight: "92vh", overflowY: "auto", background: "#fff", borderRadius: 18, padding: 20, boxShadow: "0 24px 60px rgba(15, 23, 42, 0.3)" }}>
-            <ProductForm
-              onCreate={handleAddWarehouseProduct}
-              onCancel={() => setShowAddProduct(false)}
-              userRole={currentUser?.role || "Warehouse"}
-              layoutMode="modal"
-              hideBranchField
-            />
-          </div>
-        </div>
-      ) : null}
+      {showAddProduct ? <div className="warehouse-modal" onClick={() => setShowAddProduct(false)}><div className="warehouse-modal__panel" onClick={(event) => event.stopPropagation()}><ProductForm onCreate={handleAddWarehouseProduct} onCancel={() => setShowAddProduct(false)} userRole={currentUser?.role || "Warehouse"} layoutMode="modal" hideBranchField /></div></div> : null}
     </div>
   );
 }

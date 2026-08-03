@@ -7,6 +7,8 @@ import type { Product, Purchase, PurchaseReturn, Supplier, SupplierPayment } fro
 
 type Props = {
   products: Product[];
+  warehouseId?: number | null;
+  destinationLabel?: string;
   initialProductId?: number | null;
   usesExpiryTracking?: boolean;
   onPurchaseRecorded?: () => Promise<void> | void;
@@ -465,7 +467,8 @@ function SupplierNameCombobox({
 
 type PurchaseOrderLine = {
   id: string;
-  product_id: number;
+  product_id?: number | null;
+  warehouse_item_id?: number | null;
   variant_id?: number | null;
   variant_label?: string | null;
   product_name: string;
@@ -474,6 +477,7 @@ type PurchaseOrderLine = {
   quantity: number;
   unit_cost_price: number;
   unit_selling_price?: number | null;
+  batch_number?: string | null;
   expiry_date?: string | null;
   is_perishable: boolean;
   line_total: number;
@@ -583,6 +587,8 @@ function buildPurchaseOrderGroups(purchases: Purchase[]): PurchaseOrderGroup[] {
 
 export default function PurchasingPanel({
   products,
+  warehouseId = null,
+  destinationLabel = "Active branch",
   initialProductId = null,
   usesExpiryTracking = true,
   onPurchaseRecorded,
@@ -620,6 +626,7 @@ export default function PurchasingPanel({
   const [purchasePaymentMethod, setPurchasePaymentMethod] = useState("cash");
   const [purchaseDate, setPurchaseDate] = useState(() => toISODate(new Date()));
   const [dueDate, setDueDate] = useState("");
+  const [batchNumber, setBatchNumber] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
   const [notes, setNotes] = useState("");
   const [paymentSupplierId, setPaymentSupplierId] = useState<number | null>(null);
@@ -663,11 +670,11 @@ export default function PurchasingPanel({
     setError(null);
     setLoadWarning(null);
     const [supplierResult, purchaseResult, paymentResult, purchaseReturnsSupportResult, returnResult] = await Promise.allSettled([
-      fetchSuppliersCached((fresh) => setSuppliers(fresh)),
-      fetchPurchasesCached(100, (fresh) => setPurchases(fresh)),
-      fetchSupplierPaymentsCached(30, (fresh) => setPayments(fresh)),
-      supportsPurchaseReturns(),
-      fetchPurchaseReturnsCached(40, (fresh) => setPurchaseReturns(fresh)),
+      fetchSuppliersCached((fresh) => setSuppliers(fresh), warehouseId),
+      fetchPurchasesCached(100, (fresh) => setPurchases(fresh), warehouseId),
+      fetchSupplierPaymentsCached(30, (fresh) => setPayments(fresh), warehouseId),
+      supportsPurchaseReturns(warehouseId),
+      fetchPurchaseReturnsCached(40, (fresh) => setPurchaseReturns(fresh), warehouseId),
     ]);
 
     const nextPanelErrors = createEmptyPanelDataErrors();
@@ -728,7 +735,7 @@ export default function PurchasingPanel({
     }
 
     setLoading(false);
-  }, []);
+  }, [warehouseId]);
 
   useEffect(() => {
     void loadPanelData();
@@ -812,7 +819,7 @@ export default function PurchasingPanel({
       return [] as Product[];
     }
 
-    return showAllSupplierProducts ? products : supplierScopedProducts;
+    return showAllSupplierProducts || supplierScopedProducts.length === 0 ? products : supplierScopedProducts;
   }, [matchedPurchaseSupplier, products, showAllSupplierProducts, supplierScopedProducts]);
   const supplierProductInsights = useMemo(() => {
     if (!matchedPurchaseSupplier) {
@@ -825,11 +832,12 @@ export default function PurchasingPanel({
 
     for (const purchase of purchases) {
       const sameSupplier = purchase.supplier_id === matchedPurchaseSupplier.id || normalizeText(purchase.supplier_name) === supplierName;
-      if (!sameSupplier || purchase.product_id == null) {
+      const destinationProductId = purchase.warehouse_item_id ?? purchase.product_id;
+      if (!sameSupplier || destinationProductId == null) {
         continue;
       }
 
-      const product = productsById.get(purchase.product_id);
+      const product = productsById.get(destinationProductId);
       if (!product) {
         continue;
       }
@@ -948,6 +956,7 @@ export default function PurchasingPanel({
     setUnitCostPrice(selectedProduct.cost_price != null ? String(selectedProduct.cost_price) : "");
     setUnitSellingPrice(selectedProduct.selling_price != null ? String(selectedProduct.selling_price) : "");
     setIsChangingLinePrice(selectedProduct.cost_price == null);
+    setBatchNumber("");
     setExpiryDate("");
   }, [selectedProduct]);
 
@@ -1261,7 +1270,8 @@ export default function PurchasingPanel({
       ...previousItems,
       {
         id: createOrderLineId(selectedProduct.id),
-        product_id: selectedProduct.id,
+        product_id: warehouseId ? null : selectedProduct.id,
+        warehouse_item_id: warehouseId ? selectedProduct.id : null,
         variant_id: selectedVariantId,
         variant_label: selectedVariant?.label ?? null,
         product_name: selectedProduct.name,
@@ -1270,6 +1280,7 @@ export default function PurchasingPanel({
         quantity: quantityValue,
         unit_cost_price: unitCostValue,
         unit_selling_price: unitSellingValue,
+        batch_number: trimOrUndefined(batchNumber),
         expiry_date: isPerishableProduct ? expiryDate : null,
         is_perishable: isPerishableProduct,
         line_total: lineTotal,
@@ -1281,6 +1292,7 @@ export default function PurchasingPanel({
     setUnitCostPrice(selectedProduct.cost_price != null ? String(selectedProduct.cost_price) : "");
     setUnitSellingPrice(selectedProduct.selling_price != null ? String(selectedProduct.selling_price) : "");
     setIsChangingLinePrice(selectedProduct.cost_price == null);
+    setBatchNumber("");
     setExpiryDate("");
   };
 
@@ -1476,6 +1488,7 @@ export default function PurchasingPanel({
     setNotice(null);
     try {
       const purchaseOrder = await createPurchaseOrder({
+        warehouse_id: warehouseId || undefined,
         supplier_id: selectedSupplierId,
         invoice_number: trimOrUndefined(invoiceNumber),
         amount_paid: amountPaidValue || undefined,
@@ -1484,11 +1497,13 @@ export default function PurchasingPanel({
         due_date: estimatedPaymentStatus === "paid" ? undefined : dueDate || undefined,
         notes: trimOrUndefined(notes),
         items: orderItems.map((item) => ({
-          product_id: item.product_id,
+          product_id: item.product_id ?? undefined,
+          warehouse_item_id: item.warehouse_item_id ?? undefined,
           variant_id: item.variant_id ?? undefined,
           quantity: item.quantity,
           unit_cost_price: item.unit_cost_price,
           unit_selling_price: item.unit_selling_price ?? undefined,
+          batch_number: item.batch_number || undefined,
           expiry_date: item.expiry_date || undefined,
         })),
       });
@@ -1507,6 +1522,7 @@ export default function PurchasingPanel({
       setPurchaseDate(toISODate(new Date()));
       setDueDate("");
       setNotes("");
+      setBatchNumber("");
       setExpiryDate("");
       setNotice(`Purchase order ${purchaseOrder.order_number} recorded with ${purchaseOrder.line_count} item${purchaseOrder.line_count === 1 ? "" : "s"} and status ${getStatusMeta(purchaseOrder.payment_status).label.toLowerCase()}`);
       await loadPanelData();
@@ -1548,6 +1564,7 @@ export default function PurchasingPanel({
     setNotice(null);
     try {
       const payment = await createSupplierPayment({
+        warehouse_id: warehouseId || undefined,
         purchase_id: selectedPaymentOrder.payment_target_order_number ? undefined : selectedPaymentOrder.nextPaymentPurchase?.id,
         order_number: selectedPaymentOrder.payment_target_order_number ?? undefined,
         amount: amountValue,
@@ -1593,6 +1610,7 @@ export default function PurchasingPanel({
     try {
       const purchaseReturn = await createPurchaseReturn({
         purchase_id: selectedReturnPurchase.id,
+        warehouse_id: warehouseId || undefined,
         quantity_returned: returnQuantityValue,
         return_date: returnDate || undefined,
         reason: trimOrUndefined(returnReason),
@@ -1776,28 +1794,33 @@ export default function PurchasingPanel({
               <div>
                 <h3 style={{ margin: "0 0 6px", fontSize: 20, fontWeight: 800, color: "#0f172a" }}>Create Purchase Order</h3>
                 <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>
-                  Select supplier, add products, and save the order in one short flow.
+                  Select supplier, add products, and receive this order into {destinationLabel}.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSupplierForm(emptySupplierForm);
-                  setIsSupplierModalOpen(true);
-                }}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #0f172a",
-                  background: "#0f172a",
-                  color: "#ffffff",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                }}
-              >
-                Add Supplier
-              </button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <span style={{ padding: "8px 12px", borderRadius: 999, background: warehouseId ? "#ecfdf5" : "#eff6ff", color: warehouseId ? "#047857" : "#1d4ed8", fontSize: 12, fontWeight: 800 }}>
+                  Receiving into: {destinationLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSupplierForm(emptySupplierForm);
+                    setIsSupplierModalOpen(true);
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #0f172a",
+                    background: "#0f172a",
+                    color: "#ffffff",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Add Supplier
+                </button>
+              </div>
             </div>
 
             <div style={plainSectionStyle}>
@@ -1868,9 +1891,9 @@ export default function PurchasingPanel({
                         ? `Showing all ${products.length} product${products.length === 1 ? "" : "s"}`
                         : supplierScopedProducts.length > 0
                           ? `Showing ${supplierScopedProducts.length} product${supplierScopedProducts.length === 1 ? "" : "s"} linked to ${matchedPurchaseSupplier.name}`
-                          : `No linked products found for ${matchedPurchaseSupplier.name}`}
+                          : `No products are linked yet, so all ${products.length} product${products.length === 1 ? "" : "s"} are available`}
                     </div>
-                    <button
+                    {supplierScopedProducts.length > 0 ? <button
                       type="button"
                       onClick={() => setShowAllSupplierProducts((previousValue) => !previousValue)}
                       style={{
@@ -1885,7 +1908,7 @@ export default function PurchasingPanel({
                       }}
                     >
                       {showAllSupplierProducts ? "Supplier Products Only" : "Show All Products"}
-                    </button>
+                    </button> : null}
                   </div>
 
                   {purchaseProductOptions.length > 0 ? (
@@ -2051,6 +2074,18 @@ export default function PurchasingPanel({
                           </>
                         ) : null}
 
+                        {usesExpiryTracking ? <label>
+                          <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Supplier Batch / Lot (Optional)</span>
+                          <input
+                            className="input"
+                            value={batchNumber}
+                            maxLength={100}
+                            placeholder="e.g. LOT-2408-A"
+                            onChange={(e) => setBatchNumber(e.target.value)}
+                            disabled={submittingPurchase}
+                          />
+                        </label> : null}
+
                         {isPerishableProduct ? (
                           <label>
                             <span style={{ display: "block", marginBottom: 6, fontSize: 13, fontWeight: 600, color: "#374151" }}>Batch Expiry Date</span>
@@ -2116,6 +2151,7 @@ export default function PurchasingPanel({
                                 <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
                                   {item.product_sku}
                                   {item.variant_label ? ` · ${item.variant_label}` : ""}
+                                  {item.batch_number ? ` · Batch ${item.batch_number}` : ""}
                                   {item.expiry_date ? ` · Exp ${formatDate(item.expiry_date)}` : ""}
                                 </div>
                               </div>
@@ -2907,7 +2943,7 @@ export default function PurchasingPanel({
             <p style={{ margin: 0, color: "#6b7280" }}>No return outwards recorded yet.</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
+              <table className="table-cards" style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
                 <thead>
                   <tr style={{ background: "#f8fafc" }}>
                     <th style={{ padding: 12, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>Date</th>
@@ -2922,16 +2958,16 @@ export default function PurchasingPanel({
                 <tbody>
                   {purchaseReturns.map((purchaseReturn) => (
                     <tr key={purchaseReturn.id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                      <td style={{ padding: 12, fontSize: 14 }}>{formatDate(purchaseReturn.return_date || purchaseReturn.created_at)}</td>
-                      <td style={{ padding: 12, fontSize: 14 }}>
+                      <td data-label="Date" style={{ padding: 12, fontSize: 14 }}>{formatDate(purchaseReturn.return_date || purchaseReturn.created_at)}</td>
+                      <td data-label="Supplier" style={{ padding: 12, fontSize: 14 }}>
                         <div style={{ fontWeight: 700, color: "#0f172a" }}>{purchaseReturn.supplier_name}</div>
                         <div style={{ color: "#6b7280", fontSize: 12 }}>{purchaseReturn.product_name || "Purchase return"}</div>
                       </td>
-                      <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{purchaseReturn.purchase_invoice_number || purchaseReturn.order_number || "-"}</td>
-                      <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{Number(purchaseReturn.quantity_returned || 0).toFixed(2)}</td>
-                      <td style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}</td>
-                      <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{purchaseReturn.reason || "-"}</td>
-                      <td style={{ padding: 12, fontSize: 14, color: "#475569" }}>{purchaseReturn.created_by_name || "System"}</td>
+                      <td data-label="Invoice" style={{ padding: 12, fontSize: 14, color: "#475569" }}>{purchaseReturn.purchase_invoice_number || purchaseReturn.order_number || "-"}</td>
+                      <td data-label="Quantity" style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{Number(purchaseReturn.quantity_returned || 0).toFixed(2)}</td>
+                      <td data-label="Value" style={{ padding: 12, fontSize: 14, textAlign: "right", fontWeight: 700 }}>{formatCurrency(Number(purchaseReturn.total_cost_returned || 0))}</td>
+                      <td data-label="Reason" style={{ padding: 12, fontSize: 14, color: "#475569" }}>{purchaseReturn.reason || "-"}</td>
+                      <td data-label="By" style={{ padding: 12, fontSize: 14, color: "#475569" }}>{purchaseReturn.created_by_name || "System"}</td>
                     </tr>
                   ))}
                 </tbody>

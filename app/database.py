@@ -96,6 +96,14 @@ def ensure_critical_schema() -> None:
                 conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS tax_snapshot JSONB"))
                 conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
                 conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
+                conn.execute(text("ALTER TABLE system_settings ALTER COLUMN uses_expiry_tracking SET DEFAULT FALSE"))
+                conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id) ON DELETE CASCADE"))
+                conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS warehouse_item_id INTEGER REFERENCES warehouse_stock_items(id) ON DELETE SET NULL"))
+                conn.execute(text("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS warehouse_stock_movement_id INTEGER REFERENCES warehouse_stock_movements(id) ON DELETE SET NULL"))
+                conn.execute(text("ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id) ON DELETE CASCADE"))
+                conn.execute(text("ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id) ON DELETE CASCADE"))
+                conn.execute(text("ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS warehouse_item_id INTEGER REFERENCES warehouse_stock_items(id) ON DELETE SET NULL"))
+                conn.execute(text("ALTER TABLE purchase_returns ADD COLUMN IF NOT EXISTS warehouse_stock_movement_id INTEGER REFERENCES warehouse_stock_movements(id) ON DELETE SET NULL"))
 
             _critical_schema_ready = True
         except Exception as exc:

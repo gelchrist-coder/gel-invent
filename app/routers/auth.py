@@ -30,7 +30,7 @@ from app.utils.supabase_auth import (
     delete_auth_user,
     is_supabase_auth_sync_enabled,
 )
-from app.utils.capabilities import serialize_capability_overrides
+from app.utils.capabilities import resolve_effective_capabilities, serialize_capability_overrides
 from app.utils.email import send_email, smtp_configured
 from app.utils.phone import is_valid_phone, normalize_phone
 from app.permissions import ensure_permission, get_effective_role_name, get_role_permissions, is_admin
@@ -499,11 +499,17 @@ async def signup(request: Request, db: Session = Depends(get_db)):
                 )
             )
 
-        # Create SystemSettings with default values
+        default_capabilities = resolve_effective_capabilities(
+            business_types=normalized_business_types,
+            capability_overrides=registration_overrides,
+        )
+
+        # Create SystemSettings with business-appropriate defaults. Owners can
+        # explicitly change expiry tracking later in System Settings.
         db.add(
             SystemSettings(
                 owner_user_id=new_user.id,
-                uses_expiry_tracking=True,
+                uses_expiry_tracking=bool(default_capabilities.get("expiry_tracking")),
                 capability_overrides=serialize_capability_overrides(registration_overrides),
             )
         )

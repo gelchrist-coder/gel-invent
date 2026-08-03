@@ -112,10 +112,10 @@ export const EXPIRY_TRACKING_BUSINESS_TYPES = new Set<string>([
   "Agro",
 ]);
 
-// Whether the given business types call for expiry tracking. When no business
-// type is set we return true so legacy accounts keep their existing behavior.
+// Whether the given business types call for expiry tracking. Accounts without
+// a mapped business type default off and can explicitly enable it in Settings.
 export const businessTypesNeedExpiry = (types: string[]): boolean => {
-  if (types.length === 0) return true;
+  if (types.length === 0) return false;
   return types.some((type) => EXPIRY_TRACKING_BUSINESS_TYPES.has(type.trim()));
 };
 

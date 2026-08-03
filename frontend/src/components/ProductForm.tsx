@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { Branch, MeasurementType, NewProduct, Supplier } from "../types";
-import { useAppCategories, userNeedsExpiryTracking } from "../categories";
+import { useAppCategories } from "../categories";
 import { createSupplier, updateMyCategories } from "../api";
 import { startCameraBarcodeScan } from "../barcode-scanner";
 import { useCapabilities } from "../settings";
@@ -111,9 +111,9 @@ export default function ProductForm({
 }: Props) {
   const categoryOptions = useAppCategories();
   const capabilities = useCapabilities();
-  // Expiry only applies to businesses that actually sell perishable/dated stock
-  // (e.g. Pharmacy, Grocery) — not Construction, Hardware, Fashion, Electronics.
-  const expiryEnabled = capabilities.expiry_tracking && userNeedsExpiryTracking();
+  // The effective capability already combines the business-type default with
+  // the owner's explicit setting, so it is the single source of truth.
+  const expiryEnabled = capabilities.expiry_tracking;
   const canConfigureMeasurement = capabilities.fractional_sales || capabilities.length_based_sales || capabilities.unit_conversions;
   const canConfigureVariants = capabilities.variants || capabilities.size_color_variants || capabilities.brand_shade_attributes;
   const measurementTypeOptions = useMemo<Array<{ value: MeasurementType; label: string }>>(() => {

@@ -19,6 +19,7 @@ from app.utils.branch import get_active_branch_id
 from app.utils.expiry import get_batch_balances, writeoff_expired_batches
 from app.utils.email import send_email, smtp_configured
 from app.routers.settings import _read_taxes
+from app.utils.capabilities import get_effective_capabilities_for_user
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -125,6 +126,7 @@ def _get_available_sale_batches(
     branch_id: int,
     product_id: int,
     variant_id: int | None = None,
+    expiry_tracking_enabled: bool = True,
 ):
     today = date.today()
     available_batches = [
@@ -137,7 +139,11 @@ def _get_available_sale_batches(
             variant_id=variant_id,
             include_null_expiry=True,
         )
-        if batch.balance > 0 and (batch.expiry_date is None or batch.expiry_date >= today)
+        if batch.balance > 0 and (
+            not expiry_tracking_enabled
+            or batch.expiry_date is None
+            or batch.expiry_date >= today
+        )
     ]
     available_batches.sort(
         key=lambda batch: (
@@ -399,6 +405,7 @@ def _deduct_sale_stock(
     preferred_batch_number: str | None,
     unit_selling_price: Decimal,
     sale_id: int,
+    expiry_tracking_enabled: bool,
 ) -> list[dict[str, object]]:
     """Deduct `quantity` from stock FEFO (earliest expiry first), recording one
     StockMovement per batch. Returns the batches that were drawn down.
@@ -412,6 +419,7 @@ def _deduct_sale_stock(
         branch_id=branch_id,
         product_id=product.id,
         variant_id=variant.id if variant is not None else None,
+        expiry_tracking_enabled=expiry_tracking_enabled,
     )
     normalized_preferred = _normalize_batch_number(preferred_batch_number)
     if normalized_preferred:
@@ -497,6 +505,7 @@ def create_sale(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
+    defer_commit: bool = Query(default=False, include_in_schema=False),
 ):
     """
     Create a new sale and deduct stock.
@@ -506,15 +515,19 @@ def create_sale(
     ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     tax_snapshot, currency_code = _receipt_settings_snapshot(db, current_user)
+    expiry_tracking_enabled = bool(
+        get_effective_capabilities_for_user(db, current_user).get("expiry_tracking")
+    )
 
     # Auto-writeoff expired batches for this product before checking availability.
-    writeoff_expired_batches(
-        db=db,
-        actor_user_id=current_user.id,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-        product_id=payload.product_id,
-    )
+    if expiry_tracking_enabled:
+        writeoff_expired_batches(
+            db=db,
+            actor_user_id=current_user.id,
+            tenant_user_ids=tenant_user_ids,
+            branch_id=active_branch_id,
+            product_id=payload.product_id,
+        )
     db.flush()
 
     # Idempotency for offline/poor-network retries
@@ -633,6 +646,8 @@ def create_sale(
         # (branch_id, client_sale_id) unique index. Return the winner's sale
         # instead of surfacing a 500 — the sale DID happen, exactly once.
         db.rollback()
+        if defer_commit:
+            raise
         if payload.client_sale_id:
             existing = db.scalar(
                 select(models.Sale).where(
@@ -673,6 +688,7 @@ def create_sale(
             preferred_batch_number=payload.preferred_batch_number,
             unit_selling_price=sale.unit_price,
             sale_id=sale.id,
+            expiry_tracking_enabled=expiry_tracking_enabled,
         )
     else:
         deducted_batches = []
@@ -764,7 +780,10 @@ def create_sale(
             )
             db.add(payment_transaction)
 
-    db.commit()
+    if defer_commit:
+        db.flush()
+    else:
+        db.commit()
     db.refresh(sale)
 
     # Attach batch deduction info for the client.
@@ -788,15 +807,23 @@ def create_sales_bulk(
         raise HTTPException(status_code=400, detail="No sales provided")
 
     created: list[models.Sale] = []
-    for payload in payloads:
-        created.append(
-            create_sale(
-                payload=payload,
-                db=db,
-                current_user=current_user,
-                active_branch_id=active_branch_id,
+    try:
+        for payload in payloads:
+            created.append(
+                create_sale(
+                    payload=payload,
+                    db=db,
+                    current_user=current_user,
+                    active_branch_id=active_branch_id,
+                    defer_commit=True,
+                )
             )
-        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    for sale in created:
+        db.refresh(sale)
     return created
 
 
@@ -811,6 +838,9 @@ def list_sale_batch_options(
     """Return currently sellable tracked batches for a product in FEFO order."""
     ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+    expiry_tracking_enabled = bool(
+        get_effective_capabilities_for_user(db, current_user).get("expiry_tracking")
+    )
 
     product = db.scalar(
         select(models.Product).where(
@@ -830,13 +860,14 @@ def list_sale_batch_options(
         variant_id=variant_id,
     )
 
-    writeoff_expired_batches(
-        db=db,
-        actor_user_id=current_user.id,
-        tenant_user_ids=tenant_user_ids,
-        branch_id=active_branch_id,
-        product_id=product_id,
-    )
+    if expiry_tracking_enabled:
+        writeoff_expired_batches(
+            db=db,
+            actor_user_id=current_user.id,
+            tenant_user_ids=tenant_user_ids,
+            branch_id=active_branch_id,
+            product_id=product_id,
+        )
     db.flush()
 
     available_batches = _get_available_sale_batches(
@@ -844,6 +875,7 @@ def list_sale_batch_options(
         tenant_user_ids=tenant_user_ids,
         branch_id=active_branch_id,
         product_id=product_id,
+        expiry_tracking_enabled=expiry_tracking_enabled,
     )
     return [
         SaleBatchOptionRead(
@@ -1289,6 +1321,9 @@ def supply_sale(
         )
 
     # The collected portion leaves the store now → deduct it from stock.
+    expiry_tracking_enabled = bool(
+        get_effective_capabilities_for_user(db, current_user).get("expiry_tracking")
+    )
     _deduct_sale_stock(
         db=db,
         tenant_user_ids=tenant_user_ids,
@@ -1300,6 +1335,7 @@ def supply_sale(
         preferred_batch_number=None,
         unit_selling_price=Decimal(sale.unit_price),
         sale_id=sale.id,
+        expiry_tracking_enabled=expiry_tracking_enabled,
     )
 
     # Log this hand-over so the owner can prove what was collected and when.

@@ -18,6 +18,7 @@ import {
   Supplier,
   SupplierPayment,
   Warehouse,
+  WarehouseMovement,
   WarehouseStock,
   FulfillmentOrder,
   FulfillmentStatus,
@@ -539,6 +540,10 @@ export async function fetchWarehouseStock(warehouseId: number): Promise<Warehous
   return jsonRequest<WarehouseStock[]>(`/warehouses/${warehouseId}/stock`);
 }
 
+export async function fetchWarehouseMovements(warehouseId: number, limit = 250): Promise<WarehouseMovement[]> {
+  return jsonRequest<WarehouseMovement[]>(`/warehouses/${warehouseId}/movements?limit=${encodeURIComponent(String(limit))}`);
+}
+
 export async function createWarehouseItem(warehouseId: number, payload: NewProduct): Promise<WarehouseStock> {
   return jsonRequest<WarehouseStock>(`/warehouses/${warehouseId}/items`, {
     method: "POST",
@@ -617,7 +622,7 @@ export type CapabilityMap = Record<CapabilityKey, boolean>;
 export type CapabilityOverrides = Partial<CapabilityMap>;
 
 export const DEFAULT_EFFECTIVE_CAPABILITIES: CapabilityMap = {
-  expiry_tracking: true,
+  expiry_tracking: false,
   batch_tracking: false,
   variants: false,
   size_color_variants: false,
@@ -1469,32 +1474,36 @@ export async function createBranchTransfer(payload: {
 
 // Purchasing API
 
-export async function fetchSuppliers(): Promise<Supplier[]> {
-  const cached = getCached<Supplier[]>("suppliers");
-  if (cached && isCacheFresh("suppliers")) {
+export async function fetchSuppliers(warehouseId?: number | null): Promise<Supplier[]> {
+  const cacheKey = warehouseId ? `suppliers:warehouse:${warehouseId}` : "suppliers";
+  const cached = getCached<Supplier[]>(cacheKey);
+  if (cached && isCacheFresh(cacheKey)) {
     return cached;
   }
 
-  const data = await jsonRequest<Supplier[]>("/inventory/suppliers");
-  setCache("suppliers", data);
+  const query = warehouseId ? `?warehouse_id=${encodeURIComponent(String(warehouseId))}` : "";
+  const data = await jsonRequest<Supplier[]>(`/inventory/suppliers${query}`);
+  setCache(cacheKey, data);
   return data;
 }
 
-export async function fetchSuppliersCached(onUpdate?: (suppliers: Supplier[]) => void): Promise<Supplier[]> {
-  const cached = getCached<Supplier[]>("suppliers");
+export async function fetchSuppliersCached(onUpdate?: (suppliers: Supplier[]) => void, warehouseId?: number | null): Promise<Supplier[]> {
+  const cacheKey = warehouseId ? `suppliers:warehouse:${warehouseId}` : "suppliers";
+  const query = warehouseId ? `?warehouse_id=${encodeURIComponent(String(warehouseId))}` : "";
+  const cached = getCached<Supplier[]>(cacheKey);
 
   if (cached) {
-    jsonRequest<Supplier[]>("/inventory/suppliers")
+    jsonRequest<Supplier[]>(`/inventory/suppliers${query}`)
       .then((fresh) => {
-        setCache("suppliers", fresh);
+        setCache(cacheKey, fresh);
         if (onUpdate) onUpdate(fresh);
       })
       .catch(() => {});
     return cached;
   }
 
-  const data = await jsonRequest<Supplier[]>("/inventory/suppliers");
-  setCache("suppliers", data);
+  const data = await jsonRequest<Supplier[]>(`/inventory/suppliers${query}`);
+  setCache(cacheKey, data);
   return data;
 }
 
@@ -1521,14 +1530,15 @@ export async function deactivateSupplier(supplierId: number): Promise<void> {
   invalidatePurchasingCaches();
 }
 
-export async function fetchPurchases(limit: number = 100): Promise<Purchase[]> {
-  const cacheKey = `purchases:${limit}`;
+export async function fetchPurchases(limit: number = 100, warehouseId?: number | null): Promise<Purchase[]> {
+  const cacheKey = `purchases:${limit}:${warehouseId ? `warehouse-${warehouseId}` : "branch"}`;
   const cached = getCached<Purchase[]>(cacheKey);
   if (cached && isCacheFresh(cacheKey)) {
     return cached;
   }
 
-  const data = await jsonRequest<Purchase[]>(`/inventory/purchases?limit=${encodeURIComponent(String(limit))}`);
+  const warehouseQuery = warehouseId ? `&warehouse_id=${encodeURIComponent(String(warehouseId))}` : "";
+  const data = await jsonRequest<Purchase[]>(`/inventory/purchases?limit=${encodeURIComponent(String(limit))}${warehouseQuery}`);
   setCache(cacheKey, data);
   return data;
 }
@@ -1536,12 +1546,14 @@ export async function fetchPurchases(limit: number = 100): Promise<Purchase[]> {
 export async function fetchPurchasesCached(
   limit: number = 100,
   onUpdate?: (purchases: Purchase[]) => void,
+  warehouseId?: number | null,
 ): Promise<Purchase[]> {
-  const cacheKey = `purchases:${limit}`;
+  const cacheKey = `purchases:${limit}:${warehouseId ? `warehouse-${warehouseId}` : "branch"}`;
+  const warehouseQuery = warehouseId ? `&warehouse_id=${encodeURIComponent(String(warehouseId))}` : "";
   const cached = getCached<Purchase[]>(cacheKey);
 
   if (cached) {
-    jsonRequest<Purchase[]>(`/inventory/purchases?limit=${encodeURIComponent(String(limit))}`)
+    jsonRequest<Purchase[]>(`/inventory/purchases?limit=${encodeURIComponent(String(limit))}${warehouseQuery}`)
       .then((fresh) => {
         setCache(cacheKey, fresh);
         if (onUpdate) onUpdate(fresh);
@@ -1550,7 +1562,7 @@ export async function fetchPurchasesCached(
     return cached;
   }
 
-  const data = await jsonRequest<Purchase[]>(`/inventory/purchases?limit=${encodeURIComponent(String(limit))}`);
+  const data = await jsonRequest<Purchase[]>(`/inventory/purchases?limit=${encodeURIComponent(String(limit))}${warehouseQuery}`);
   setCache(cacheKey, data);
   return data;
 }
@@ -1564,14 +1576,15 @@ export async function createPurchaseOrder(payload: NewPurchaseOrder): Promise<Pu
   return result;
 }
 
-export async function fetchSupplierPayments(limit: number = 40): Promise<SupplierPayment[]> {
-  const cacheKey = `supplierPayments:${limit}`;
+export async function fetchSupplierPayments(limit: number = 40, warehouseId?: number | null): Promise<SupplierPayment[]> {
+  const cacheKey = `supplierPayments:${limit}:${warehouseId ? `warehouse-${warehouseId}` : "branch"}`;
   const cached = getCached<SupplierPayment[]>(cacheKey);
   if (cached && isCacheFresh(cacheKey)) {
     return cached;
   }
 
-  const data = await jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?limit=${encodeURIComponent(String(limit))}`);
+  const warehouseQuery = warehouseId ? `&warehouse_id=${encodeURIComponent(String(warehouseId))}` : "";
+  const data = await jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?limit=${encodeURIComponent(String(limit))}${warehouseQuery}`);
   setCache(cacheKey, data);
   return data;
 }
@@ -1579,12 +1592,14 @@ export async function fetchSupplierPayments(limit: number = 40): Promise<Supplie
 export async function fetchSupplierPaymentsCached(
   limit: number = 40,
   onUpdate?: (payments: SupplierPayment[]) => void,
+  warehouseId?: number | null,
 ): Promise<SupplierPayment[]> {
-  const cacheKey = `supplierPayments:${limit}`;
+  const cacheKey = `supplierPayments:${limit}:${warehouseId ? `warehouse-${warehouseId}` : "branch"}`;
+  const warehouseQuery = warehouseId ? `&warehouse_id=${encodeURIComponent(String(warehouseId))}` : "";
   const cached = getCached<SupplierPayment[]>(cacheKey);
 
   if (cached) {
-    jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?limit=${encodeURIComponent(String(limit))}`)
+    jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?limit=${encodeURIComponent(String(limit))}${warehouseQuery}`)
       .then((fresh) => {
         setCache(cacheKey, fresh);
         if (onUpdate) onUpdate(fresh);
@@ -1593,7 +1608,7 @@ export async function fetchSupplierPaymentsCached(
     return cached;
   }
 
-  const data = await jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?limit=${encodeURIComponent(String(limit))}`);
+  const data = await jsonRequest<SupplierPayment[]>(`/inventory/supplier-payments?limit=${encodeURIComponent(String(limit))}${warehouseQuery}`);
   setCache(cacheKey, data);
   return data;
 }
@@ -1607,8 +1622,9 @@ export async function createSupplierPayment(payload: NewSupplierPayment): Promis
   return result;
 }
 
-export async function supportsPurchaseReturns(): Promise<boolean> {
-  const response = await resilientFetch(`${API_BASE}/inventory/purchase-returns?limit=1`, {
+export async function supportsPurchaseReturns(warehouseId?: number | null): Promise<boolean> {
+  const warehouseQuery = warehouseId ? `&warehouse_id=${encodeURIComponent(String(warehouseId))}` : "";
+  const response = await resilientFetch(`${API_BASE}/inventory/purchase-returns?limit=1${warehouseQuery}`, {
     method: "GET",
     headers: buildAuthHeaders(),
   });
@@ -1623,14 +1639,15 @@ export async function supportsPurchaseReturns(): Promise<boolean> {
   return response.status !== 404 && response.status !== 405;
 }
 
-export async function fetchPurchaseReturns(limit: number = 40): Promise<PurchaseReturn[]> {
-  const cacheKey = `purchaseReturns:${limit}`;
+export async function fetchPurchaseReturns(limit: number = 40, warehouseId?: number | null): Promise<PurchaseReturn[]> {
+  const cacheKey = `purchaseReturns:${limit}:${warehouseId ? `warehouse-${warehouseId}` : "branch"}`;
   const cached = getCached<PurchaseReturn[]>(cacheKey);
   if (cached && isCacheFresh(cacheKey)) {
     return cached;
   }
 
-  const data = await jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?limit=${encodeURIComponent(String(limit))}`);
+  const warehouseQuery = warehouseId ? `&warehouse_id=${encodeURIComponent(String(warehouseId))}` : "";
+  const data = await jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?limit=${encodeURIComponent(String(limit))}${warehouseQuery}`);
   setCache(cacheKey, data);
   return data;
 }
@@ -1638,12 +1655,14 @@ export async function fetchPurchaseReturns(limit: number = 40): Promise<Purchase
 export async function fetchPurchaseReturnsCached(
   limit: number = 40,
   onUpdate?: (purchaseReturns: PurchaseReturn[]) => void,
+  warehouseId?: number | null,
 ): Promise<PurchaseReturn[]> {
-  const cacheKey = `purchaseReturns:${limit}`;
+  const cacheKey = `purchaseReturns:${limit}:${warehouseId ? `warehouse-${warehouseId}` : "branch"}`;
+  const warehouseQuery = warehouseId ? `&warehouse_id=${encodeURIComponent(String(warehouseId))}` : "";
   const cached = getCached<PurchaseReturn[]>(cacheKey);
 
   if (cached) {
-    jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?limit=${encodeURIComponent(String(limit))}`)
+    jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?limit=${encodeURIComponent(String(limit))}${warehouseQuery}`)
       .then((fresh) => {
         setCache(cacheKey, fresh);
         if (onUpdate) onUpdate(fresh);
@@ -1652,7 +1671,7 @@ export async function fetchPurchaseReturnsCached(
     return cached;
   }
 
-  const data = await jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?limit=${encodeURIComponent(String(limit))}`);
+  const data = await jsonRequest<PurchaseReturn[]>(`/inventory/purchase-returns?limit=${encodeURIComponent(String(limit))}${warehouseQuery}`);
   setCache(cacheKey, data);
   return data;
 }

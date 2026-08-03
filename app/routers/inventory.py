@@ -10,18 +10,52 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from .. import schemas
-from ..models import Product, ProductVariant, StockMovement, Sale, User, SystemSettings, Branch, Supplier, Purchase, SupplierPayment, PurchaseReturn
+from ..models import Product, ProductVariant, StockMovement, Sale, User, SystemSettings, Branch, Warehouse, WarehouseStockItem, WarehouseStockMovement, Supplier, Purchase, SupplierPayment, PurchaseReturn
 from ..auth import get_current_active_user
-from app.permissions import ensure_permission, is_admin
+from app.permissions import ensure_permission, get_effective_role_name, is_admin
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.movement_reasons import classify_movement, validate_reason_and_change
 from app.utils.expiry import get_batch_balances, get_batch_balances_bulk, writeoff_expired_batches
+from app.utils.warehouse_stock import get_warehouse_lot_balances
+from app.utils.capabilities import get_effective_capabilities_for_user
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
 MONEY_SCALE = Decimal("0.01")
 MONEY_ZERO = Decimal("0.00")
+
+
+def _warehouse_scope(
+    db: Session,
+    current_user: User,
+    warehouse_id: int | None,
+    *,
+    active_only: bool = False,
+) -> Warehouse | None:
+    is_warehouse_user = get_effective_role_name(current_user) == "Warehouse"
+    if warehouse_id is None:
+        if is_warehouse_user:
+            raise HTTPException(status_code=422, detail="A warehouse destination is required for this user")
+        return None
+
+    owner_user_id = _get_tenant_owner_id(current_user)
+    query = select(Warehouse).where(
+        Warehouse.id == warehouse_id,
+        Warehouse.owner_user_id == owner_user_id,
+    )
+    if active_only:
+        query = query.where(Warehouse.is_active.is_(True))
+    warehouse = db.scalar(query)
+    if not warehouse or (is_warehouse_user and current_user.warehouse_id != warehouse.id):
+        raise HTTPException(status_code=404, detail="Warehouse not found")
+    return warehouse
+
+
+def _location_condition(model, active_branch_id: int, warehouse_id: int | None):
+    if warehouse_id is not None:
+        return model.warehouse_id == warehouse_id
+    return and_(model.branch_id == active_branch_id, model.warehouse_id.is_(None))
 
 
 def _load_variant_label_map(
@@ -87,6 +121,7 @@ def _get_purchase_order_rows(
     tenant_user_ids: list[int],
     active_branch_id: int,
     order_number: str,
+    warehouse_id: int | None = None,
 ) -> list[Purchase]:
     normalized_order_number = order_number.strip()
     if not normalized_order_number:
@@ -97,7 +132,7 @@ def _get_purchase_order_rows(
         .where(
             Purchase.order_number == normalized_order_number,
             Purchase.user_id.in_(tenant_user_ids),
-            Purchase.branch_id == active_branch_id,
+            _location_condition(Purchase, active_branch_id, warehouse_id),
         )
         .order_by(Purchase.purchase_date.asc(), Purchase.created_at.asc(), Purchase.id.asc())
     ).all()
@@ -171,6 +206,7 @@ def _create_purchase_records(
     current_user: User,
     tenant_user_ids: list[int],
     active_branch_id: int,
+    warehouse_id: int | None,
     items: list[schemas.PurchaseOrderItemCreate],
     supplier_id: int | None,
     supplier_name: str | None,
@@ -192,43 +228,71 @@ def _create_purchase_records(
         supplier_name,
     )
 
-    product_ids = sorted({item.product_id for item in items})
-    products = db.scalars(
-        select(Product).where(
-            Product.id.in_(product_ids),
-            Product.user_id.in_(tenant_user_ids),
-            Product.branch_id == active_branch_id,
-        )
-    ).all()
-    product_by_id = {product.id: product for product in products}
-
-    missing_product_ids = [str(product_id) for product_id in product_ids if product_id not in product_by_id]
-    if missing_product_ids:
-        raise HTTPException(status_code=404, detail="Product not found")
-
-    variant_ids = sorted({int(item.variant_id) for item in items if item.variant_id is not None})
+    warehouse = _warehouse_scope(db, current_user, warehouse_id, active_only=True)
+    expiry_tracking_enabled = bool(
+        get_effective_capabilities_for_user(db, current_user).get("expiry_tracking")
+    )
+    product_by_id: dict[int, Product] = {}
+    warehouse_item_by_id: dict[int, WarehouseStockItem] = {}
     variant_by_id: dict[int, ProductVariant] = {}
-    if variant_ids:
-        variants = db.scalars(
-            select(ProductVariant).where(
-                ProductVariant.id.in_(variant_ids),
-                ProductVariant.product_id.in_(product_ids),
+
+    if warehouse is not None:
+        if any(item.product_id is not None or item.warehouse_item_id is None for item in items):
+            raise HTTPException(status_code=422, detail="Warehouse purchases require warehouse_item_id for every item")
+        warehouse_item_ids = sorted({int(item.warehouse_item_id) for item in items if item.warehouse_item_id is not None})
+        warehouse_items = db.scalars(
+            select(WarehouseStockItem).where(
+                WarehouseStockItem.id.in_(warehouse_item_ids),
+                WarehouseStockItem.owner_user_id == _get_tenant_owner_id(current_user),
+                WarehouseStockItem.warehouse_id == warehouse.id,
             )
         ).all()
-        variant_by_id = {variant.id: variant for variant in variants}
+        warehouse_item_by_id = {item.id: item for item in warehouse_items}
+        if len(warehouse_item_by_id) != len(warehouse_item_ids):
+            raise HTTPException(status_code=404, detail="Warehouse product not found")
+        if any(item.variant_id is not None for item in items):
+            raise HTTPException(status_code=422, detail="Warehouse purchase variants must be recorded as separate warehouse products")
+    else:
+        if any(item.product_id is None or item.warehouse_item_id is not None for item in items):
+            raise HTTPException(status_code=422, detail="Branch purchases require product_id for every item")
+        product_ids = sorted({int(item.product_id) for item in items if item.product_id is not None})
+        products = db.scalars(
+            select(Product).where(
+                Product.id.in_(product_ids),
+                Product.user_id.in_(tenant_user_ids),
+                Product.branch_id == active_branch_id,
+            )
+        ).all()
+        product_by_id = {product.id: product for product in products}
+        if len(product_by_id) != len(product_ids):
+            raise HTTPException(status_code=404, detail="Product not found")
 
-    prepared_items: list[tuple[int, Product, schemas.PurchaseOrderItemCreate, Decimal, Decimal]] = []
+        variant_ids = sorted({int(item.variant_id) for item in items if item.variant_id is not None})
+        if variant_ids:
+            variants = db.scalars(
+                select(ProductVariant).where(
+                    ProductVariant.id.in_(variant_ids),
+                    ProductVariant.product_id.in_(product_ids),
+                )
+            ).all()
+            variant_by_id = {variant.id: variant for variant in variants}
+
+    prepared_items: list[tuple[int, Product | WarehouseStockItem, schemas.PurchaseOrderItemCreate, Decimal, Decimal]] = []
     order_total = MONEY_ZERO
     for index, item in enumerate(items, start=1):
-        product = product_by_id[item.product_id]
-        if item.variant_id is not None:
+        stock_item: Product | WarehouseStockItem
+        if warehouse is not None:
+            stock_item = warehouse_item_by_id[int(item.warehouse_item_id or 0)]
+        else:
+            stock_item = product_by_id[int(item.product_id or 0)]
+        if warehouse is None and item.variant_id is not None:
             variant = variant_by_id.get(int(item.variant_id))
-            if not variant or variant.product_id != product.id:
-                raise HTTPException(status_code=400, detail=f"Selected variant is invalid for {product.name}")
-        if product.expiry_date is not None and item.expiry_date is None:
+            if not variant or variant.product_id != stock_item.id:
+                raise HTTPException(status_code=400, detail=f"Selected variant is invalid for {stock_item.name}")
+        if expiry_tracking_enabled and stock_item.expiry_date is not None and item.expiry_date is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"Expiry date is required when purchasing stock for {product.name}",
+                detail=f"Expiry date is required when purchasing stock for {stock_item.name}",
             )
 
         quantity = _to_money(item.quantity)
@@ -238,7 +302,7 @@ def _create_purchase_records(
 
         unit_cost = _to_money(item.unit_cost_price)
         line_total = (quantity * unit_cost).quantize(MONEY_SCALE)
-        prepared_items.append((index, product, item, quantity, line_total))
+        prepared_items.append((index, stock_item, item, quantity, line_total))
         order_total += line_total
 
     upfront_payment = _to_money(amount_paid)
@@ -256,49 +320,81 @@ def _create_purchase_records(
 
     remaining_payment = upfront_payment
     created_purchases: list[Purchase] = []
-    for index, product, item, quantity, line_total in prepared_items:
-        existing_movements = db.scalar(
-            select(func.count(StockMovement.id)).where(
-                StockMovement.product_id == product.id,
-                StockMovement.user_id.in_(tenant_user_ids),
-                StockMovement.branch_id == active_branch_id,
-            )
-        )
-        movement_reason = "Restock" if int(existing_movements or 0) > 0 else "New Stock"
-        batch_number = f"{order_number}-{index:02d}"
-        movement = StockMovement(
-            product_id=product.id,
-            variant_id=item.variant_id,
-            user_id=current_user.id,
-            branch_id=active_branch_id,
-            change=quantity,
-            reason=movement_reason,
-            batch_number=batch_number,
-            expiry_date=item.expiry_date,
-            unit_cost_price=item.unit_cost_price,
-            unit_selling_price=item.unit_selling_price if item.unit_selling_price is not None else product.selling_price,
-        )
-        db.add(movement)
-        db.flush()
+    for index, stock_item, item, quantity, line_total in prepared_items:
+        batch_number = (item.batch_number or "").strip() or f"{order_number}-{index:02d}"
+        branch_movement: StockMovement | None = None
+        warehouse_movement: WarehouseStockMovement | None = None
+        product: Product | None = stock_item if isinstance(stock_item, Product) else None
+        warehouse_item: WarehouseStockItem | None = stock_item if isinstance(stock_item, WarehouseStockItem) else None
 
-        product.supplier = resolved_supplier_name
-        product.cost_price = item.unit_cost_price
-        if item.unit_selling_price is not None:
-            product.selling_price = item.unit_selling_price
+        if warehouse is not None and warehouse_item is not None:
+            existing_movements = db.scalar(select(func.count(WarehouseStockMovement.id)).where(
+                WarehouseStockMovement.warehouse_id == warehouse.id,
+                WarehouseStockMovement.item_id == warehouse_item.id,
+            ))
+            movement_reason = "Warehouse restock from supplier" if int(existing_movements or 0) > 0 else "Opening supplier delivery"
+            warehouse_movement = WarehouseStockMovement(
+                owner_user_id=_get_tenant_owner_id(current_user),
+                warehouse_id=warehouse.id,
+                item_id=warehouse_item.id,
+                actor_user_id=current_user.id,
+                change=quantity,
+                reason=movement_reason,
+                reference=order_number,
+                batch_number=batch_number,
+                expiry_date=item.expiry_date,
+                unit_cost_price=item.unit_cost_price,
+            )
+            db.add(warehouse_movement)
+            db.flush()
+            warehouse_item.supplier = resolved_supplier_name
+            warehouse_item.cost_price = item.unit_cost_price
+            if item.unit_selling_price is not None:
+                warehouse_item.selling_price = item.unit_selling_price
+        elif product is not None:
+            existing_movements = db.scalar(
+                select(func.count(StockMovement.id)).where(
+                    StockMovement.product_id == product.id,
+                    StockMovement.user_id.in_(tenant_user_ids),
+                    StockMovement.branch_id == active_branch_id,
+                )
+            )
+            movement_reason = "Restock" if int(existing_movements or 0) > 0 else "New Stock"
+            branch_movement = StockMovement(
+                product_id=product.id,
+                variant_id=item.variant_id,
+                user_id=current_user.id,
+                branch_id=active_branch_id,
+                change=quantity,
+                reason=movement_reason,
+                batch_number=batch_number,
+                expiry_date=item.expiry_date,
+                unit_cost_price=item.unit_cost_price,
+                unit_selling_price=item.unit_selling_price if item.unit_selling_price is not None else product.selling_price,
+            )
+            db.add(branch_movement)
+            db.flush()
+            product.supplier = resolved_supplier_name
+            product.cost_price = item.unit_cost_price
+            if item.unit_selling_price is not None:
+                product.selling_price = item.unit_selling_price
 
         line_payment = min(remaining_payment, line_total)
         remaining_payment = (remaining_payment - line_payment).quantize(MONEY_SCALE)
         purchase = Purchase(
             user_id=current_user.id,
-            branch_id=active_branch_id,
+            branch_id=None if warehouse is not None else active_branch_id,
+            warehouse_id=warehouse.id if warehouse is not None else None,
             supplier_id=supplier.id,
-            product_id=product.id,
-            variant_id=item.variant_id,
-            stock_movement_id=movement.id,
+            product_id=product.id if product is not None else None,
+            warehouse_item_id=warehouse_item.id if warehouse_item is not None else None,
+            variant_id=item.variant_id if product is not None else None,
+            stock_movement_id=branch_movement.id if branch_movement is not None else None,
+            warehouse_stock_movement_id=warehouse_movement.id if warehouse_movement is not None else None,
             order_number=order_number,
             supplier_name=resolved_supplier_name,
-            product_name=product.name,
-            product_sku=product.sku,
+            product_name=stock_item.name,
+            product_sku=stock_item.sku,
             invoice_number=invoice_number_value,
             quantity=quantity,
             unit_cost_price=item.unit_cost_price,
@@ -322,7 +418,8 @@ def _create_purchase_records(
         db.add(
             SupplierPayment(
                 user_id=current_user.id,
-                branch_id=active_branch_id,
+                branch_id=None if warehouse is not None else active_branch_id,
+                warehouse_id=warehouse.id if warehouse is not None else None,
                 supplier_id=supplier.id,
                 purchase_id=created_purchases[0].id if len(created_purchases) == 1 else None,
                 order_number=order_number,
@@ -365,6 +462,10 @@ def _build_purchase_order_response(purchases: list[Purchase]) -> schemas.Purchas
 
     return schemas.PurchaseOrderRead(
         order_number=first_purchase.order_number or f"PURCHASE-{first_purchase.id}",
+        branch_id=first_purchase.branch_id,
+        warehouse_id=first_purchase.warehouse_id,
+        destination_type="warehouse" if first_purchase.warehouse_id is not None else "branch",
+        destination_name=getattr(first_purchase, "destination_name", None),
         supplier_id=first_purchase.supplier_id,
         supplier_name=first_purchase.supplier_name,
         invoice_number=first_purchase.invoice_number,
@@ -447,9 +548,21 @@ def _attach_purchase_creator_names(purchases: list[Purchase], db: Session) -> No
     creator_ids = sorted({p.user_id for p in purchases})
     creators = db.execute(select(User.id, User.name).where(User.id.in_(creator_ids))).all()
     creator_name_by_id = {int(uid): name for uid, name in creators}
+    branch_ids = sorted({int(purchase.branch_id) for purchase in purchases if purchase.branch_id is not None})
+    warehouse_ids = sorted({int(purchase.warehouse_id) for purchase in purchases if purchase.warehouse_id is not None})
+    branches = db.execute(select(Branch.id, Branch.name).where(Branch.id.in_(branch_ids))).all() if branch_ids else []
+    warehouses = db.execute(select(Warehouse.id, Warehouse.name).where(Warehouse.id.in_(warehouse_ids))).all() if warehouse_ids else []
+    branch_name_by_id = {int(row.id): row.name for row in branches}
+    warehouse_name_by_id = {int(row.id): row.name for row in warehouses}
 
     for purchase in purchases:
         purchase.created_by_name = creator_name_by_id.get(purchase.user_id)
+        purchase.destination_type = "warehouse" if purchase.warehouse_id is not None else "branch"
+        purchase.destination_name = (
+            warehouse_name_by_id.get(int(purchase.warehouse_id))
+            if purchase.warehouse_id is not None
+            else branch_name_by_id.get(int(purchase.branch_id)) if purchase.branch_id is not None else None
+        )
 
 
 def _attach_supplier_financials(
@@ -457,6 +570,7 @@ def _attach_supplier_financials(
     db: Session,
     tenant_user_ids: list[int],
     active_branch_id: int,
+    warehouse_id: int | None = None,
 ) -> None:
     if not suppliers:
         return
@@ -480,7 +594,7 @@ def _attach_supplier_financials(
         )
         .where(
             Purchase.user_id.in_(tenant_user_ids),
-            Purchase.branch_id == active_branch_id,
+            _location_condition(Purchase, active_branch_id, warehouse_id),
         )
         .group_by(Purchase.supplier_id, func.lower(func.trim(Purchase.supplier_name)))
     ).all()
@@ -492,7 +606,7 @@ def _attach_supplier_financials(
         )
         .where(
             SupplierPayment.user_id.in_(tenant_user_ids),
-            SupplierPayment.branch_id == active_branch_id,
+            _location_condition(SupplierPayment, active_branch_id, warehouse_id),
             SupplierPayment.supplier_id.is_not(None),
         )
         .group_by(SupplierPayment.supplier_id)
@@ -667,11 +781,13 @@ class BranchTransferCreate(BaseModel):
 
 @router.get("/suppliers", response_model=list[schemas.SupplierRead])
 def list_suppliers(
+    warehouse_id: int | None = Query(default=None, gt=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
+    _warehouse_scope(db, current_user, warehouse_id)
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     suppliers = db.scalars(
         select(Supplier)
@@ -681,7 +797,7 @@ def list_suppliers(
         )
         .order_by(func.lower(Supplier.name), Supplier.id.asc())
     ).all()
-    _attach_supplier_financials(suppliers, db, tenant_user_ids, active_branch_id)
+    _attach_supplier_financials(suppliers, db, tenant_user_ids, active_branch_id, warehouse_id)
     return suppliers
 
 
@@ -717,20 +833,22 @@ def get_supplier_detail(
     supplier_id: int,
     purchase_limit: int = Query(default=50, ge=1, le=300),
     payment_limit: int = Query(default=50, ge=1, le=300),
+    warehouse_id: int | None = Query(default=None, gt=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
+    _warehouse_scope(db, current_user, warehouse_id)
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     supplier = _get_supplier_or_404(db, tenant_user_ids, supplier_id)
-    _attach_supplier_financials([supplier], db, tenant_user_ids, active_branch_id)
+    _attach_supplier_financials([supplier], db, tenant_user_ids, active_branch_id, warehouse_id)
 
     purchases = db.scalars(
         select(Purchase)
         .where(
             Purchase.user_id.in_(tenant_user_ids),
-            Purchase.branch_id == active_branch_id,
+            _location_condition(Purchase, active_branch_id, warehouse_id),
             _supplier_purchase_condition(supplier),
         )
         .order_by(Purchase.created_at.desc())
@@ -743,7 +861,7 @@ def get_supplier_detail(
         select(SupplierPayment)
         .where(
             SupplierPayment.user_id.in_(tenant_user_ids),
-            SupplierPayment.branch_id == active_branch_id,
+            _location_condition(SupplierPayment, active_branch_id, warehouse_id),
             SupplierPayment.supplier_id == supplier.id,
         )
         .order_by(SupplierPayment.payment_date.desc(), SupplierPayment.created_at.desc())
@@ -754,7 +872,7 @@ def get_supplier_detail(
             select(SupplierPayment)
             .where(
                 SupplierPayment.user_id.in_(tenant_user_ids),
-                SupplierPayment.branch_id == active_branch_id,
+                _location_condition(SupplierPayment, active_branch_id, warehouse_id),
                 or_(
                     SupplierPayment.supplier_id == supplier.id,
                     SupplierPayment.purchase_id.in_(purchase_ids),
@@ -837,6 +955,14 @@ def update_supplier(
             )
             .values(supplier=new_name)
         )
+        db.execute(
+            update(WarehouseStockItem)
+            .where(
+                WarehouseStockItem.owner_user_id == _get_tenant_owner_id(current_user),
+                func.lower(func.trim(WarehouseStockItem.supplier)) == old_name_key,
+            )
+            .values(supplier=new_name)
+        )
 
     db.commit()
     db.refresh(supplier)
@@ -854,9 +980,13 @@ def deactivate_supplier(
     ensure_permission(current_user, "manage_procurement", "Only Admin and Manager can manage suppliers and purchases")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     supplier = _get_supplier_or_404(db, tenant_user_ids, supplier_id)
-    _attach_supplier_financials([supplier], db, tenant_user_ids, active_branch_id)
-
-    if _to_money(getattr(supplier, "outstanding_balance", MONEY_ZERO)) > MONEY_ZERO:
+    outstanding_balance = db.scalar(
+        select(func.coalesce(func.sum(func.coalesce(Purchase.amount_due, Purchase.total_cost)), 0)).where(
+            Purchase.user_id.in_(tenant_user_ids),
+            _supplier_purchase_condition(supplier),
+        )
+    )
+    if _to_money(outstanding_balance) > MONEY_ZERO:
         raise HTTPException(status_code=400, detail="Cannot deactivate a supplier with outstanding balance")
 
     supplier.is_active = False
@@ -867,17 +997,19 @@ def deactivate_supplier(
 @router.get("/purchases", response_model=list[schemas.PurchaseRead])
 def list_purchases(
     limit: int = Query(default=100, ge=1, le=300),
+    warehouse_id: int | None = Query(default=None, gt=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
+    _warehouse_scope(db, current_user, warehouse_id)
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     purchases = db.scalars(
         select(Purchase)
         .where(
             Purchase.user_id.in_(tenant_user_ids),
-            Purchase.branch_id == active_branch_id,
+            _location_condition(Purchase, active_branch_id, warehouse_id),
         )
         .order_by(Purchase.created_at.desc())
         .limit(limit)
@@ -890,17 +1022,19 @@ def list_purchases(
 @router.get("/supplier-payments", response_model=list[schemas.SupplierPaymentRead])
 def list_supplier_payments(
     limit: int = Query(default=40, ge=1, le=200),
+    warehouse_id: int | None = Query(default=None, gt=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
+    _warehouse_scope(db, current_user, warehouse_id)
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     payments = db.scalars(
         select(SupplierPayment)
         .where(
             SupplierPayment.user_id.in_(tenant_user_ids),
-            SupplierPayment.branch_id == active_branch_id,
+            _location_condition(SupplierPayment, active_branch_id, warehouse_id),
         )
         .order_by(SupplierPayment.payment_date.desc(), SupplierPayment.created_at.desc())
         .limit(limit)
@@ -913,17 +1047,19 @@ def list_supplier_payments(
 @router.get("/purchase-returns", response_model=list[schemas.PurchaseReturnRead])
 def list_purchase_returns(
     limit: int = Query(default=40, ge=1, le=200),
+    warehouse_id: int | None = Query(default=None, gt=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
+    _warehouse_scope(db, current_user, warehouse_id)
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     returns = db.scalars(
         select(PurchaseReturn)
         .where(
             PurchaseReturn.user_id.in_(tenant_user_ids),
-            PurchaseReturn.branch_id == active_branch_id,
+            _location_condition(PurchaseReturn, active_branch_id, warehouse_id),
         )
         .order_by(PurchaseReturn.return_date.desc(), PurchaseReturn.created_at.desc())
         .limit(limit)
@@ -948,6 +1084,7 @@ def create_purchase_order(
         current_user=current_user,
         tenant_user_ids=tenant_user_ids,
         active_branch_id=active_branch_id,
+        warehouse_id=payload.warehouse_id,
         items=payload.items,
         supplier_id=payload.supplier_id,
         supplier_name=payload.supplier_name,
@@ -962,7 +1099,7 @@ def create_purchase_order(
     db.commit()
     for purchase in purchases:
         db.refresh(purchase)
-        purchase.created_by_name = current_user.name
+    _attach_purchase_creator_names(purchases, db)
 
     return _build_purchase_order_response(purchases)
 
@@ -982,13 +1119,16 @@ def create_purchase(
         current_user=current_user,
         tenant_user_ids=tenant_user_ids,
         active_branch_id=active_branch_id,
+        warehouse_id=payload.warehouse_id,
         items=[
             schemas.PurchaseOrderItemCreate(
                 product_id=payload.product_id,
+                warehouse_item_id=payload.warehouse_item_id,
                 variant_id=payload.variant_id,
                 quantity=payload.quantity,
                 unit_cost_price=payload.unit_cost_price,
                 unit_selling_price=payload.unit_selling_price,
+                batch_number=payload.batch_number,
                 expiry_date=payload.expiry_date,
             )
         ],
@@ -1005,7 +1145,7 @@ def create_purchase(
 
     db.commit()
     db.refresh(purchase)
-    purchase.created_by_name = current_user.name
+    _attach_purchase_creator_names([purchase], db)
     return purchase
 
 
@@ -1017,6 +1157,7 @@ def create_supplier_payment(
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     ensure_permission(current_user, "manage_procurement", "Only Admin and Manager can manage suppliers and purchases")
+    warehouse = _warehouse_scope(db, current_user, payload.warehouse_id)
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     if payload.purchase_id is None and not (payload.order_number or "").strip():
         raise HTTPException(status_code=400, detail="Select a purchase or purchase order to pay")
@@ -1026,7 +1167,7 @@ def create_supplier_payment(
 
     payment: SupplierPayment
     if (payload.order_number or "").strip():
-        purchases = _get_purchase_order_rows(db, tenant_user_ids, active_branch_id, payload.order_number or "")
+        purchases = _get_purchase_order_rows(db, tenant_user_ids, active_branch_id, payload.order_number or "", payload.warehouse_id)
         for purchase in purchases:
             _apply_purchase_payment_state(purchase)
 
@@ -1041,7 +1182,8 @@ def create_supplier_payment(
         supplier = _resolve_supplier_for_existing_purchases(db, current_user, tenant_user_ids, purchases)
         payment = SupplierPayment(
             user_id=current_user.id,
-            branch_id=active_branch_id,
+            branch_id=None if warehouse is not None else active_branch_id,
+            warehouse_id=warehouse.id if warehouse is not None else None,
             supplier_id=supplier.id,
             purchase_id=None,
             order_number=(payload.order_number or "").strip(),
@@ -1069,7 +1211,7 @@ def create_supplier_payment(
             select(Purchase).where(
                 Purchase.id == payload.purchase_id,
                 Purchase.user_id.in_(tenant_user_ids),
-                Purchase.branch_id == active_branch_id,
+                _location_condition(Purchase, active_branch_id, payload.warehouse_id),
             )
         )
         if not purchase:
@@ -1085,7 +1227,8 @@ def create_supplier_payment(
         supplier = _resolve_supplier_for_existing_purchases(db, current_user, tenant_user_ids, [purchase])
         payment = SupplierPayment(
             user_id=current_user.id,
-            branch_id=active_branch_id,
+            branch_id=None if warehouse is not None else active_branch_id,
+            warehouse_id=warehouse.id if warehouse is not None else None,
             supplier_id=supplier.id,
             purchase_id=purchase.id,
             order_number=purchase.order_number,
@@ -1116,19 +1259,22 @@ def create_purchase_return(
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     ensure_permission(current_user, "manage_procurement", "Only Admin and Manager can manage suppliers and purchases")
+    warehouse = _warehouse_scope(db, current_user, payload.warehouse_id)
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     purchase = db.scalar(
         select(Purchase).where(
             Purchase.id == payload.purchase_id,
             Purchase.user_id.in_(tenant_user_ids),
-            Purchase.branch_id == active_branch_id,
+            _location_condition(Purchase, active_branch_id, payload.warehouse_id),
         )
     )
     if not purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
 
-    if purchase.product_id is None:
+    if warehouse is None and purchase.product_id is None:
         raise HTTPException(status_code=400, detail="This purchase is missing product information")
+    if warehouse is not None and purchase.warehouse_item_id is None:
+        raise HTTPException(status_code=400, detail="This purchase is missing warehouse product information")
 
     _apply_purchase_payment_state(purchase)
 
@@ -1143,7 +1289,27 @@ def create_purchase_return(
             detail=f"Cannot return more than {remaining_quantity} unit(s) from this purchase",
         )
 
-    available_stock = _get_purchase_returnable_quantity(db, tenant_user_ids, active_branch_id, purchase)
+    if warehouse is not None:
+        source_warehouse_movement = purchase.warehouse_stock_movement
+        lot_balances = get_warehouse_lot_balances(
+            db,
+            warehouse_id=warehouse.id,
+            item_id=int(purchase.warehouse_item_id or 0),
+        )
+        if source_warehouse_movement is not None:
+            available_stock = _to_money(sum(
+                (
+                    lot.quantity
+                    for lot in lot_balances
+                    if lot.batch_number == source_warehouse_movement.batch_number
+                    and lot.expiry_date == source_warehouse_movement.expiry_date
+                ),
+                MONEY_ZERO,
+            ))
+        else:
+            available_stock = _to_money(sum((lot.quantity for lot in lot_balances), MONEY_ZERO))
+    else:
+        available_stock = _get_purchase_returnable_quantity(db, tenant_user_ids, active_branch_id, purchase)
     if quantity_to_return > available_stock:
         raise HTTPException(
             status_code=400,
@@ -1152,31 +1318,49 @@ def create_purchase_return(
 
     supplier = _resolve_supplier_for_existing_purchases(db, current_user, tenant_user_ids, [purchase])
     source_movement = purchase.stock_movement
+    source_warehouse_movement = purchase.warehouse_stock_movement
     unit_cost_price = _to_money(purchase.unit_cost_price)
     total_cost_returned = (quantity_to_return * unit_cost_price).quantize(MONEY_SCALE)
 
-    return_movement = StockMovement(
-        user_id=current_user.id,
-        branch_id=active_branch_id,
-        product_id=purchase.product_id,
-        change=-quantity_to_return,
-        reason="Return to Supplier",
-        batch_number=source_movement.batch_number if source_movement else None,
-        expiry_date=source_movement.expiry_date if source_movement else None,
-        unit_cost_price=unit_cost_price,
-        unit_selling_price=(source_movement.unit_selling_price if source_movement else purchase.unit_selling_price),
-        location=(source_movement.location if source_movement and source_movement.location else "Main Store"),
-    )
+    if warehouse is not None:
+        return_movement = WarehouseStockMovement(
+            owner_user_id=_get_tenant_owner_id(current_user),
+            warehouse_id=warehouse.id,
+            item_id=int(purchase.warehouse_item_id or 0),
+            actor_user_id=current_user.id,
+            change=-quantity_to_return,
+            reason="Return to Supplier",
+            reference=purchase.order_number,
+            batch_number=source_warehouse_movement.batch_number if source_warehouse_movement else None,
+            expiry_date=source_warehouse_movement.expiry_date if source_warehouse_movement else None,
+            unit_cost_price=unit_cost_price,
+        )
+    else:
+        return_movement = StockMovement(
+            user_id=current_user.id,
+            branch_id=active_branch_id,
+            product_id=int(purchase.product_id or 0),
+            change=-quantity_to_return,
+            reason="Return to Supplier",
+            batch_number=source_movement.batch_number if source_movement else None,
+            expiry_date=source_movement.expiry_date if source_movement else None,
+            unit_cost_price=unit_cost_price,
+            unit_selling_price=(source_movement.unit_selling_price if source_movement else purchase.unit_selling_price),
+            location=(source_movement.location if source_movement and source_movement.location else "Main Store"),
+        )
     db.add(return_movement)
     db.flush()
 
     purchase_return = PurchaseReturn(
         user_id=current_user.id,
-        branch_id=active_branch_id,
+        branch_id=None if warehouse is not None else active_branch_id,
+        warehouse_id=warehouse.id if warehouse is not None else None,
         supplier_id=supplier.id,
         purchase_id=purchase.id,
         product_id=purchase.product_id,
-        stock_movement_id=return_movement.id,
+        warehouse_item_id=purchase.warehouse_item_id,
+        stock_movement_id=return_movement.id if warehouse is None else None,
+        warehouse_stock_movement_id=return_movement.id if warehouse is not None else None,
         order_number=purchase.order_number,
         quantity_returned=quantity_to_return,
         unit_cost_price=unit_cost_price,
@@ -1340,11 +1524,14 @@ def get_inventory_analytics(
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     owner_user_id = _get_tenant_owner_id(current_user)
     settings = _get_or_create_settings(db, owner_user_id)
+    expiry_tracking_enabled = bool(
+        get_effective_capabilities_for_user(db, current_user).get("expiry_tracking")
+    )
     low_stock_threshold = settings.low_stock_threshold
     expiry_warning_days = settings.expiry_warning_days
 
     # Auto-writeoff expired batches so analytics reflect real stock.
-    if writeoff_expired_batches(
+    if expiry_tracking_enabled and writeoff_expired_batches(
         db=db,
         actor_user_id=current_user.id,
         tenant_user_ids=tenant_user_ids,
@@ -1522,7 +1709,7 @@ def get_inventory_analytics(
             })
 
         # Expiring batches (true remaining per batch)
-        if total_stock > 0:
+        if expiry_tracking_enabled and total_stock > 0:
             for b in balances_by_product.get(product.id, []):
                 if b.balance <= 0 or b.expiry_date is None:
                     continue

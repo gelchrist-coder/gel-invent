@@ -4,7 +4,7 @@ import { DEFAULT_EFFECTIVE_CAPABILITIES, fetchSystemSettings, SystemSettings, ty
 const DEFAULT_SETTINGS: SystemSettings = {
   low_stock_threshold: 10,
   expiry_warning_days: 45,
-  uses_expiry_tracking: true,
+  uses_expiry_tracking: false,
   capability_overrides: {},
   effective_capabilities: { ...DEFAULT_EFFECTIVE_CAPABILITIES },
   currency_code: "GHS",

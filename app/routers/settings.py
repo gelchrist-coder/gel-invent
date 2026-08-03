@@ -9,7 +9,23 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
 from ..database import get_db
-from ..models import CreditTransaction, Creditor, Product, Sale, SaleReturn, StockMovement, SystemSettings, User
+from ..models import (
+    CreditTransaction,
+    Creditor,
+    FulfillmentOrder,
+    FulfillmentOrderItem,
+    Product,
+    Purchase,
+    PurchaseReturn,
+    Sale,
+    SaleReturn,
+    StockMovement,
+    SupplierPayment,
+    SystemSettings,
+    User,
+    WarehouseStockItem,
+    WarehouseStockMovement,
+)
 from app.permissions import ensure_permission, is_admin
 from app.utils.capabilities import normalize_capability_overrides, resolve_effective_capabilities, serialize_capability_overrides
 
@@ -231,7 +247,7 @@ def _serialize_settings(settings: SystemSettings, owner: User | None, taxes: lis
     return SystemSettingsRead(
         low_stock_threshold=settings.low_stock_threshold,
         expiry_warning_days=settings.expiry_warning_days,
-        uses_expiry_tracking=settings.uses_expiry_tracking,
+        uses_expiry_tracking=bool(effective_capabilities.get("expiry_tracking")),
         capability_overrides=capability_overrides,
         effective_capabilities=effective_capabilities,
         currency_code=_normalize_currency(getattr(settings, "currency_code", "GHS") or "GHS"),
@@ -266,8 +282,11 @@ def update_system_settings(
     settings.low_stock_threshold = payload.low_stock_threshold
     settings.expiry_warning_days = payload.expiry_warning_days
     settings.uses_expiry_tracking = payload.uses_expiry_tracking
+    capability_overrides = normalize_capability_overrides(settings.capability_overrides)
     if payload.capability_overrides is not None:
-        settings.capability_overrides = serialize_capability_overrides(payload.capability_overrides)
+        capability_overrides.update(normalize_capability_overrides(payload.capability_overrides))
+    capability_overrides["expiry_tracking"] = payload.uses_expiry_tracking
+    settings.capability_overrides = serialize_capability_overrides(capability_overrides)
     settings.currency_code = currency_code
     settings.auto_backup = payload.auto_backup
     settings.email_notifications = payload.email_notifications
@@ -379,6 +398,7 @@ def convert_system_currency(
                 row.pack_cost_price = _to_money(row.pack_cost_price, rate)
                 row.selling_price = _to_money(row.selling_price, rate)
                 row.pack_selling_price = _to_money(row.pack_selling_price, rate)
+                row.wholesale_price = _to_money(row.wholesale_price, rate)
 
             movements = db.query(StockMovement).filter(StockMovement.user_id.in_(tenant_user_ids)).all()
             for row in movements:
@@ -404,6 +424,49 @@ def convert_system_currency(
             sale_returns = db.query(SaleReturn).filter(SaleReturn.user_id.in_(tenant_user_ids)).all()
             for row in sale_returns:
                 row.refund_amount = _to_money(row.refund_amount, rate)
+
+            purchases = db.query(Purchase).filter(Purchase.user_id.in_(tenant_user_ids)).all()
+            for row in purchases:
+                row.unit_cost_price = _to_money(row.unit_cost_price, rate)
+                row.unit_selling_price = _to_money(row.unit_selling_price, rate)
+                row.total_cost = _to_money(row.total_cost, rate)
+                row.amount_paid = _to_money(row.amount_paid, rate)
+                row.amount_due = _to_money(row.amount_due, rate)
+
+            supplier_payments = db.query(SupplierPayment).filter(SupplierPayment.user_id.in_(tenant_user_ids)).all()
+            for row in supplier_payments:
+                row.amount = _to_money(row.amount, rate)
+
+            purchase_returns = db.query(PurchaseReturn).filter(PurchaseReturn.user_id.in_(tenant_user_ids)).all()
+            for row in purchase_returns:
+                row.unit_cost_price = _to_money(row.unit_cost_price, rate)
+                row.total_cost_returned = _to_money(row.total_cost_returned, rate)
+
+            warehouse_items = db.query(WarehouseStockItem).filter(WarehouseStockItem.owner_user_id == current_user.id).all()
+            for row in warehouse_items:
+                row.cost_price = _to_money(row.cost_price, rate)
+                row.pack_cost_price = _to_money(row.pack_cost_price, rate)
+                row.selling_price = _to_money(row.selling_price, rate)
+                row.pack_selling_price = _to_money(row.pack_selling_price, rate)
+                row.wholesale_price = _to_money(row.wholesale_price, rate)
+
+            warehouse_movements = db.query(WarehouseStockMovement).filter(WarehouseStockMovement.owner_user_id == current_user.id).all()
+            for row in warehouse_movements:
+                row.unit_cost_price = _to_money(row.unit_cost_price, rate)
+
+            fulfilment_orders = db.query(FulfillmentOrder).filter(FulfillmentOrder.owner_user_id == current_user.id).all()
+            for row in fulfilment_orders:
+                row.total_amount = _to_money(row.total_amount, rate)
+
+            fulfilment_items = (
+                db.query(FulfillmentOrderItem)
+                .join(FulfillmentOrder, FulfillmentOrder.id == FulfillmentOrderItem.order_id)
+                .filter(FulfillmentOrder.owner_user_id == current_user.id)
+                .all()
+            )
+            for row in fulfilment_items:
+                row.unit_price = _to_money(row.unit_price, rate)
+                row.line_total = _to_money(row.line_total, rate)
 
     settings.currency_code = target_currency
     db.add(settings)

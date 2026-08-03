@@ -13,7 +13,6 @@ import {
   enqueueSales,
   getSalesOutboxCount,
   loadCachedProducts,
-  removeOutboxItem,
 } from "../offline/storage";
 import { syncSalesOutboxOnce } from "../offline/sync";
 import { getDisplayBusinessName, getStoredBusinessLogo, hasUserPermission, readStoredUser } from "../user-storage";
@@ -541,54 +540,49 @@ export default function Sales() {
     if (salesToConfirm.length === 0) return;
     setConfirming(true);
     setConfirmationError(null);
-    try {
-      // Instant UI: mark as confirmed and sync in the background.
+    setSaleConfirmed(false);
+    setConfirmedSales([]);
+
+    const updated = applyLocalSaleToCachedProducts(salesToConfirm);
+    if (updated) setProducts(updated);
+
+    if (!navigator.onLine) {
+      enqueueSales(salesToConfirm);
       setSaleConfirmed(true);
-      setConfirmedSales([]);
+      setConfirming(false);
+      setOfflineNotice("Offline mode: sale saved locally. It will sync when internet returns.");
+      return;
+    }
 
-      // Optimistically update local stock and queue the sale.
-      const queuedItems = enqueueSales(salesToConfirm);
-      const updated = applyLocalSaleToCachedProducts(salesToConfirm);
-      if (updated) setProducts(updated);
-
-      if (!navigator.onLine) {
-        setOfflineNotice("Offline mode: sale saved locally. It will sync when internet returns.");
+    try {
+      // Online sales go directly to the server. Only failed network requests
+      // enter the outbox, preventing bulk checkout and outbox sync from racing.
+      const createdSales = await createSalesBulk(salesToConfirm);
+      setConfirmedSales(createdSales);
+      setSaleConfirmed(true);
+      setSales((previous) => {
+        const createdIds = new Set(createdSales.map((sale) => sale.id));
+        return [...createdSales, ...previous.filter((sale) => !createdIds.has(sale.id))];
+      });
+      setOfflineNotice(null);
+      window.dispatchEvent(new CustomEvent("productsUpdated"));
+      await loadData();
+    } catch (error) {
+      if (shouldQueueSaleRetry(error)) {
+        enqueueSales(salesToConfirm);
+        setSaleConfirmed(true);
+        setOfflineNotice("Sale saved for sync. It will be recorded automatically when the server reconnects.");
         return;
       }
 
-      // Sync in background; don't block the UI.
-      void (async () => {
-        try {
-          const createdSales = await createSalesBulk(salesToConfirm);
-          setConfirmedSales(createdSales);
-          await loadData();
-          setOfflineNotice(null);
-          window.dispatchEvent(new CustomEvent("productsUpdated"));
-        } catch (error) {
-          if (shouldQueueSaleRetry(error)) {
-            setOfflineNotice("Sale queued for sync. We'll retry automatically.");
-            return;
-          }
-
-          queuedItems.forEach((item) => removeOutboxItem(item.id));
-          setSaleConfirmed(false);
-          setConfirmedSales([]);
-          setConfirmationError(error instanceof Error ? error.message : "Sale could not be completed.");
-          try {
-            await loadData();
-          } catch {
-            // Keep the validation error visible even if the reload fails.
-          }
-        }
-      })();
-    } catch {
-      // Network issue: queue sale locally and sync later.
-      enqueueSales(salesToConfirm);
+      setSaleConfirmed(false);
       setConfirmedSales([]);
-      const updated = applyLocalSaleToCachedProducts(salesToConfirm);
-      if (updated) setProducts(updated);
-      setOfflineNotice("Sale queued for sync. We'll retry automatically.");
-      setSaleConfirmed(true);
+      setConfirmationError(error instanceof Error ? error.message : "Sale could not be completed.");
+      try {
+        await loadData();
+      } catch {
+        // Keep the validation error visible even if the reload fails.
+      }
     } finally {
       setConfirming(false);
     }

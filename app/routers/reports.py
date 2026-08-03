@@ -12,6 +12,7 @@ from app.permissions import ensure_permission, is_admin
 from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.expiry import get_batch_balances_bulk
+from app.utils.capabilities import get_effective_capabilities_for_user
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 LEGACY_EXPIRY_WARNING_DAYS = 180
@@ -82,6 +83,9 @@ def get_morning_summary(
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     owner_user_id = _get_tenant_owner_id(current_user)
     settings = _get_or_create_settings(db, owner_user_id)
+    expiry_tracking_enabled = bool(
+        get_effective_capabilities_for_user(db, current_user).get("expiry_tracking")
+    )
 
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -145,7 +149,7 @@ def get_morning_summary(
         branch_id=active_branch_id,
         product_ids=stocked_product_ids,
         include_null_expiry=False,
-    )
+    ) if expiry_tracking_enabled else {}
 
     low_stock_items = []
     expiring_items = []
@@ -163,6 +167,8 @@ def get_morning_summary(
             )
 
         if stock <= 0:
+            continue
+        if not expiry_tracking_enabled:
             continue
 
         soonest_expiry_date = None
@@ -640,6 +646,9 @@ def get_inventory_status(
     # Get tenant user IDs for multi-tenant filtering
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     settings = _get_or_create_settings(db, _get_tenant_owner_id(current_user))
+    expiry_tracking_enabled = bool(
+        get_effective_capabilities_for_user(db, current_user).get("expiry_tracking")
+    )
     
     # Get all products with their current stock
     products_query = select(
@@ -673,7 +682,7 @@ def get_inventory_status(
     
     # Items expiring soon (within expiry warning window)
     expiring_soon = []
-    if products:
+    if expiry_tracking_enabled and products:
         warning_end = datetime.now().date() + timedelta(days=settings.expiry_warning_days)
         expiring_soon = [
             p for p in products 

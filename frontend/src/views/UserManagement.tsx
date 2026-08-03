@@ -26,7 +26,7 @@ const ALL_RESPONSIBILITY_KEYS = RESPONSIBILITIES.map((responsibility) => respons
 
 function defaultResponsibilities(role: string): ResponsibilityKey[] {
   if (role === "Manager") return [...ALL_RESPONSIBILITY_KEYS];
-  if (role === "Warehouse") return ["warehouses"];
+  if (role === "Warehouse") return ["warehouses", "procurement"];
   if (role === "Custom") return [];
   return ["sales"];
 }
@@ -60,7 +60,7 @@ function ResponsibilityPicker({
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
       {RESPONSIBILITIES.map((responsibility) => {
         const checked = selected.includes(responsibility.key);
-        const disabled = warehouseOnly && responsibility.key !== "warehouses";
+        const disabled = warehouseOnly && !["warehouses", "procurement"].includes(responsibility.key);
         return (
           <label
             key={responsibility.key}
@@ -629,7 +629,7 @@ export default function UserManagement() {
               </select>}
               <div style={{ marginTop: 6, color: "#5f6475", fontSize: 12 }}>
                 {formData.role === "Warehouse"
-                  ? "This user will only see and control the assigned warehouse."
+                  ? "This user will only see the assigned warehouse, including its supplier purchases and stock movements."
                   : "Employees are locked to their assigned branch."}
               </div>
             </div>

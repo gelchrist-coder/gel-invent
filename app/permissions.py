@@ -92,7 +92,9 @@ ROLE_PERMISSIONS: Final[dict[str, tuple[PermissionName, ...]]] = {
     ),
     "Custom": (),
     "Warehouse": (
+        "manage_procurement",
         "manage_warehouses",
+        "view_procurement",
         "view_warehouses",
     ),
 }
