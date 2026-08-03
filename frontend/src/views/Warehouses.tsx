@@ -332,9 +332,8 @@ export default function Warehouses() {
             </div>
 
             {activeTab === "overview" ? <div className="warehouse-overview-grid">
-              <div className="card warehouse-flow-card"><span className="warehouse-eyebrow">WAREHOUSE-FIRST FLOW</span><h3>Supplier → Warehouse → Branch → Sale</h3><p>Record supplier deliveries in Purchases, verify them in warehouse stock, then transfer only the quantities each branch needs.</p><div className="warehouse-flow"><span>Purchase</span><b>→</b><span>Receive</span><b>→</b><span>Transfer</span><b>→</b><span>Sell</span></div></div>
-              <div className="card warehouse-actions-card"><h3>Quick actions</h3>{canPurchase && selectedWarehouse.is_active ? <button className="button" onClick={() => setActiveTab("purchases")}>Record supplier purchase</button> : null}<button className="button secondary" onClick={() => setActiveTab("transfers")}>Transfer to a branch</button><button className="button secondary" onClick={() => setActiveTab("stock")}>Review warehouse stock</button></div>
-              <div style={{ gridColumn: "1 / -1" }}>{stockTable}</div>
+              <div className="card warehouse-actions-card"><h3>Quick actions</h3><div className="warehouse-action-buttons">{canPurchase && selectedWarehouse.is_active ? <button className="button" onClick={() => setActiveTab("purchases")}>Record supplier purchase</button> : null}<button className="button secondary" onClick={() => setActiveTab("transfers")}>Transfer to a branch</button><button className="button secondary" onClick={() => setActiveTab("stock")}>Review warehouse stock</button></div></div>
+              {stockTable}
             </div> : null}
 
             {activeTab === "stock" ? <div style={{ display: "grid", gap: 16 }}>
