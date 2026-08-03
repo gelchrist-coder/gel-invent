@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { API_BASE, buildAuthHeaders, createBranch, fetchBranches, resilientFetch } from "../api";
-import { Branch } from "../types";
+import { API_BASE, buildAuthHeaders, createBranch, fetchBranches, fetchWarehouses, resilientFetch } from "../api";
+import { Branch, Warehouse } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
 type Employee = {
@@ -10,6 +10,7 @@ type Employee = {
   name: string;
   role: string;
   branch_id?: number | null;
+  warehouse_id?: number | null;
   is_active: boolean;
   created_at?: string;
 };
@@ -19,6 +20,7 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [branchName, setBranchName] = useState("");
   const [branchError, setBranchError] = useState("");
   const visibleBranches = branches;
@@ -32,6 +34,7 @@ export default function UserManagement() {
     password: "",
     role: "Sales",
     branch_id: "" as "" | number,
+    warehouse_id: "" as "" | number,
   });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -42,7 +45,7 @@ export default function UserManagement() {
       return;
     }
 
-    void Promise.all([loadEmployees(), loadBranches()]);
+    void Promise.all([loadEmployees(), loadBranches(), loadWarehouses()]);
   }, [canManageEmployees]);
 
   const loadBranches = async () => {
@@ -78,6 +81,16 @@ export default function UserManagement() {
     }
   };
 
+  const loadWarehouses = async () => {
+    try {
+      const data = await fetchWarehouses();
+      setWarehouses(data.filter((warehouse) => warehouse.is_active));
+      setFormData((previous) => previous.warehouse_id !== "" ? previous : { ...previous, warehouse_id: data.find((warehouse) => warehouse.is_active)?.id ?? "" });
+    } catch (err) {
+      console.error("Error loading warehouses:", err);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -101,6 +114,10 @@ export default function UserManagement() {
       if (typeof formData.branch_id === "number") {
         payload.branch_id = formData.branch_id;
       }
+      if (formData.role === "Warehouse" && typeof formData.warehouse_id === "number") {
+        payload.warehouse_id = formData.warehouse_id;
+        delete payload.branch_id;
+      }
       const response = await resilientFetch(`${API_BASE}/employees`, {
         method: "POST",
         headers: buildAuthHeaders({ "Content-Type": "application/json" }),
@@ -109,7 +126,7 @@ export default function UserManagement() {
 
       if (response.ok) {
         setSuccess("Employee added successfully!");
-        setFormData((prev) => ({ name: "", email: "", phone: "", password: "", role: "Sales", branch_id: prev.branch_id }));
+        setFormData((prev) => ({ name: "", email: "", phone: "", password: "", role: "Sales", branch_id: prev.branch_id, warehouse_id: prev.warehouse_id }));
         setShowAddForm(false);
         loadEmployees();
       } else {
@@ -149,6 +166,19 @@ export default function UserManagement() {
       }
     } catch (err) {
       console.error("Error changing employee branch:", err);
+    }
+  };
+
+  const handleChangeEmployeeWarehouse = async (employeeId: number, warehouseId: number) => {
+    try {
+      const response = await resilientFetch(`${API_BASE}/employees/${employeeId}`, {
+        method: "PATCH",
+        headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ warehouse_id: warehouseId }),
+      });
+      if (response.ok) loadEmployees();
+    } catch (err) {
+      console.error("Error changing employee warehouse:", err);
     }
   };
 
@@ -195,7 +225,7 @@ export default function UserManagement() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
         <div>
           <h1 className="page-title" style={{ margin: 0 }}>User Management</h1>
-          <p style={{ margin: "8px 0 0", color: "#5f6475" }}>Manage your sales personnel</p>
+          <p style={{ margin: "8px 0 0", color: "#5f6475" }}>Manage branch and warehouse users</p>
         </div>
         <button
           onClick={() => setShowAddForm(!showAddForm)}
@@ -396,15 +426,24 @@ export default function UserManagement() {
                 >
                   <option value="Sales">Sales Personnel</option>
                   <option value="Manager">Manager</option>
+                  <option value="Warehouse">Warehouse User</option>
                 </select>
               </div>
             </div>
 
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: "block", marginBottom: 8, fontSize: 14, fontWeight: 600 }}>
-                Branch
+                {formData.role === "Warehouse" ? "Warehouse" : "Branch"}
               </label>
-              <select
+              {formData.role === "Warehouse" ? <select
+                value={formData.warehouse_id === "" ? "" : String(formData.warehouse_id)}
+                onChange={(e) => setFormData({ ...formData, warehouse_id: e.target.value ? Number(e.target.value) : "" })}
+                style={{ width: "100%", padding: 10, border: "1px solid #d8dce8", borderRadius: 6, fontSize: 14 }}
+                required
+              >
+                <option value="">Select Warehouse</option>
+                {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
+              </select> : <select
                 value={formData.branch_id === "" ? "" : String(formData.branch_id)}
                 onChange={(e) => {
                   const value = e.target.value;
@@ -427,9 +466,11 @@ export default function UserManagement() {
                     </option>
                   ))
                 )}
-              </select>
+              </select>}
               <div style={{ marginTop: 6, color: "#5f6475", fontSize: 12 }}>
-                Employees are locked to their assigned branch.
+                {formData.role === "Warehouse"
+                  ? "This user will only see and control the assigned warehouse."
+                  : "Employees are locked to their assigned branch."}
               </div>
             </div>
             <button
@@ -485,7 +526,7 @@ export default function UserManagement() {
                   Role
                 </th>
                 <th style={{ padding: 16, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#5f6475" }}>
-                  Branch
+                  Assignment
                 </th>
                 <th style={{ padding: 16, textAlign: "left", fontSize: 13, fontWeight: 600, color: "#5f6475" }}>
                   Status
@@ -517,8 +558,10 @@ export default function UserManagement() {
                   </td>
                   <td style={{ padding: 16, fontSize: 14 }}>
                     <select
-                      value={String(employee.branch_id ?? "")}
-                      onChange={(e) => handleChangeEmployeeBranch(employee.id, Number(e.target.value))}
+                      value={String(employee.role === "Warehouse" ? employee.warehouse_id ?? "" : employee.branch_id ?? "")}
+                      onChange={(e) => employee.role === "Warehouse"
+                        ? handleChangeEmployeeWarehouse(employee.id, Number(e.target.value))
+                        : handleChangeEmployeeBranch(employee.id, Number(e.target.value))}
                       style={{
                         width: "100%",
                         maxWidth: 220,
@@ -529,7 +572,9 @@ export default function UserManagement() {
                         background: "#fff",
                       }}
                     >
-                      {branches.length === 0 ? (
+                      {employee.role === "Warehouse" ? (
+                        warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)
+                      ) : branches.length === 0 ? (
                         <option value={String(employee.branch_id ?? "")}>Current Branch</option>
                       ) : (
                         (() => {

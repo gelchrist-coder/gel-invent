@@ -36,6 +36,8 @@ ROLE_ALIASES: Final[dict[str, str]] = {
     "admin": "Admin",
     "manager": "Manager",
     "sales": "Sales",
+    "warehouse": "Warehouse",
+    "warehouse manager": "Warehouse",
 }
 
 ROLE_PERMISSIONS: Final[dict[str, tuple[PermissionName, ...]]] = {
@@ -89,6 +91,10 @@ ROLE_PERMISSIONS: Final[dict[str, tuple[PermissionName, ...]]] = {
         "view_catalog",
         "view_creditors",
         "view_inventory",
+    ),
+    "Warehouse": (
+        "manage_warehouses",
+        "view_warehouses",
     ),
 }
 

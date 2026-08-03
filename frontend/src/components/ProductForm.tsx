@@ -17,6 +17,7 @@ type Props = {
   activeBranchId?: number | null;
   existingSuppliers?: Supplier[];
   layoutMode?: "card" | "modal";
+  hideBranchField?: boolean;
 };
 
 type VariantDraft = {
@@ -106,6 +107,7 @@ export default function ProductForm({
   activeBranchId,
   existingSuppliers,
   layoutMode = "card",
+  hideBranchField = false,
 }: Props) {
   const categoryOptions = useAppCategories();
   const capabilities = useCapabilities();
@@ -200,6 +202,7 @@ export default function ProductForm({
   const role = userRole;
   const accessUser = readStoredUser() ?? { role };
   const canManageBranches = hasUserPermission("manage_branches", accessUser);
+  const canManageProcurement = hasUserPermission("manage_procurement", accessUser);
   const isModalLayout = layoutMode === "modal";
   const modalSectionStyle = isModalLayout
     ? {
@@ -456,7 +459,7 @@ export default function ProductForm({
     setSubmittingMode(mode);
     setError(null);
     try {
-      if (!isKnownSupplier) {
+      if (!isKnownSupplier && canManageProcurement) {
         try {
           const createdSupplier = await createSupplier({
             name: normalizedSupplierName,
@@ -1181,7 +1184,7 @@ export default function ProductForm({
                     : "Number of pieces"}
                 </small>
               </label>
-              <label>
+              {!hideBranchField ? <label>
                 Branch
                 {canManageBranches && visibleBranches.length > 0 ? (
                   <select
@@ -1206,7 +1209,7 @@ export default function ProductForm({
                     readOnly
                   />
                 )}
-              </label>
+              </label> : null}
             </div>
             <label>
               Reorder Level (Low Stock Alert)

@@ -1,0 +1,27 @@
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_users_warehouse_id ON users (warehouse_id);
+
+ALTER TABLE warehouse_stock_items
+    ADD COLUMN IF NOT EXISTS barcode VARCHAR(128),
+    ADD COLUMN IF NOT EXISTS description VARCHAR(1024),
+    ADD COLUMN IF NOT EXISTS measurement_type VARCHAR(32) DEFAULT 'count',
+    ADD COLUMN IF NOT EXISTS allows_fractional_sales BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS quantity_step NUMERIC(10,2) DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS variant_group VARCHAR(120),
+    ADD COLUMN IF NOT EXISTS variant_label VARCHAR(120),
+    ADD COLUMN IF NOT EXISTS brand VARCHAR(100),
+    ADD COLUMN IF NOT EXISTS size VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS color VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS shade VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS pack_size INTEGER,
+    ADD COLUMN IF NOT EXISTS supplier VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS expiry_date DATE,
+    ADD COLUMN IF NOT EXISTS pack_cost_price NUMERIC(10,2),
+    ADD COLUMN IF NOT EXISTS pack_selling_price NUMERIC(10,2),
+    ADD COLUMN IF NOT EXISTS wholesale_price NUMERIC(10,2),
+    ADD COLUMN IF NOT EXISTS wholesale_min_quantity NUMERIC(10,2),
+    ADD COLUMN IF NOT EXISTS image TEXT,
+    ADD COLUMN IF NOT EXISTS variants_json JSONB DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS unit_conversions_json JSONB DEFAULT '[]'::jsonb;

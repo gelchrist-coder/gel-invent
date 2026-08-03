@@ -23,7 +23,7 @@ export type FrontendPermission =
   | "view_revenue"
   | "view_runtime_health";
 
-type EffectiveRole = "Admin" | "Manager" | "Sales";
+type EffectiveRole = "Admin" | "Manager" | "Sales" | "Warehouse";
 
 const ALL_PERMISSIONS = new Set<FrontendPermission>([
   "delete_sales",
@@ -55,6 +55,8 @@ const ROLE_ALIASES: Record<string, EffectiveRole> = {
   admin: "Admin",
   manager: "Manager",
   sales: "Sales",
+  warehouse: "Warehouse",
+  "warehouse manager": "Warehouse",
 };
 
 const ROLE_PERMISSIONS: Record<EffectiveRole, readonly FrontendPermission[]> = {
@@ -109,6 +111,10 @@ const ROLE_PERMISSIONS: Record<EffectiveRole, readonly FrontendPermission[]> = {
     "view_creditors",
     "view_inventory",
   ],
+  Warehouse: [
+    "manage_warehouses",
+    "view_warehouses",
+  ],
 };
 
 export type StoredUser = {
@@ -123,6 +129,7 @@ export type StoredUser = {
   role?: string;
   permissions?: FrontendPermission[] | null;
   branch_id?: number | null;
+  warehouse_id?: number | null;
 };
 
 export type StoredBusinessInfo = {

@@ -53,6 +53,7 @@ def list_branches(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
+    ensure_permission(current_user, "view_inventory", "You do not have access to branch data")
     owner_user_id = get_owner_user_id(current_user)
 
     branches = (

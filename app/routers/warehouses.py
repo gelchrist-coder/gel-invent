@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from app import models
 from app.auth import get_current_active_user
 from app.deps import get_db
-from app.permissions import ensure_permission
-from app.utils.branch import get_active_branch_id, get_owner_user_id
+from app.permissions import ensure_permission, get_effective_role_name
+from app.utils.branch import get_owner_user_id
 from app.utils.tenant import get_tenant_user_ids
 
 router = APIRouter(prefix="/warehouses", tags=["warehouses"])
@@ -46,6 +46,11 @@ class WarehouseRead(BaseModel):
     created_at: datetime
 
 
+class WarehouseBranchRead(BaseModel):
+    id: int
+    name: str
+
+
 class WarehouseStockRead(BaseModel):
     item_id: int
     warehouse_id: int
@@ -61,14 +66,50 @@ class WarehouseStockRead(BaseModel):
     available_quantity: Decimal = Decimal("0")
 
 
+class WarehouseVariantCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    attributes_json: dict = Field(default_factory=dict)
+    is_active: bool = True
+    sort_order: int = 0
+
+
+class WarehouseUnitConversionCreate(BaseModel):
+    unit_name: str = Field(min_length=1, max_length=64)
+    base_quantity: Decimal = Field(gt=0, decimal_places=2)
+    is_sale_unit: bool = True
+    is_purchase_unit: bool = False
+    sort_order: int = 0
+
+
 class WarehouseItemCreate(BaseModel):
     sku: str = Field(min_length=1, max_length=100)
+    barcode: str | None = Field(default=None, max_length=128)
     name: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=1024)
     unit: str = Field(default="pcs", min_length=1, max_length=50)
+    measurement_type: str = Field(default="count", pattern="^(count|weight|volume|length)$")
+    allows_fractional_sales: bool = False
+    quantity_step: Decimal = Field(default=Decimal("1"), gt=0, decimal_places=2)
+    variant_group: str | None = Field(default=None, max_length=120)
+    variant_label: str | None = Field(default=None, max_length=120)
+    brand: str | None = Field(default=None, max_length=100)
+    size: str | None = Field(default=None, max_length=64)
+    color: str | None = Field(default=None, max_length=64)
+    shade: str | None = Field(default=None, max_length=64)
+    pack_size: int | None = Field(default=None, gt=0)
     category: str | None = Field(default=None, max_length=120)
+    supplier: str | None = Field(default=None, max_length=255)
+    expiry_date: date | None = None
     cost_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    pack_cost_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
     selling_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
-    initial_quantity: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2)
+    pack_selling_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    wholesale_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    wholesale_min_quantity: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    image: str | None = None
+    initial_stock: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2)
+    variants: list[WarehouseVariantCreate] = Field(default_factory=list, max_length=100)
+    unit_conversions: list[WarehouseUnitConversionCreate] = Field(default_factory=list, max_length=100)
 
 
 class FulfillmentOrderItemCreate(BaseModel):
@@ -149,7 +190,17 @@ def _clean(value: str | None) -> str | None:
     return cleaned or None
 
 
-def _warehouse_or_404(db: Session, owner_user_id: int, warehouse_id: int, *, active_only: bool = False) -> models.Warehouse:
+def _warehouse_or_404(
+    db: Session,
+    owner_user_id: int,
+    warehouse_id: int,
+    *,
+    current_user: models.User | None = None,
+    active_only: bool = False,
+) -> models.Warehouse:
+    if current_user is not None and get_effective_role_name(current_user) == "Warehouse":
+        if current_user.warehouse_id != warehouse_id:
+            raise HTTPException(status_code=404, detail="Warehouse not found")
     query = select(models.Warehouse).where(
         models.Warehouse.id == warehouse_id,
         models.Warehouse.owner_user_id == owner_user_id,
@@ -229,6 +280,32 @@ def _get_or_create_item(
     warehouse_id: int,
     product: models.Product,
 ) -> models.WarehouseStockItem:
+    variants = [{
+        "label": variant.label,
+        "attributes_json": variant.attributes_json or {},
+        "is_active": variant.is_active,
+        "sort_order": variant.sort_order,
+    } for variant in product.variants]
+    unit_conversions = [{
+        "unit_name": conversion.unit_name,
+        "base_quantity": float(conversion.base_quantity),
+        "is_sale_unit": conversion.is_sale_unit,
+        "is_purchase_unit": conversion.is_purchase_unit,
+        "sort_order": conversion.sort_order,
+    } for conversion in product.unit_conversions]
+    product_snapshot = {
+        "barcode": product.barcode, "name": product.name, "description": product.description,
+        "unit": product.unit, "measurement_type": product.measurement_type,
+        "allows_fractional_sales": product.allows_fractional_sales, "quantity_step": product.quantity_step,
+        "variant_group": product.variant_group, "variant_label": product.variant_label,
+        "brand": product.brand, "size": product.size, "color": product.color, "shade": product.shade,
+        "pack_size": product.pack_size, "category": product.category, "supplier": product.supplier,
+        "expiry_date": product.expiry_date, "cost_price": product.cost_price,
+        "pack_cost_price": product.pack_cost_price, "selling_price": product.selling_price,
+        "pack_selling_price": product.pack_selling_price, "wholesale_price": product.wholesale_price,
+        "wholesale_min_quantity": product.wholesale_min_quantity, "image": product.image,
+        "variants_json": variants, "unit_conversions_json": unit_conversions,
+    }
     item = db.scalar(
         select(models.WarehouseStockItem).where(
             models.WarehouseStockItem.warehouse_id == warehouse_id,
@@ -237,11 +314,8 @@ def _get_or_create_item(
     )
     if item:
         item.source_product_id = product.id
-        item.name = product.name
-        item.unit = product.unit
-        item.category = product.category
-        item.cost_price = product.cost_price
-        item.selling_price = product.selling_price
+        for field_name, value in product_snapshot.items():
+            setattr(item, field_name, value)
         return item
 
     item = models.WarehouseStockItem(
@@ -249,11 +323,7 @@ def _get_or_create_item(
         warehouse_id=warehouse_id,
         source_product_id=product.id,
         sku=product.sku,
-        name=product.name,
-        unit=product.unit,
-        category=product.category,
-        cost_price=product.cost_price,
-        selling_price=product.selling_price,
+        **product_snapshot,
     )
     db.add(item)
     db.flush()
@@ -283,31 +353,56 @@ def _find_or_clone_branch_product(
         user_id=actor_user_id,
         branch_id=branch_id,
         sku=item.sku,
+        barcode=source.barcode if source else item.barcode,
         name=item.name,
-        description=source.description if source else None,
+        description=source.description if source else item.description,
         unit=item.unit,
-        measurement_type=source.measurement_type if source else "count",
-        allows_fractional_sales=source.allows_fractional_sales if source else False,
-        quantity_step=source.quantity_step if source else Decimal("1"),
-        variant_group=source.variant_group if source else None,
-        variant_label=source.variant_label if source else None,
-        brand=source.brand if source else None,
-        size=source.size if source else None,
-        color=source.color if source else None,
-        shade=source.shade if source else None,
-        pack_size=source.pack_size if source else None,
+        measurement_type=source.measurement_type if source else item.measurement_type,
+        allows_fractional_sales=source.allows_fractional_sales if source else item.allows_fractional_sales,
+        quantity_step=source.quantity_step if source else item.quantity_step,
+        variant_group=source.variant_group if source else item.variant_group,
+        variant_label=source.variant_label if source else item.variant_label,
+        brand=source.brand if source else item.brand,
+        size=source.size if source else item.size,
+        color=source.color if source else item.color,
+        shade=source.shade if source else item.shade,
+        pack_size=source.pack_size if source else item.pack_size,
         category=item.category,
-        supplier=source.supplier if source else None,
+        supplier=source.supplier if source else item.supplier,
+        expiry_date=source.expiry_date if source else item.expiry_date,
         cost_price=item.cost_price,
         selling_price=item.selling_price,
-        pack_cost_price=source.pack_cost_price if source else None,
-        pack_selling_price=source.pack_selling_price if source else None,
-        wholesale_price=source.wholesale_price if source else None,
-        wholesale_min_quantity=source.wholesale_min_quantity if source else None,
-        image=source.image if source else None,
+        pack_cost_price=source.pack_cost_price if source else item.pack_cost_price,
+        pack_selling_price=source.pack_selling_price if source else item.pack_selling_price,
+        wholesale_price=source.wholesale_price if source else item.wholesale_price,
+        wholesale_min_quantity=source.wholesale_min_quantity if source else item.wholesale_min_quantity,
+        image=source.image if source else item.image,
     )
     db.add(product)
     db.flush()
+    variants = item.variants_json or ([{
+        "label": variant.label, "attributes_json": variant.attributes_json,
+        "is_active": variant.is_active, "sort_order": variant.sort_order,
+    } for variant in source.variants] if source else [])
+    conversions = item.unit_conversions_json or ([{
+        "unit_name": conversion.unit_name, "base_quantity": conversion.base_quantity,
+        "is_sale_unit": conversion.is_sale_unit, "is_purchase_unit": conversion.is_purchase_unit,
+        "sort_order": conversion.sort_order,
+    } for conversion in source.unit_conversions] if source else [])
+    for variant in variants:
+        db.add(models.ProductVariant(
+            product_id=product.id, label=str(variant.get("label") or "").strip(),
+            attributes_json=variant.get("attributes_json") or {},
+            is_active=bool(variant.get("is_active", True)), sort_order=int(variant.get("sort_order", 0)),
+        ))
+    for conversion in conversions:
+        db.add(models.ProductUnitConversion(
+            product_id=product.id, unit_name=str(conversion.get("unit_name") or "").strip(),
+            base_quantity=Decimal(str(conversion.get("base_quantity") or 1)),
+            is_sale_unit=bool(conversion.get("is_sale_unit", True)),
+            is_purchase_unit=bool(conversion.get("is_purchase_unit", False)),
+            sort_order=int(conversion.get("sort_order", 0)),
+        ))
     return product
 
 
@@ -318,9 +413,13 @@ def list_warehouses(
 ):
     ensure_permission(current_user, "view_warehouses")
     owner_user_id = get_owner_user_id(current_user)
+    warehouse_query = select(models.Warehouse).where(models.Warehouse.owner_user_id == owner_user_id)
+    if get_effective_role_name(current_user) == "Warehouse":
+        if current_user.warehouse_id is None:
+            return []
+        warehouse_query = warehouse_query.where(models.Warehouse.id == current_user.warehouse_id)
     warehouses = db.scalars(
-        select(models.Warehouse)
-        .where(models.Warehouse.owner_user_id == owner_user_id)
+        warehouse_query
         .order_by(models.Warehouse.is_active.desc(), models.Warehouse.name.asc())
     ).all()
 
@@ -354,6 +453,19 @@ def list_warehouses(
     ]
 
 
+@router.get("/destinations/branches", response_model=list[WarehouseBranchRead])
+def list_warehouse_destination_branches(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    ensure_permission(current_user, "view_warehouses")
+    owner_user_id = get_owner_user_id(current_user)
+    return db.scalars(select(models.Branch).where(
+        models.Branch.owner_user_id == owner_user_id,
+        models.Branch.is_active.is_(True),
+    ).order_by(models.Branch.name.asc())).all()
+
+
 @router.post("", response_model=WarehouseRead)
 def create_warehouse(
     payload: WarehouseCreate,
@@ -361,6 +473,8 @@ def create_warehouse(
     current_user: models.User = Depends(get_current_active_user),
 ):
     ensure_permission(current_user, "manage_warehouses")
+    if get_effective_role_name(current_user) == "Warehouse":
+        raise HTTPException(status_code=403, detail="Warehouse users cannot create warehouses")
     owner_user_id = get_owner_user_id(current_user)
     name = payload.name.strip()
     duplicate = db.scalar(select(models.Warehouse.id).where(
@@ -390,8 +504,10 @@ def update_warehouse(
     current_user: models.User = Depends(get_current_active_user),
 ):
     ensure_permission(current_user, "manage_warehouses")
+    if get_effective_role_name(current_user) == "Warehouse":
+        raise HTTPException(status_code=403, detail="Warehouse users cannot change warehouse settings")
     owner_user_id = get_owner_user_id(current_user)
-    warehouse = _warehouse_or_404(db, owner_user_id, warehouse_id)
+    warehouse = _warehouse_or_404(db, owner_user_id, warehouse_id, current_user=current_user)
     data = payload.model_dump(exclude_unset=True)
     if "name" in data:
         name = str(data["name"]).strip()
@@ -421,7 +537,7 @@ def list_warehouse_stock(
 ):
     ensure_permission(current_user, "view_warehouses")
     owner_user_id = get_owner_user_id(current_user)
-    _warehouse_or_404(db, owner_user_id, warehouse_id)
+    _warehouse_or_404(db, owner_user_id, warehouse_id, current_user=current_user)
     rows = db.execute(
         select(models.WarehouseStockItem, func.coalesce(func.sum(models.WarehouseStockMovement.change), 0))
         .outerjoin(models.WarehouseStockMovement, models.WarehouseStockMovement.item_id == models.WarehouseStockItem.id)
@@ -454,7 +570,7 @@ def create_warehouse_item(
 ):
     ensure_permission(current_user, "manage_warehouses")
     owner_user_id = get_owner_user_id(current_user)
-    _warehouse_or_404(db, owner_user_id, warehouse_id, active_only=True)
+    _warehouse_or_404(db, owner_user_id, warehouse_id, current_user=current_user, active_only=True)
     sku = payload.sku.strip()
     name = payload.name.strip()
     unit = payload.unit.strip()
@@ -472,21 +588,42 @@ def create_warehouse_item(
         warehouse_id=warehouse_id,
         source_product_id=None,
         sku=sku,
+        barcode=_clean(payload.barcode),
         name=name,
+        description=_clean(payload.description),
         unit=unit,
+        measurement_type=payload.measurement_type,
+        allows_fractional_sales=payload.allows_fractional_sales,
+        quantity_step=payload.quantity_step,
+        variant_group=_clean(payload.variant_group),
+        variant_label=_clean(payload.variant_label),
+        brand=_clean(payload.brand),
+        size=_clean(payload.size),
+        color=_clean(payload.color),
+        shade=_clean(payload.shade),
+        pack_size=payload.pack_size,
         category=_clean(payload.category),
+        supplier=_clean(payload.supplier),
+        expiry_date=payload.expiry_date,
         cost_price=payload.cost_price,
+        pack_cost_price=payload.pack_cost_price,
         selling_price=payload.selling_price,
+        pack_selling_price=payload.pack_selling_price,
+        wholesale_price=payload.wholesale_price,
+        wholesale_min_quantity=payload.wholesale_min_quantity,
+        image=payload.image,
+        variants_json=[variant.model_dump(mode="json") for variant in payload.variants],
+        unit_conversions_json=[conversion.model_dump(mode="json") for conversion in payload.unit_conversions],
     )
     db.add(item)
     db.flush()
-    if payload.initial_quantity > 0:
+    if payload.initial_stock > 0:
         db.add(models.WarehouseStockMovement(
             owner_user_id=owner_user_id,
             warehouse_id=warehouse_id,
             item_id=item.id,
             actor_user_id=current_user.id,
-            change=payload.initial_quantity,
+            change=payload.initial_stock,
             reason="Opening warehouse stock",
             unit_cost_price=payload.cost_price,
         ))
@@ -510,7 +647,7 @@ def receive_warehouse_stock(
 ):
     ensure_permission(current_user, "manage_warehouses")
     owner_user_id = get_owner_user_id(current_user)
-    _warehouse_or_404(db, owner_user_id, warehouse_id, active_only=True)
+    _warehouse_or_404(db, owner_user_id, warehouse_id, current_user=current_user, active_only=True)
     if bool(payload.product_id) == bool(payload.item_id):
         raise HTTPException(status_code=422, detail="Provide either item_id or product_id")
     product = None
@@ -560,7 +697,7 @@ def list_fulfillment_orders(
 ):
     ensure_permission(current_user, "view_warehouses")
     owner_user_id = get_owner_user_id(current_user)
-    _warehouse_or_404(db, owner_user_id, warehouse_id)
+    _warehouse_or_404(db, owner_user_id, warehouse_id, current_user=current_user)
     query = select(models.FulfillmentOrder).where(
         models.FulfillmentOrder.owner_user_id == owner_user_id,
         models.FulfillmentOrder.warehouse_id == warehouse_id,
@@ -580,7 +717,7 @@ def create_fulfillment_order(
 ):
     ensure_permission(current_user, "manage_warehouses")
     owner_user_id = get_owner_user_id(current_user)
-    _warehouse_or_404(db, owner_user_id, warehouse_id, active_only=True)
+    _warehouse_or_404(db, owner_user_id, warehouse_id, current_user=current_user, active_only=True)
 
     item_ids = [line.item_id for line in payload.items]
     if len(set(item_ids)) != len(item_ids):
@@ -667,7 +804,7 @@ def update_fulfillment_status(
 ):
     ensure_permission(current_user, "manage_warehouses")
     owner_user_id = get_owner_user_id(current_user)
-    _warehouse_or_404(db, owner_user_id, warehouse_id)
+    _warehouse_or_404(db, owner_user_id, warehouse_id, current_user=current_user)
     order = db.scalar(
         select(models.FulfillmentOrder)
         .where(
@@ -738,13 +875,14 @@ def transfer_warehouse_stock(
     payload: WarehouseTransferCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
 ):
     ensure_permission(current_user, "manage_warehouses")
     owner_user_id = get_owner_user_id(current_user)
-    warehouse = _warehouse_or_404(db, owner_user_id, warehouse_id, active_only=True)
+    warehouse = _warehouse_or_404(db, owner_user_id, warehouse_id, current_user=current_user, active_only=True)
     tenant_user_ids = get_tenant_user_ids(current_user, db)
-    branch_id = payload.branch_id or active_branch_id
+    branch_id = payload.branch_id or current_user.branch_id
+    if not branch_id:
+        raise HTTPException(status_code=422, detail="Select a destination branch")
     branch = db.scalar(select(models.Branch).where(
         models.Branch.id == branch_id,
         models.Branch.owner_user_id == owner_user_id,

@@ -192,7 +192,7 @@ export default function App() {
   const [outboxCount, setOutboxCount] = useState(() => getSalesOutboxCount());
   const [isSyncingOutbox, setIsSyncingOutbox] = useState(false);
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [activeView, setActiveView] = useState("dashboard");
+  const [activeView, setActiveView] = useState(() => readStoredUser()?.role === "Warehouse" ? "warehouses" : "dashboard");
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -232,6 +232,7 @@ export default function App() {
   const canViewProcurement = hasUserPermission("view_procurement", accessUser);
   const canViewReports = hasUserPermission("view_reports", accessUser);
   const canViewRevenue = hasUserPermission("view_revenue", accessUser);
+  const isWarehouseUser = storedUser?.role === "Warehouse";
 
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
 
@@ -467,7 +468,12 @@ export default function App() {
 
   // Load branches after login and pick an active branch.
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || isWarehouseUser) {
+      if (isWarehouseUser) {
+        setBranches([]);
+        setActiveBranchId(null);
+        localStorage.removeItem("activeBranchId");
+      }
       return;
     }
 
@@ -535,7 +541,7 @@ export default function App() {
     run();
     // Intentionally not depending on activeBranchId to avoid repeated fetches.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isWarehouseUser]);
 
   // Refresh branches when another part of the app creates/changes them.
   useEffect(() => {
@@ -563,7 +569,7 @@ export default function App() {
 
     window.addEventListener("branchesChanged", handler as EventListener);
     return () => window.removeEventListener("branchesChanged", handler as EventListener);
-  }, [isAuthenticated, activeBranchId]);
+  }, [isAuthenticated, activeBranchId, isWarehouseUser]);
 
   // Warm caches in background so page switches feel instant.
   useEffect(() => {
@@ -579,6 +585,8 @@ export default function App() {
       // Keep startup non-blocking; regular fetch retries still handle failures.
     });
 
+    if (isWarehouseUser) return;
+
     if (prefetchedBranchRef.current === activeBranchId) return;
     prefetchedBranchRef.current = activeBranchId;
 
@@ -588,7 +596,7 @@ export default function App() {
     if (canViewReports) {
       fetchSalesDashboard().catch(() => {});
     }
-  }, [canViewReports, isAuthenticated, activeBranchId]);
+  }, [canViewReports, isAuthenticated, activeBranchId, isWarehouseUser]);
 
   useEffect(() => {
     const handleOutboxChanged = () => {
@@ -600,6 +608,10 @@ export default function App() {
 
     const handleOnline = () => {
       setIsOnline(true);
+      if (isWarehouseUser) {
+        window.dispatchEvent(new CustomEvent("appReconnected"));
+        return;
+      }
       void syncQueuedSales();
       // Self-heal after a network change: refetch the core data and tell the
       // open view to reload, so a load that was killed mid-flight recovers
@@ -634,7 +646,7 @@ export default function App() {
     window.addEventListener("appinstalled", handleAppInstalled);
 
     setOutboxCount(getSalesOutboxCount());
-    if (navigator.onLine) {
+    if (navigator.onLine && !isWarehouseUser) {
       void syncQueuedSales();
     }
 
@@ -645,7 +657,7 @@ export default function App() {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt as EventListener);
       window.removeEventListener("appinstalled", handleAppInstalled);
     };
-  }, [syncQueuedSales]);
+  }, [isWarehouseUser, syncQueuedSales]);
 
   // Auto-refresh when another user signs in
   useEffect(() => {
@@ -722,7 +734,11 @@ export default function App() {
   }, [currentUserId]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || isWarehouseUser) {
+      if (isWarehouseUser) {
+        setProducts([]);
+        setSelectedId(null);
+      }
       return;
     }
     
@@ -748,7 +764,7 @@ export default function App() {
     };
 
     void run();
-  }, [isAuthenticated, activeBranchId]);
+  }, [isAuthenticated, activeBranchId, isWarehouseUser]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -814,8 +830,7 @@ export default function App() {
       }
     }
 
-    // Always start authenticated users on dashboard.
-    setActiveView("dashboard");
+    setActiveView(user?.role === "Warehouse" ? "warehouses" : "dashboard");
     setIsAuthenticated(true);
     // Leave the public auth route (e.g. /login, /signup) for the app shell.
     navigate("/", { replace: true });
@@ -856,6 +871,11 @@ export default function App() {
       return;
     }
 
+    if (isWarehouseUser && activeView !== "warehouses") {
+      setActiveView("warehouses");
+      return;
+    }
+
     if (activeView === "reports" && !canViewReports) {
       setActiveView("dashboard");
       return;
@@ -874,7 +894,7 @@ export default function App() {
     if ((activeView === "suppliers" || activeView === "purchases") && !canViewProcurement) {
       setActiveView("dashboard");
     }
-  }, [activeView, canManageEmployees, canViewProcurement, canViewReports, canViewRevenue, isAuthenticated]);
+  }, [activeView, canManageEmployees, canViewProcurement, canViewReports, canViewRevenue, isAuthenticated, isWarehouseUser]);
 
   // Show login page if not authenticated
   if (!isAuthenticated) {

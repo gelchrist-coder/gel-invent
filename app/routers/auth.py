@@ -92,6 +92,7 @@ class UserResponse(BaseModel):
     # Legacy compatibility alias for product_categories.
     categories: Optional[list[str]] = None
     branch_id: Optional[int] = None
+    warehouse_id: Optional[int] = None
     is_active: bool
 
     class Config:
@@ -268,6 +269,7 @@ def _serialize_user(user: User, db: Session | None = None) -> UserResponse:
         product_categories=product_categories,
         categories=product_categories,
         branch_id=getattr(user, "branch_id", None),
+        warehouse_id=getattr(user, "warehouse_id", None),
         is_active=user.is_active,
     )
 

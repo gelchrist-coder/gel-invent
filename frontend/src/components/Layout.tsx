@@ -205,8 +205,10 @@ export default function Layout({
   // Filter navigation items based on user role
   const accessUser = { role: userRole, permissions: userPermissions };
   const canManageBranches = hasUserPermission("manage_branches", accessUser);
+  const isWarehouseUser = userRole.trim().toLowerCase() === "warehouse";
   const visibleNavItems = NAV_ITEMS.filter(
-    (item) => (item.id !== "warehouses" || warehouseEnabled)
+    (item) => (!isWarehouseUser || item.id === "warehouses")
+      && (item.id !== "warehouses" || warehouseEnabled || isWarehouseUser)
       && (!item.requiredPermission || hasUserPermission(item.requiredPermission, accessUser)),
   );
 

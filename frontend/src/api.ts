@@ -436,6 +436,7 @@ export type AuthUser = {
   // Legacy compatibility alias for product_categories.
   categories?: string[] | null;
   branch_id?: number | null;
+  warehouse_id?: number | null;
   is_active: boolean;
 };
 
@@ -538,19 +539,15 @@ export async function fetchWarehouseStock(warehouseId: number): Promise<Warehous
   return jsonRequest<WarehouseStock[]>(`/warehouses/${warehouseId}/stock`);
 }
 
-export async function createWarehouseItem(warehouseId: number, payload: {
-  sku: string;
-  name: string;
-  unit: string;
-  category?: string | null;
-  cost_price?: number | null;
-  selling_price?: number | null;
-  initial_quantity?: number;
-}): Promise<WarehouseStock> {
+export async function createWarehouseItem(warehouseId: number, payload: NewProduct): Promise<WarehouseStock> {
   return jsonRequest<WarehouseStock>(`/warehouses/${warehouseId}/items`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function fetchWarehouseDestinationBranches(): Promise<Branch[]> {
+  return jsonRequest<Branch[]>("/warehouses/destinations/branches");
 }
 
 export async function receiveWarehouseStock(warehouseId: number, payload: {

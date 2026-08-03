@@ -5,7 +5,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User, Branch
+from app.models import User, Branch, Warehouse
 from app.auth import get_current_active_user, get_password_hash, get_password_rule_error
 from app.permissions import ensure_permission
 from app.utils.branch import get_owner_user_id
@@ -22,6 +22,8 @@ router = APIRouter(prefix="/employees", tags=["employees"])
 EMPLOYEE_ROLE_LOOKUP = {
     "sales": "Sales",
     "manager": "Manager",
+    "warehouse": "Warehouse",
+    "warehouse manager": "Warehouse",
 }
 
 
@@ -31,7 +33,7 @@ def _normalize_employee_role(role: str) -> str:
     if normalized:
         return normalized
 
-    allowed_roles = ", ".join(EMPLOYEE_ROLE_LOOKUP.values())
+    allowed_roles = ", ".join(dict.fromkeys(EMPLOYEE_ROLE_LOOKUP.values()))
     raise HTTPException(status_code=400, detail=f"Invalid employee role. Allowed roles: {allowed_roles}")
 
 
@@ -43,6 +45,7 @@ class EmployeeCreate(BaseModel):
     password: str
     role: str = "Sales"  # Default role for employees
     branch_id: Optional[int] = None
+    warehouse_id: Optional[int] = None
 
 
 class EmployeeResponse(BaseModel):
@@ -52,6 +55,7 @@ class EmployeeResponse(BaseModel):
     name: str
     role: str
     branch_id: Optional[int] = None
+    warehouse_id: Optional[int] = None
     is_active: bool
     created_at: Optional[datetime] = None
 
@@ -64,6 +68,7 @@ class EmployeeUpdate(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     branch_id: Optional[int] = None
+    warehouse_id: Optional[int] = None
     phone: Optional[str] = None
 
 
@@ -101,7 +106,18 @@ def create_employee(
     owner_user_id = get_owner_user_id(current_user)
 
     branch_id = employee_data.branch_id
-    if branch_id is None:
+    warehouse_id = employee_data.warehouse_id
+    if role == "Warehouse":
+        warehouse = db.query(Warehouse).filter(
+            Warehouse.id == warehouse_id,
+            Warehouse.owner_user_id == owner_user_id,
+            Warehouse.is_active.is_(True),
+        ).first()
+        if not warehouse:
+            raise HTTPException(status_code=400, detail="Select a valid active warehouse")
+        branch_id = None
+        warehouse_id = warehouse.id
+    elif branch_id is None:
         default_branch = (
             db.query(Branch)
             .filter(
@@ -129,6 +145,10 @@ def create_employee(
         )
         if not branch:
             raise HTTPException(status_code=400, detail="Invalid branch")
+        warehouse_id = None
+
+    if role != "Warehouse":
+        warehouse_id = None
 
     supabase_user_id: str | None = None
     if is_supabase_auth_sync_enabled():
@@ -151,6 +171,7 @@ def create_employee(
         role=role,
         created_by=current_user.id,
         branch_id=branch_id,
+        warehouse_id=warehouse_id,
         business_name=current_user.business_name,  # Inherit owner's business
         is_active=True,
     )
@@ -250,6 +271,22 @@ def update_employee(
         if not branch:
             raise HTTPException(status_code=400, detail="Invalid branch")
         employee.branch_id = branch.id
+        employee.warehouse_id = None
+    if employee_data.warehouse_id is not None:
+        owner_user_id = get_owner_user_id(current_user)
+        warehouse = db.query(Warehouse).filter(
+            Warehouse.id == employee_data.warehouse_id,
+            Warehouse.owner_user_id == owner_user_id,
+            Warehouse.is_active.is_(True),
+        ).first()
+        if not warehouse:
+            raise HTTPException(status_code=400, detail="Invalid warehouse")
+        employee.warehouse_id = warehouse.id
+        employee.branch_id = None
+    if employee.role == "Warehouse" and employee.warehouse_id is None:
+        raise HTTPException(status_code=400, detail="Warehouse users must be assigned to a warehouse")
+    if employee.role != "Warehouse" and employee.branch_id is None:
+        raise HTTPException(status_code=400, detail="Branch users must be assigned to a branch")
     if employee_data.phone is not None:
         if employee_data.phone.strip() == "":
             employee.phone = None

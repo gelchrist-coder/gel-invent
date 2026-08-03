@@ -4,7 +4,7 @@ import {
   createWarehouseItem,
   createWarehouse,
   createFulfillmentOrder,
-  fetchBranches,
+  fetchWarehouseDestinationBranches,
   fetchProducts,
   fetchWarehouseStock,
   fetchWarehouses,
@@ -14,7 +14,8 @@ import {
   updateWarehouse,
   updateFulfillmentOrderStatus,
 } from "../api";
-import { Branch, FulfillmentOrder, FulfillmentStatus, Product, Warehouse, WarehouseStock } from "../types";
+import ProductForm from "../components/ProductForm";
+import { Branch, FulfillmentOrder, FulfillmentStatus, NewProduct, Product, Warehouse, WarehouseStock } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
 const inputStyle = {
@@ -27,7 +28,10 @@ const inputStyle = {
 } as const;
 
 export default function Warehouses() {
-  const canManage = hasUserPermission("manage_warehouses", readStoredUser());
+  const currentUser = readStoredUser();
+  const canManage = hasUserPermission("manage_warehouses", currentUser);
+  const canViewBranchStock = hasUserPermission("view_inventory", currentUser) && hasUserPermission("view_catalog", currentUser);
+  const isWarehouseUser = currentUser?.role === "Warehouse";
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | null>(null);
   const [stock, setStock] = useState<WarehouseStock[]>([]);
@@ -39,12 +43,12 @@ export default function Warehouses() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [showAddProduct, setShowAddProduct] = useState(false);
   const [warehouseName, setWarehouseName] = useState("");
   const [warehouseAddress, setWarehouseAddress] = useState("");
-  const [warehouseProduct, setWarehouseProduct] = useState({ sku: "", name: "", unit: "pcs", category: "", costPrice: "", sellingPrice: "", initialQuantity: "" });
   const [receipt, setReceipt] = useState({ itemId: "", quantity: "", reference: "" });
   const [transfer, setTransfer] = useState({
-    direction: "branch_to_warehouse" as "branch_to_warehouse" | "warehouse_to_branch",
+    direction: (isWarehouseUser ? "warehouse_to_branch" : "branch_to_warehouse") as "branch_to_warehouse" | "warehouse_to_branch",
     productId: "",
     itemId: "",
     branchId: "",
@@ -73,13 +77,15 @@ export default function Warehouses() {
     try {
       const [warehouseRows, productRows, branchRows] = await Promise.all([
         fetchWarehouses(),
-        fetchProducts(),
-        fetchBranches(),
+        canViewBranchStock ? fetchProducts() : Promise.resolve([]),
+        fetchWarehouseDestinationBranches(),
       ]);
       setWarehouses(warehouseRows);
       setProducts(productRows);
       setBranches(branchRows);
-      const activeBranchId = localStorage.getItem("activeBranchId") || String(branchRows[0]?.id ?? "");
+      const activeBranchId = canViewBranchStock
+        ? localStorage.getItem("activeBranchId") || String(branchRows[0]?.id ?? "")
+        : String(branchRows[0]?.id ?? "");
       setTransfer((current) => current.branchId ? current : { ...current, branchId: activeBranchId });
       const nextId = selectedWarehouseId && warehouseRows.some((row) => row.id === selectedWarehouseId)
         ? selectedWarehouseId
@@ -92,7 +98,7 @@ export default function Warehouses() {
     } finally {
       setLoading(false);
     }
-  }, [loadStock, selectedWarehouseId]);
+  }, [canViewBranchStock, loadStock, selectedWarehouseId]);
 
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -121,21 +127,11 @@ export default function Warehouses() {
     } finally { setBusy(false); }
   };
 
-  const handleAddWarehouseProduct = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!selectedWarehouseId || !warehouseProduct.sku.trim() || !warehouseProduct.name.trim()) return;
+  const handleAddWarehouseProduct = async (payload: NewProduct) => {
+    if (!selectedWarehouseId) return;
     setBusy(true); setError(null); setMessage(null);
     try {
-      await createWarehouseItem(selectedWarehouseId, {
-        sku: warehouseProduct.sku.trim(),
-        name: warehouseProduct.name.trim(),
-        unit: warehouseProduct.unit.trim() || "pcs",
-        category: warehouseProduct.category.trim() || null,
-        cost_price: warehouseProduct.costPrice === "" ? null : Number(warehouseProduct.costPrice),
-        selling_price: warehouseProduct.sellingPrice === "" ? null : Number(warehouseProduct.sellingPrice),
-        initial_quantity: Number(warehouseProduct.initialQuantity || 0),
-      });
-      setWarehouseProduct({ sku: "", name: "", unit: "pcs", category: "", costPrice: "", sellingPrice: "", initialQuantity: "" });
+      await createWarehouseItem(selectedWarehouseId, payload);
       await load();
       setMessage("Product added to the warehouse.");
     } catch (cause) {
@@ -244,7 +240,7 @@ export default function Warehouses() {
           <h1 style={{ margin: 0, fontSize: 26 }}>Warehouses</h1>
           <p style={{ margin: "5px 0 0", color: "#64748b" }}>Receive stock centrally and move it to or from your branches.</p>
         </div>
-        {canManage ? <button className="button" onClick={() => setShowCreate((value) => !value)}>Add Warehouse</button> : null}
+        {canManage && !isWarehouseUser ? <button className="button" onClick={() => setShowCreate((value) => !value)}>Add Warehouse</button> : null}
       </div>
 
       {error ? <div style={{ padding: 12, borderRadius: 8, background: "#fef2f2", color: "#b91c1c" }}>{error}</div> : null}
@@ -280,24 +276,15 @@ export default function Warehouses() {
             <>
               <div className="card" style={{ padding: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                 <div><strong>{selectedWarehouse.name}</strong><div style={{ color: "#64748b", fontSize: 13 }}>{selectedWarehouse.address || "No address saved"}</div></div>
-                {canManage ? <button className="button secondary" onClick={() => void updateWarehouse(selectedWarehouse.id, { is_active: !selectedWarehouse.is_active }).then(load)}>{selectedWarehouse.is_active ? "Deactivate" : "Reactivate"}</button> : null}
+                {canManage && !isWarehouseUser ? <button className="button secondary" onClick={() => void updateWarehouse(selectedWarehouse.id, { is_active: !selectedWarehouse.is_active }).then(load)}>{selectedWarehouse.is_active ? "Deactivate" : "Reactivate"}</button> : null}
               </div>
 
               {canManage && selectedWarehouse.is_active ? (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
-                  <form className="card" onSubmit={handleAddWarehouseProduct} style={{ padding: 16, display: "grid", gap: 10 }}>
-                    <div><strong>Add product to warehouse</strong><div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>Create the product here first, with optional opening stock.</div></div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                      <input style={inputStyle} value={warehouseProduct.sku} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, sku: e.target.value })} placeholder="SKU" required />
-                      <input style={inputStyle} value={warehouseProduct.name} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, name: e.target.value })} placeholder="Product name" required />
-                      <input style={inputStyle} value={warehouseProduct.unit} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, unit: e.target.value })} placeholder="Unit (e.g. pcs)" required />
-                      <input style={inputStyle} value={warehouseProduct.category} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, category: e.target.value })} placeholder="Category (optional)" />
-                      <input style={inputStyle} type="number" min="0" step="0.01" value={warehouseProduct.costPrice} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, costPrice: e.target.value })} placeholder="Cost price" />
-                      <input style={inputStyle} type="number" min="0" step="0.01" value={warehouseProduct.sellingPrice} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, sellingPrice: e.target.value })} placeholder="Selling price" />
-                    </div>
-                    <input style={inputStyle} type="number" min="0" step="0.01" value={warehouseProduct.initialQuantity} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, initialQuantity: e.target.value })} placeholder="Opening quantity (optional)" />
-                    <button className="button" disabled={busy}>Add Warehouse Product</button>
-                  </form>
+                  <div className="card" style={{ padding: 16, display: "grid", gap: 10, alignContent: "start" }}>
+                    <div><strong>Add product to warehouse</strong><div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>Use the complete product flow for details, pricing, variants, units, and opening stock.</div></div>
+                    <button type="button" className="button" disabled={busy} onClick={() => setShowAddProduct(true)}>Open Product Form</button>
+                  </div>
 
                   <form className="card" onSubmit={handleReceipt} style={{ padding: 16, display: "grid", gap: 10 }}>
                     <div><strong>Receive stock</strong><div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>Increase stock for a product already listed in this warehouse.</div></div>
@@ -313,7 +300,7 @@ export default function Warehouses() {
                   <form className="card" onSubmit={handleTransfer} style={{ padding: 16, display: "grid", gap: 10 }}>
                     <strong>Transfer stock</strong>
                     <select style={inputStyle} value={transfer.direction} onChange={(e) => setTransfer({ ...transfer, direction: e.target.value as typeof transfer.direction })}>
-                      <option value="branch_to_warehouse">Branch → Warehouse</option>
+                      {canViewBranchStock ? <option value="branch_to_warehouse">Branch → Warehouse</option> : null}
                       <option value="warehouse_to_branch">Warehouse → Branch</option>
                     </select>
                     <select style={inputStyle} value={transfer.branchId} onChange={(e) => setTransfer({ ...transfer, branchId: e.target.value })} required disabled={transfer.direction === "branch_to_warehouse"}>
@@ -406,6 +393,19 @@ export default function Warehouses() {
         </>
       )}
       {activeWarehouses.length === 0 && warehouses.length > 0 ? <p style={{ color: "#92400e" }}>All warehouses are inactive.</p> : null}
+      {showAddProduct ? (
+        <div onClick={() => setShowAddProduct(false)} style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(15, 23, 42, 0.5)", display: "flex", justifyContent: "center", alignItems: "center", padding: 18 }}>
+          <div onClick={(event) => event.stopPropagation()} style={{ width: "min(880px, 100%)", maxHeight: "92vh", overflowY: "auto", background: "#fff", borderRadius: 18, padding: 20, boxShadow: "0 24px 60px rgba(15, 23, 42, 0.3)" }}>
+            <ProductForm
+              onCreate={handleAddWarehouseProduct}
+              onCancel={() => setShowAddProduct(false)}
+              userRole={currentUser?.role || "Warehouse"}
+              layoutMode="modal"
+              hideBranchField
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

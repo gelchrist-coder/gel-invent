@@ -85,6 +85,21 @@ def _ensure_warehouse_tables(conn) -> None:
     models.WarehouseStockMovement.__table__.create(bind=conn, checkfirst=True)
     models.FulfillmentOrder.__table__.create(bind=conn, checkfirst=True)
     models.FulfillmentOrderItem.__table__.create(bind=conn, checkfirst=True)
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id) ON DELETE SET NULL"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_warehouse_id ON users (warehouse_id)"))
+    warehouse_item_columns = {
+        "barcode": "VARCHAR(128)", "description": "VARCHAR(1024)",
+        "measurement_type": "VARCHAR(32) DEFAULT 'count'", "allows_fractional_sales": "BOOLEAN DEFAULT FALSE",
+        "quantity_step": "NUMERIC(10,2) DEFAULT 1", "variant_group": "VARCHAR(120)",
+        "variant_label": "VARCHAR(120)", "brand": "VARCHAR(100)", "size": "VARCHAR(64)",
+        "color": "VARCHAR(64)", "shade": "VARCHAR(64)", "pack_size": "INTEGER",
+        "supplier": "VARCHAR(255)", "expiry_date": "DATE", "pack_cost_price": "NUMERIC(10,2)",
+        "pack_selling_price": "NUMERIC(10,2)", "wholesale_price": "NUMERIC(10,2)",
+        "wholesale_min_quantity": "NUMERIC(10,2)", "image": "TEXT",
+        "variants_json": "JSONB DEFAULT '[]'::jsonb", "unit_conversions_json": "JSONB DEFAULT '[]'::jsonb",
+    }
+    for column_name, column_type in warehouse_item_columns.items():
+        conn.execute(text(f"ALTER TABLE warehouse_stock_items ADD COLUMN IF NOT EXISTS {column_name} {column_type}"))
     conn.execute(text(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_warehouses_owner_lower_name_unique "
         "ON warehouses (owner_user_id, lower(trim(name)))"
