@@ -74,6 +74,7 @@ class UserCreate(BaseModel):
     wants_collect_later: Optional[bool] = None
     has_warehouse: Optional[bool] = None
     warehouse_name: Optional[str] = None
+    uses_variants: Optional[bool] = None
     # Legacy input kept for compatibility during migration.
     categories: Optional[list[str]] = None
     branches: Optional[list[str]] = None  # Optional list of branch names
@@ -360,6 +361,7 @@ async def _parse_signup_request(request: Request) -> UserCreate:
             wants_collect_later=_parse_optional_bool(form.get("wants_collect_later")),
             has_warehouse=_parse_optional_bool(form.get("has_warehouse")),
             warehouse_name=str(form.get("warehouse_name") or "").strip() or None,
+            uses_variants=_parse_optional_bool(form.get("uses_variants")),
             categories=categories,
             branches=branches,
         )
@@ -481,6 +483,12 @@ async def signup(request: Request, db: Session = Depends(get_db)):
             registration_overrides["supply_tracking"] = bool(user_data.wants_collect_later)
         if user_data.has_warehouse is not None:
             registration_overrides["warehouse_management"] = bool(user_data.has_warehouse)
+        if user_data.uses_variants is not None:
+            uses_variants = bool(user_data.uses_variants)
+            registration_overrides["variants"] = uses_variants
+            if not uses_variants:
+                registration_overrides["size_color_variants"] = False
+                registration_overrides["brand_shade_attributes"] = False
 
         if user_data.has_warehouse:
             db.add(

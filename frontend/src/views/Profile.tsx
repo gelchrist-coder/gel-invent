@@ -88,6 +88,7 @@ export default function Profile() {
   // Feature switches asked at registration, changeable here. Saved as
   // capability overrides (merged with any others so nothing is lost).
   const [featureToggles, setFeatureToggles] = useState({
+    variants: false,
     wholesale_pricing: false,
     supply_tracking: false,
     warehouse_management: false,
@@ -213,6 +214,7 @@ export default function Profile() {
         });
         setTaxes(Array.isArray(settings.taxes) ? settings.taxes : []);
         setFeatureToggles({
+          variants: !!settings.effective_capabilities?.variants,
           wholesale_pricing: !!settings.effective_capabilities?.wholesale_pricing,
           supply_tracking: !!settings.effective_capabilities?.supply_tracking,
           warehouse_management: !!settings.effective_capabilities?.warehouse_management,
@@ -278,6 +280,20 @@ export default function Profile() {
       if (canManageSettings) {
         const selectedCurrency = nextBusinessInfo.currency;
         const previousCurrency = (systemSettings.currencyCode || "GHS").toUpperCase();
+        const nextCapabilityOverrides: Record<string, boolean> = {
+          ...existingCapabilityOverrides,
+          variants: featureToggles.variants,
+          wholesale_pricing: featureToggles.wholesale_pricing,
+          supply_tracking: featureToggles.supply_tracking,
+          warehouse_management: featureToggles.warehouse_management,
+        };
+        if (featureToggles.variants) {
+          delete nextCapabilityOverrides.size_color_variants;
+          delete nextCapabilityOverrides.brand_shade_attributes;
+        } else {
+          nextCapabilityOverrides.size_color_variants = false;
+          nextCapabilityOverrides.brand_shade_attributes = false;
+        }
 
         const payload = {
           low_stock_threshold: Number(systemSettings.lowStockThreshold) || 0,
@@ -289,12 +305,7 @@ export default function Profile() {
           taxes: taxes
             .map((t) => ({ name: t.name.trim(), rate: Number(t.rate) || 0, enabled: !!t.enabled }))
             .filter((t) => t.name.length > 0),
-          capability_overrides: {
-            ...existingCapabilityOverrides,
-            wholesale_pricing: featureToggles.wholesale_pricing,
-            supply_tracking: featureToggles.supply_tracking,
-            warehouse_management: featureToggles.warehouse_management,
-          },
+          capability_overrides: nextCapabilityOverrides,
         };
         const updated = await updateSystemSettings(payload);
 
@@ -323,6 +334,7 @@ export default function Profile() {
         });
         setTaxes(Array.isArray(updated.taxes) ? updated.taxes : []);
         setFeatureToggles({
+          variants: !!updated.effective_capabilities?.variants,
           wholesale_pricing: !!updated.effective_capabilities?.wholesale_pricing,
           supply_tracking: !!updated.effective_capabilities?.supply_tracking,
           warehouse_management: !!updated.effective_capabilities?.warehouse_management,
@@ -1295,6 +1307,35 @@ export default function Profile() {
               </p>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: 12,
+                    background: "#f9fafb",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 8,
+                    cursor: editing ? "pointer" : "default",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={featureToggles.variants}
+                    disabled={!editing}
+                    onChange={(e) => setFeatureToggles({ ...featureToggles, variants: e.target.checked })}
+                    style={{ width: 18, height: 18, marginTop: 1 }}
+                  />
+                  <span>
+                    <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                      Product variants
+                    </span>
+                    <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#6b7280" }}>
+                      Add options such as size, colour, shade, or type. Turn this off to keep product forms simple.
+                    </span>
+                  </span>
+                </label>
+
                 <label
                   style={{
                     display: "flex",

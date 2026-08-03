@@ -52,6 +52,7 @@ export default function SignUp({ onLogin }: SignUpProps) {
     wantsCollectLater: false,
     hasWarehouse: false,
     warehouseName: "Main Warehouse",
+    usesVariants: false,
   });
   const [branchInput, setBranchInput] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -145,6 +146,7 @@ export default function SignUp({ onLogin }: SignUpProps) {
         wants_collect_later: formData.wantsCollectLater,
         has_warehouse: formData.hasWarehouse,
         warehouse_name: formData.hasWarehouse ? formData.warehouseName.trim() || "Main Warehouse" : null,
+        uses_variants: formData.usesVariants,
         ...(captchaToken ? { recaptcha_token: captchaToken } : {}),
       };
 
@@ -328,6 +330,23 @@ export default function SignUp({ onLogin }: SignUpProps) {
                 </span>
                 <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#94a3b8" }}>
                   Products get a second (wholesale) price, and the POS lets you choose which price to charge.
+                </span>
+              </span>
+            </label>
+
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={formData.usesVariants}
+                onChange={(e) => setFormData({ ...formData, usesVariants: e.target.checked })}
+                style={{ width: 18, height: 18, marginTop: 1 }}
+              />
+              <span>
+                <span style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+                  My products have options such as size, colour, shade, or type
+                </span>
+                <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "#94a3b8" }}>
+                  Enables optional variants in product forms. Leave this off if each product only needs one stock record.
                 </span>
               </span>
             </label>
