@@ -21,9 +21,6 @@ import {
   WarehouseStock,
   FulfillmentOrder,
   FulfillmentStatus,
-  IntegrationApiKey,
-  WebhookDelivery,
-  WebhookEndpoint,
 } from "./types";
 
 function normalizeBaseUrl(url: string): string {
@@ -509,8 +506,7 @@ export type CapabilityKey =
   | "length_based_sales"
   | "wholesale_pricing"
   | "supply_tracking"
-  | "warehouse_management"
-  | "online_order_fulfillment";
+  | "warehouse_management";
 
 export async function fetchWarehouses(): Promise<Warehouse[]> {
   return jsonRequest<Warehouse[]>("/warehouses");
@@ -542,8 +538,24 @@ export async function fetchWarehouseStock(warehouseId: number): Promise<Warehous
   return jsonRequest<WarehouseStock[]>(`/warehouses/${warehouseId}/stock`);
 }
 
+export async function createWarehouseItem(warehouseId: number, payload: {
+  sku: string;
+  name: string;
+  unit: string;
+  category?: string | null;
+  cost_price?: number | null;
+  selling_price?: number | null;
+  initial_quantity?: number;
+}): Promise<WarehouseStock> {
+  return jsonRequest<WarehouseStock>(`/warehouses/${warehouseId}/items`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function receiveWarehouseStock(warehouseId: number, payload: {
-  product_id: number;
+  product_id?: number;
+  item_id?: number;
   quantity: number;
   reference?: string | null;
   batch_number?: string | null;
@@ -604,44 +616,6 @@ export async function updateFulfillmentOrderStatus(
   });
 }
 
-export async function fetchIntegrationApiKeys(): Promise<IntegrationApiKey[]> {
-  return jsonRequest<IntegrationApiKey[]>("/integrations/api-keys");
-}
-
-export async function createIntegrationApiKey(payload: { name: string; scopes: string[] }): Promise<IntegrationApiKey> {
-  return jsonRequest<IntegrationApiKey>("/integrations/api-keys", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function revokeIntegrationApiKey(keyId: number): Promise<void> {
-  await jsonRequest(`/integrations/api-keys/${keyId}`, { method: "DELETE" });
-}
-
-export async function fetchWebhookEndpoints(): Promise<WebhookEndpoint[]> {
-  return jsonRequest<WebhookEndpoint[]>("/integrations/webhooks");
-}
-
-export async function createWebhookEndpoint(payload: { name: string; url: string; events: string[] }): Promise<WebhookEndpoint> {
-  return jsonRequest<WebhookEndpoint>("/integrations/webhooks", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function deactivateWebhookEndpoint(endpointId: number): Promise<void> {
-  await jsonRequest(`/integrations/webhooks/${endpointId}`, { method: "DELETE" });
-}
-
-export async function fetchWebhookDeliveries(): Promise<WebhookDelivery[]> {
-  return jsonRequest<WebhookDelivery[]>("/integrations/webhook-deliveries");
-}
-
-export async function retryWebhookDelivery(deliveryId: number): Promise<void> {
-  await jsonRequest(`/integrations/webhook-deliveries/${deliveryId}/retry`, { method: "POST" });
-}
-
 export type CapabilityMap = Record<CapabilityKey, boolean>;
 export type CapabilityOverrides = Partial<CapabilityMap>;
 
@@ -657,7 +631,6 @@ export const DEFAULT_EFFECTIVE_CAPABILITIES: CapabilityMap = {
   wholesale_pricing: false,
   supply_tracking: false,
   warehouse_management: false,
-  online_order_fulfillment: false,
 };
 
 export type SystemSettingsUpdate = {

@@ -1,28 +1,20 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
-  buildApiUrl,
-  createIntegrationApiKey,
+  createWarehouseItem,
   createWarehouse,
-  createWebhookEndpoint,
-  deactivateWebhookEndpoint,
   createFulfillmentOrder,
   fetchBranches,
   fetchProducts,
   fetchWarehouseStock,
   fetchWarehouses,
   fetchFulfillmentOrders,
-  fetchIntegrationApiKeys,
-  fetchWebhookDeliveries,
-  fetchWebhookEndpoints,
   receiveWarehouseStock,
-  retryWebhookDelivery,
-  revokeIntegrationApiKey,
   transferWarehouseStock,
   updateWarehouse,
   updateFulfillmentOrderStatus,
 } from "../api";
-import { Branch, FulfillmentOrder, FulfillmentStatus, IntegrationApiKey, Product, Warehouse, WarehouseStock, WebhookDelivery, WebhookEndpoint } from "../types";
+import { Branch, FulfillmentOrder, FulfillmentStatus, Product, Warehouse, WarehouseStock } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
 const inputStyle = {
@@ -36,7 +28,6 @@ const inputStyle = {
 
 export default function Warehouses() {
   const canManage = hasUserPermission("manage_warehouses", readStoredUser());
-  const canManageIntegrations = hasUserPermission("manage_settings", readStoredUser());
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | null>(null);
   const [stock, setStock] = useState<WarehouseStock[]>([]);
@@ -50,7 +41,8 @@ export default function Warehouses() {
   const [showCreate, setShowCreate] = useState(false);
   const [warehouseName, setWarehouseName] = useState("");
   const [warehouseAddress, setWarehouseAddress] = useState("");
-  const [receipt, setReceipt] = useState({ productId: "", quantity: "", reference: "" });
+  const [warehouseProduct, setWarehouseProduct] = useState({ sku: "", name: "", unit: "pcs", category: "", costPrice: "", sellingPrice: "", initialQuantity: "" });
+  const [receipt, setReceipt] = useState({ itemId: "", quantity: "", reference: "" });
   const [transfer, setTransfer] = useState({
     direction: "branch_to_warehouse" as "branch_to_warehouse" | "warehouse_to_branch",
     productId: "",
@@ -62,12 +54,6 @@ export default function Warehouses() {
   const [orderDraft, setOrderDraft] = useState({ customerName: "", phone: "", email: "", address: "", externalId: "" });
   const [lineDraft, setLineDraft] = useState({ itemId: "", quantity: "" });
   const [orderLines, setOrderLines] = useState<Array<{ itemId: number; quantity: number }>>([]);
-  const [apiKeys, setApiKeys] = useState<IntegrationApiKey[]>([]);
-  const [webhooks, setWebhooks] = useState<WebhookEndpoint[]>([]);
-  const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
-  const [revealedSecret, setRevealedSecret] = useState<{ label: string; value: string } | null>(null);
-  const [keyName, setKeyName] = useState("Website");
-  const [webhookDraft, setWebhookDraft] = useState({ name: "Website", url: "" });
 
   const selectedWarehouse = warehouses.find((warehouse) => warehouse.id === selectedWarehouseId) ?? null;
   const activeWarehouses = useMemo(() => warehouses.filter((warehouse) => warehouse.is_active), [warehouses]);
@@ -110,20 +96,6 @@ export default function Warehouses() {
 
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadIntegrations = useCallback(async () => {
-    if (!canManageIntegrations) return;
-    try {
-      const [keyRows, webhookRows, deliveryRows] = await Promise.all([
-        fetchIntegrationApiKeys(), fetchWebhookEndpoints(), fetchWebhookDeliveries(),
-      ]);
-      setApiKeys(keyRows); setWebhooks(webhookRows); setDeliveries(deliveryRows);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load website integrations");
-    }
-  }, [canManageIntegrations]);
-
-  useEffect(() => { void loadIntegrations(); }, [loadIntegrations]);
-
   const selectWarehouse = async (warehouseId: number) => {
     setSelectedWarehouseId(warehouseId);
     setError(null);
@@ -149,17 +121,39 @@ export default function Warehouses() {
     } finally { setBusy(false); }
   };
 
+  const handleAddWarehouseProduct = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedWarehouseId || !warehouseProduct.sku.trim() || !warehouseProduct.name.trim()) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      await createWarehouseItem(selectedWarehouseId, {
+        sku: warehouseProduct.sku.trim(),
+        name: warehouseProduct.name.trim(),
+        unit: warehouseProduct.unit.trim() || "pcs",
+        category: warehouseProduct.category.trim() || null,
+        cost_price: warehouseProduct.costPrice === "" ? null : Number(warehouseProduct.costPrice),
+        selling_price: warehouseProduct.sellingPrice === "" ? null : Number(warehouseProduct.sellingPrice),
+        initial_quantity: Number(warehouseProduct.initialQuantity || 0),
+      });
+      setWarehouseProduct({ sku: "", name: "", unit: "pcs", category: "", costPrice: "", sellingPrice: "", initialQuantity: "" });
+      await load();
+      setMessage("Product added to the warehouse.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not add warehouse product");
+    } finally { setBusy(false); }
+  };
+
   const handleReceipt = async (event: FormEvent) => {
     event.preventDefault();
-    if (!selectedWarehouseId || !receipt.productId || Number(receipt.quantity) <= 0) return;
+    if (!selectedWarehouseId || !receipt.itemId || Number(receipt.quantity) <= 0) return;
     setBusy(true); setError(null); setMessage(null);
     try {
       await receiveWarehouseStock(selectedWarehouseId, {
-        product_id: Number(receipt.productId),
+        item_id: Number(receipt.itemId),
         quantity: Number(receipt.quantity),
         reference: receipt.reference.trim() || null,
       });
-      setReceipt({ productId: "", quantity: "", reference: "" });
+      setReceipt({ itemId: "", quantity: "", reference: "" });
       await load();
       setMessage("Stock received into the warehouse.");
     } catch (cause) {
@@ -241,32 +235,6 @@ export default function Warehouses() {
     } finally { setBusy(false); }
   };
 
-  const handleCreateApiKey = async () => {
-    if (!keyName.trim()) return;
-    setBusy(true); setError(null);
-    try {
-      const created = await createIntegrationApiKey({ name: keyName.trim(), scopes: ["inventory:read", "orders:read", "orders:write"] });
-      if (created.secret) setRevealedSecret({ label: "Website API key — copy it now; it will not be shown again", value: created.secret });
-      await loadIntegrations();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create API key"); }
-    finally { setBusy(false); }
-  };
-
-  const handleCreateWebhook = async () => {
-    if (!webhookDraft.name.trim() || !webhookDraft.url.trim()) return;
-    setBusy(true); setError(null);
-    try {
-      const created = await createWebhookEndpoint({
-        name: webhookDraft.name.trim(), url: webhookDraft.url.trim(),
-        events: ["fulfillment.order.created", "fulfillment.order.picking", "fulfillment.order.packed", "fulfillment.order.dispatched", "fulfillment.order.delivered", "fulfillment.order.cancelled"],
-      });
-      if (created.signing_secret) setRevealedSecret({ label: "Webhook signing secret", value: created.signing_secret });
-      setWebhookDraft({ ...webhookDraft, url: "" });
-      await loadIntegrations();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create webhook"); }
-    finally { setBusy(false); }
-  };
-
   if (loading) return <div className="card" style={{ margin: 16, padding: 20 }}>Loading warehouses...</div>;
 
   return (
@@ -317,11 +285,25 @@ export default function Warehouses() {
 
               {canManage && selectedWarehouse.is_active ? (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+                  <form className="card" onSubmit={handleAddWarehouseProduct} style={{ padding: 16, display: "grid", gap: 10 }}>
+                    <div><strong>Add product to warehouse</strong><div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>Create the product here first, with optional opening stock.</div></div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <input style={inputStyle} value={warehouseProduct.sku} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, sku: e.target.value })} placeholder="SKU" required />
+                      <input style={inputStyle} value={warehouseProduct.name} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, name: e.target.value })} placeholder="Product name" required />
+                      <input style={inputStyle} value={warehouseProduct.unit} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, unit: e.target.value })} placeholder="Unit (e.g. pcs)" required />
+                      <input style={inputStyle} value={warehouseProduct.category} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, category: e.target.value })} placeholder="Category (optional)" />
+                      <input style={inputStyle} type="number" min="0" step="0.01" value={warehouseProduct.costPrice} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, costPrice: e.target.value })} placeholder="Cost price" />
+                      <input style={inputStyle} type="number" min="0" step="0.01" value={warehouseProduct.sellingPrice} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, sellingPrice: e.target.value })} placeholder="Selling price" />
+                    </div>
+                    <input style={inputStyle} type="number" min="0" step="0.01" value={warehouseProduct.initialQuantity} onChange={(e) => setWarehouseProduct({ ...warehouseProduct, initialQuantity: e.target.value })} placeholder="Opening quantity (optional)" />
+                    <button className="button" disabled={busy}>Add Warehouse Product</button>
+                  </form>
+
                   <form className="card" onSubmit={handleReceipt} style={{ padding: 16, display: "grid", gap: 10 }}>
-                    <strong>Receive directly into warehouse</strong>
-                    <select style={inputStyle} value={receipt.productId} onChange={(e) => setReceipt({ ...receipt, productId: e.target.value })} required>
-                      <option value="">Choose product</option>
-                      {products.map((product) => <option key={product.id} value={product.id}>{product.name} ({product.sku})</option>)}
+                    <div><strong>Receive stock</strong><div style={{ marginTop: 3, fontSize: 12, color: "#64748b" }}>Increase stock for a product already listed in this warehouse.</div></div>
+                    <select style={inputStyle} value={receipt.itemId} onChange={(e) => setReceipt({ ...receipt, itemId: e.target.value })} required>
+                      <option value="">Choose warehouse product</option>
+                      {stock.map((item) => <option key={item.item_id} value={item.item_id}>{item.name} ({item.sku})</option>)}
                     </select>
                     <input style={inputStyle} type="number" min="0.01" step="0.01" value={receipt.quantity} onChange={(e) => setReceipt({ ...receipt, quantity: e.target.value })} placeholder="Quantity" required />
                     <input style={inputStyle} value={receipt.reference} onChange={(e) => setReceipt({ ...receipt, reference: e.target.value })} placeholder="Supplier reference (optional)" />
@@ -365,7 +347,7 @@ export default function Warehouses() {
                     <input style={inputStyle} value={orderDraft.customerName} onChange={(e) => setOrderDraft({ ...orderDraft, customerName: e.target.value })} placeholder="Customer name" required />
                     <input style={inputStyle} value={orderDraft.phone} onChange={(e) => setOrderDraft({ ...orderDraft, phone: e.target.value })} placeholder="Phone" />
                     <input style={inputStyle} type="email" value={orderDraft.email} onChange={(e) => setOrderDraft({ ...orderDraft, email: e.target.value })} placeholder="Email" />
-                    <input style={inputStyle} value={orderDraft.externalId} onChange={(e) => setOrderDraft({ ...orderDraft, externalId: e.target.value })} placeholder="Website order ID (optional)" />
+                    <input style={inputStyle} value={orderDraft.externalId} onChange={(e) => setOrderDraft({ ...orderDraft, externalId: e.target.value })} placeholder="Order reference (optional)" />
                     <input style={inputStyle} value={orderDraft.address} onChange={(e) => setOrderDraft({ ...orderDraft, address: e.target.value })} placeholder="Delivery address" />
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) 130px auto", gap: 8 }}>
@@ -423,73 +405,6 @@ export default function Warehouses() {
           ) : null}
         </>
       )}
-      {canManageIntegrations ? (
-        <div className="card" style={{ padding: 18, display: "grid", gap: 18 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 20 }}>Website integration</h2>
-            <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>
-              Connect an ecommerce website to warehouse availability and fulfilment orders. API base: <code>{buildApiUrl("/integrations/v1")}</code>
-            </p>
-          </div>
-
-          {revealedSecret ? (
-            <div style={{ padding: 13, border: "1px solid #fbbf24", background: "#fffbeb", borderRadius: 9 }}>
-              <strong style={{ display: "block", color: "#92400e", marginBottom: 7 }}>{revealedSecret.label}</strong>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <code style={{ flex: 1, minWidth: 220, overflowWrap: "anywhere" }}>{revealedSecret.value}</code>
-                <button type="button" className="button secondary" onClick={() => void navigator.clipboard.writeText(revealedSecret.value)}>Copy</button>
-                <button type="button" className="button secondary" onClick={() => setRevealedSecret(null)}>Done</button>
-              </div>
-            </div>
-          ) : null}
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))", gap: 16 }}>
-            <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 14, display: "grid", gap: 10 }}>
-              <strong>Website API keys</strong>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input style={inputStyle} value={keyName} onChange={(e) => setKeyName(e.target.value)} placeholder="Key name" />
-                <button type="button" className="button" disabled={busy} onClick={() => void handleCreateApiKey()}>Create Key</button>
-              </div>
-              <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>New keys receive inventory read and order read/write scopes. Send the key in the <code>X-API-Key</code> header.</p>
-              {apiKeys.map((key) => (
-                <div key={key.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", paddingTop: 9, borderTop: "1px solid #e2e8f0" }}>
-                  <div><strong style={{ fontSize: 13 }}>{key.name}</strong><div style={{ fontSize: 12, color: "#64748b" }}>{key.key_prefix}… · {key.is_active ? "Active" : "Revoked"}</div></div>
-                  {key.is_active ? <button type="button" className="button secondary" onClick={() => void revokeIntegrationApiKey(key.id).then(loadIntegrations)}>Revoke</button> : null}
-                </div>
-              ))}
-            </div>
-
-            <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 14, display: "grid", gap: 10 }}>
-              <strong>Signed webhooks</strong>
-              <input style={inputStyle} value={webhookDraft.name} onChange={(e) => setWebhookDraft({ ...webhookDraft, name: e.target.value })} placeholder="Webhook name" />
-              <input style={inputStyle} type="url" value={webhookDraft.url} onChange={(e) => setWebhookDraft({ ...webhookDraft, url: e.target.value })} placeholder="https://your-site.com/webhooks/gel-invent" />
-              <button type="button" className="button" disabled={busy} onClick={() => void handleCreateWebhook()}>Add Webhook</button>
-              <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>All fulfilment lifecycle events are sent with an <code>X-GelInvent-Signature</code> HMAC header.</p>
-              {webhooks.map((webhook) => (
-                <div key={webhook.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", paddingTop: 9, borderTop: "1px solid #e2e8f0" }}>
-                  <div style={{ minWidth: 0 }}><strong style={{ fontSize: 13 }}>{webhook.name}</strong><div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis" }}>{webhook.url} · {webhook.is_active ? "Active" : "Disabled"}</div></div>
-                  {webhook.is_active ? <button type="button" className="button secondary" onClick={() => void deactivateWebhookEndpoint(webhook.id).then(loadIntegrations)}>Disable</button> : null}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 14 }}>
-            <strong>Recent webhook deliveries</strong>
-            <div style={{ display: "grid", gap: 7, marginTop: 10 }}>
-              {deliveries.slice(0, 20).map((delivery) => (
-                <div key={delivery.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: 9, background: "#f8fafc", borderRadius: 8, fontSize: 12 }}>
-                  <span style={{ fontWeight: 700, color: delivery.status === "delivered" ? "#047857" : delivery.status === "failed" ? "#b91c1c" : "#92400e" }}>{delivery.status}</span>
-                  <span style={{ flex: 1 }}>{delivery.event_type} · attempt {delivery.attempts}</span>
-                  {delivery.response_status ? <span>HTTP {delivery.response_status}</span> : null}
-                  {delivery.status === "failed" ? <button type="button" className="button secondary" onClick={() => void retryWebhookDelivery(delivery.id).then(loadIntegrations)}>Retry</button> : null}
-                </div>
-              ))}
-              {deliveries.length === 0 ? <span style={{ color: "#64748b", fontSize: 13 }}>No webhook deliveries yet.</span> : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
       {activeWarehouses.length === 0 && warehouses.length > 0 ? <p style={{ color: "#92400e" }}>All warehouses are inactive.</p> : null}
     </div>
   );

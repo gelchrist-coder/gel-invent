@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -15,7 +15,6 @@ from app.deps import get_db
 from app.permissions import ensure_permission
 from app.utils.branch import get_active_branch_id, get_owner_user_id
 from app.utils.tenant import get_tenant_user_ids
-from app.utils.webhooks import deliver_webhook, enqueue_webhook_event
 
 router = APIRouter(prefix="/warehouses", tags=["warehouses"])
 
@@ -60,6 +59,16 @@ class WarehouseStockRead(BaseModel):
     quantity: Decimal
     reserved_quantity: Decimal = Decimal("0")
     available_quantity: Decimal = Decimal("0")
+
+
+class WarehouseItemCreate(BaseModel):
+    sku: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=255)
+    unit: str = Field(default="pcs", min_length=1, max_length=50)
+    category: str | None = Field(default=None, max_length=120)
+    cost_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    selling_price: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    initial_quantity: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2)
 
 
 class FulfillmentOrderItemCreate(BaseModel):
@@ -115,7 +124,8 @@ class FulfillmentOrderRead(BaseModel):
 
 
 class WarehouseReceiptCreate(BaseModel):
-    product_id: int = Field(gt=0)
+    product_id: int | None = Field(default=None, gt=0)
+    item_id: int | None = Field(default=None, gt=0)
     quantity: Decimal = Field(gt=0, decimal_places=2)
     reference: str | None = Field(default=None, max_length=100)
     batch_number: str | None = Field(default=None, max_length=100)
@@ -210,30 +220,6 @@ def _serialize_order(order: models.FulfillmentOrder) -> FulfillmentOrderRead:
         cancelled_at=order.cancelled_at,
         created_at=order.created_at,
     )
-
-
-def _schedule_order_webhooks(
-    *,
-    db: Session,
-    background_tasks: BackgroundTasks,
-    owner_user_id: int,
-    event_type: str,
-    order: FulfillmentOrderRead,
-) -> None:
-    """Webhooks are best-effort and must never roll back a completed stock operation."""
-    try:
-        delivery_ids = enqueue_webhook_event(
-            db,
-            owner_user_id=owner_user_id,
-            event_type=event_type,
-            data=order.model_dump(mode="json"),
-        )
-    except Exception as exc:
-        db.rollback()
-        print(f"Webhook enqueue failed for {event_type}: {type(exc).__name__}: {exc}")
-        return
-    for delivery_id in delivery_ids:
-        background_tasks.add_task(deliver_webhook, delivery_id)
 
 
 def _get_or_create_item(
@@ -459,6 +445,62 @@ def list_warehouse_stock(
     return result
 
 
+@router.post("/{warehouse_id}/items", response_model=WarehouseStockRead, status_code=201)
+def create_warehouse_item(
+    warehouse_id: int,
+    payload: WarehouseItemCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+):
+    ensure_permission(current_user, "manage_warehouses")
+    owner_user_id = get_owner_user_id(current_user)
+    _warehouse_or_404(db, owner_user_id, warehouse_id, active_only=True)
+    sku = payload.sku.strip()
+    name = payload.name.strip()
+    unit = payload.unit.strip()
+    if not sku or not name or not unit:
+        raise HTTPException(status_code=422, detail="SKU, product name, and unit cannot be blank")
+    duplicate = db.scalar(select(models.WarehouseStockItem.id).where(
+        models.WarehouseStockItem.owner_user_id == owner_user_id,
+        models.WarehouseStockItem.warehouse_id == warehouse_id,
+        func.lower(func.trim(models.WarehouseStockItem.sku)) == sku.lower(),
+    ))
+    if duplicate:
+        raise HTTPException(status_code=409, detail="A product with this SKU already exists in this warehouse")
+    item = models.WarehouseStockItem(
+        owner_user_id=owner_user_id,
+        warehouse_id=warehouse_id,
+        source_product_id=None,
+        sku=sku,
+        name=name,
+        unit=unit,
+        category=_clean(payload.category),
+        cost_price=payload.cost_price,
+        selling_price=payload.selling_price,
+    )
+    db.add(item)
+    db.flush()
+    if payload.initial_quantity > 0:
+        db.add(models.WarehouseStockMovement(
+            owner_user_id=owner_user_id,
+            warehouse_id=warehouse_id,
+            item_id=item.id,
+            actor_user_id=current_user.id,
+            change=payload.initial_quantity,
+            reason="Opening warehouse stock",
+            unit_cost_price=payload.cost_price,
+        ))
+    db.commit()
+    db.refresh(item)
+    quantity = _stock_quantity(db, warehouse_id, item.id)
+    return WarehouseStockRead(
+        item_id=item.id, warehouse_id=item.warehouse_id, source_product_id=None,
+        sku=item.sku, name=item.name, unit=item.unit, category=item.category,
+        cost_price=item.cost_price, selling_price=item.selling_price,
+        quantity=quantity, reserved_quantity=Decimal("0"), available_quantity=quantity,
+    )
+
+
 @router.post("/{warehouse_id}/receipts", response_model=WarehouseStockRead)
 def receive_warehouse_stock(
     warehouse_id: int,
@@ -469,20 +511,33 @@ def receive_warehouse_stock(
     ensure_permission(current_user, "manage_warehouses")
     owner_user_id = get_owner_user_id(current_user)
     _warehouse_or_404(db, owner_user_id, warehouse_id, active_only=True)
-    tenant_user_ids = get_tenant_user_ids(current_user, db)
-    product = db.scalar(select(models.Product).where(
-        models.Product.id == payload.product_id,
-        models.Product.user_id.in_(tenant_user_ids),
-    ))
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    item = _get_or_create_item(db, owner_user_id=owner_user_id, warehouse_id=warehouse_id, product=product)
+    if bool(payload.product_id) == bool(payload.item_id):
+        raise HTTPException(status_code=422, detail="Provide either item_id or product_id")
+    product = None
+    if payload.item_id:
+        item = db.scalar(select(models.WarehouseStockItem).where(
+            models.WarehouseStockItem.id == payload.item_id,
+            models.WarehouseStockItem.owner_user_id == owner_user_id,
+            models.WarehouseStockItem.warehouse_id == warehouse_id,
+        ))
+        if not item:
+            raise HTTPException(status_code=404, detail="Warehouse product not found")
+    else:
+        tenant_user_ids = get_tenant_user_ids(current_user, db)
+        product = db.scalar(select(models.Product).where(
+            models.Product.id == payload.product_id,
+            models.Product.user_id.in_(tenant_user_ids),
+        ))
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        item = _get_or_create_item(db, owner_user_id=owner_user_id, warehouse_id=warehouse_id, product=product)
     reason = "Warehouse receipt" + (f": {payload.notes.strip()}" if payload.notes and payload.notes.strip() else "")
     db.add(models.WarehouseStockMovement(
         owner_user_id=owner_user_id, warehouse_id=warehouse_id, item_id=item.id,
         actor_user_id=current_user.id, change=payload.quantity, reason=reason,
         reference=_clean(payload.reference), batch_number=_clean(payload.batch_number),
-        expiry_date=payload.expiry_date, unit_cost_price=payload.unit_cost_price or product.cost_price,
+        expiry_date=payload.expiry_date,
+        unit_cost_price=payload.unit_cost_price if payload.unit_cost_price is not None else item.cost_price,
     ))
     db.commit()
     db.refresh(item)
@@ -520,7 +575,6 @@ def list_fulfillment_orders(
 def create_fulfillment_order(
     warehouse_id: int,
     payload: FulfillmentOrderCreate,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
@@ -600,10 +654,6 @@ def create_fulfillment_order(
     db.commit()
     db.refresh(order)
     result = _serialize_order(order)
-    _schedule_order_webhooks(
-        db=db, background_tasks=background_tasks, owner_user_id=owner_user_id,
-        event_type="fulfillment.order.created", order=result,
-    )
     return result
 
 
@@ -612,7 +662,6 @@ def update_fulfillment_status(
     warehouse_id: int,
     order_id: int,
     payload: FulfillmentStatusUpdate,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
 ):
@@ -680,10 +729,6 @@ def update_fulfillment_status(
     db.commit()
     db.refresh(order)
     result = _serialize_order(order)
-    _schedule_order_webhooks(
-        db=db, background_tasks=background_tasks, owner_user_id=owner_user_id,
-        event_type=f"fulfillment.order.{target}", order=result,
-    )
     return result
 
 
