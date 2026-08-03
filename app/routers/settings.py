@@ -389,7 +389,9 @@ def convert_system_currency(
             for row in sales:
                 row.unit_price = _to_money(row.unit_price, rate)
                 row.total_price = _to_money(row.total_price, rate)
+                row.discount_amount = _to_money(row.discount_amount, rate)
                 row.amount_paid = _to_money(row.amount_paid, rate)
+                row.currency_code = target_currency
 
             creditors = db.query(Creditor).filter(Creditor.user_id.in_(tenant_user_ids)).all()
             for row in creditors:

@@ -92,6 +92,9 @@ def ensure_critical_schema() -> None:
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS permission_overrides JSONB"))
+                conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10,2) DEFAULT 0"))
+                conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS tax_snapshot JSONB"))
+                conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
                 conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
 
             _critical_schema_ready = True

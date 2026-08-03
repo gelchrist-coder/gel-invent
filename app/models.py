@@ -432,6 +432,11 @@ class Sale(Base):
     pack_quantity: Mapped[int | None] = mapped_column(Integer, default=None)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     total_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    # Receipt accounting snapshots. total_price is the final tax-inclusive
+    # amount after this line's discount.
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    tax_snapshot: Mapped[list | None] = mapped_column(JSON, default=None)
+    currency_code: Mapped[str] = mapped_column(String(3), default="GHS")
     customer_name: Mapped[str | None] = mapped_column(String(255), default=None)
     customer_phone: Mapped[str | None] = mapped_column(String(40), default=None)
     payment_method: Mapped[str] = mapped_column(String(50), default="cash")

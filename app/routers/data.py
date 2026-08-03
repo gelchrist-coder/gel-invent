@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from io import BytesIO
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -276,6 +277,9 @@ def export_data(
                 "pack_quantity": getattr(s, "pack_quantity", None),
                 "unit_price": _serialize_decimal(s.unit_price),
                 "total_price": _serialize_decimal(s.total_price),
+                "discount_amount": _serialize_decimal(getattr(s, "discount_amount", None)),
+                "tax_snapshot": getattr(s, "tax_snapshot", None),
+                "currency_code": getattr(s, "currency_code", None),
                 "customer_name": s.customer_name,
                 "payment_method": s.payment_method,
                 "amount_paid": _serialize_decimal(s.amount_paid),
@@ -487,7 +491,10 @@ def export_data_xlsx(
         "Pack Quantity",
         "Quantity",
         "Unit Price",
+        "Discount",
         "Total Price",
+        "Currency",
+        "Tax Snapshot",
         "Customer",
         "Payment Method",
         "Amount Paid",
@@ -514,7 +521,12 @@ def export_data_xlsx(
                 getattr(s, "pack_quantity", None),
                 _serialize_num(s.quantity),
                 _serialize_num(s.unit_price),
+                _serialize_num(getattr(s, "discount_amount", None)),
                 _serialize_num(s.total_price),
+                getattr(s, "currency_code", None),
+                json.dumps(getattr(s, "tax_snapshot", None), ensure_ascii=False)
+                if getattr(s, "tax_snapshot", None) is not None
+                else None,
                 s.customer_name,
                 s.payment_method,
                 _serialize_num(s.amount_paid),
@@ -937,6 +949,10 @@ def import_data(
         new_variant_id = variant_id_map.get(legacy_variant_id) if legacy_variant_id is not None else None
 
         pack_quantity = _as_int(s.get("pack_quantity"))
+        tax_snapshot = s.get("tax_snapshot")
+        if not isinstance(tax_snapshot, list):
+            tax_snapshot = None
+        currency_code = str(s.get("currency_code") or "GHS").strip().upper()[:3] or "GHS"
 
         sale = models.Sale(
             user_id=current_user.id,
@@ -948,6 +964,9 @@ def import_data(
             pack_quantity=pack_quantity,
             unit_price=_as_decimal(s.get("unit_price", 0)),
             total_price=_as_decimal(s.get("total_price", 0)),
+            discount_amount=_as_decimal(s.get("discount_amount", 0)),
+            tax_snapshot=tax_snapshot,
+            currency_code=currency_code,
             customer_name=s.get("customer_name"),
             payment_method=str(s.get("payment_method") or "cash"),
             amount_paid=_as_decimal(s.get("amount_paid")) if s.get("amount_paid") is not None else None,

@@ -41,9 +41,11 @@ type ReceiptData = {
   cashier: string;
   customer?: string | null;
   lines: ReceiptLineItem[];
+  currencyCode: string;
   subtotal: number;
   discount?: number;
-  // Tax-inclusive breakdown: each active tax's portion of the (unchanged) total.
+  amountBeforeTax: number;
+  // Tax-inclusive breakdown shown before the unchanged final total.
   taxLines?: ReceiptTaxLine[];
   total: number;
   paymentMethod: string;
@@ -54,20 +56,46 @@ type ReceiptData = {
   receivedVia?: string | null;
 };
 
-// Prices are tax-inclusive: split each active tax out of the total so the total
-// itself never changes. net = total / (1 + sumRates); tax_i = net * rate_i.
-function computeInclusiveTaxLines(
+type ReceiptTotals = {
+  subtotal: number;
+  discount: number;
+  amountBeforeTax: number;
+  taxLines: ReceiptTaxLine[];
+  total: number;
+};
+
+function roundReceiptMoney(value: number): number {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+// Prices remain tax-inclusive. Work backwards from the charged total and fold
+// any rounding remainder into the final tax line so the receipt always balances.
+function computeInclusiveReceiptTotals(
+  subtotal: number,
+  discount: number,
   total: number,
   taxes: { name: string; rate: number; enabled: boolean }[],
-): ReceiptTaxLine[] {
+): ReceiptTotals {
+  const normalizedTotal = roundReceiptMoney(Math.max(0, total));
+  const normalizedDiscount = roundReceiptMoney(Math.max(0, discount));
+  const normalizedSubtotal = roundReceiptMoney(Math.max(normalizedTotal + normalizedDiscount, subtotal));
   const active = taxes.filter((t) => t.enabled && Number(t.rate) > 0);
-  if (active.length === 0 || !(total > 0)) return [];
+  if (active.length === 0 || !(normalizedTotal > 0)) {
+    return { subtotal: normalizedSubtotal, discount: normalizedDiscount, amountBeforeTax: normalizedTotal, taxLines: [], total: normalizedTotal };
+  }
   const sumRates = active.reduce((sum, t) => sum + Number(t.rate), 0);
-  const net = total / (1 + sumRates / 100);
-  return active.map((t) => ({
-    label: `${t.name} (${Number(t.rate)}%)`,
-    amount: net * (Number(t.rate) / 100),
-  }));
+  const rawNet = normalizedTotal / (1 + sumRates / 100);
+  const amountBeforeTax = roundReceiptMoney(rawNet);
+  const taxTotal = roundReceiptMoney(normalizedTotal - amountBeforeTax);
+  let allocatedTax = 0;
+  const taxLines = active.map((tax, index) => {
+    const amount = index === active.length - 1
+      ? roundReceiptMoney(taxTotal - allocatedTax)
+      : roundReceiptMoney(rawNet * (Number(tax.rate) / 100));
+    allocatedTax = roundReceiptMoney(allocatedTax + amount);
+    return { label: `${tax.name} (${Number(tax.rate)}%)`, amount };
+  });
+  return { subtotal: normalizedSubtotal, discount: normalizedDiscount, amountBeforeTax, taxLines, total: normalizedTotal };
 }
 
 function escapeReceiptHtml(value: unknown): string {
@@ -76,11 +104,12 @@ function escapeReceiptHtml(value: unknown): string {
   );
 }
 
-function receiptMoney(n: number): string {
-  return `${RECEIPT_CURRENCY} ${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
+function receiptMoney(n: number, currencyCode = RECEIPT_CURRENCY): string {
+  return `${String(currencyCode || RECEIPT_CURRENCY).toUpperCase()} ${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
 }
 
 function buildReceiptHtml(data: ReceiptData): string {
+  const money = (value: number) => receiptMoney(value, data.currencyCode);
   // Modern minimal: item name on top with a muted "qty x price" line beneath,
   // line total right-aligned. Reads cleaner than a 4-column table on 80mm.
   const itemsRows = data.lines
@@ -89,7 +118,7 @@ function buildReceiptHtml(data: ReceiptData): string {
       <div class="item">
         <div class="top">
           <div class="name">${escapeReceiptHtml(line.name)}</div>
-          <div class="amt">${receiptMoney(line.lineTotal)}</div>
+          <div class="amt">${money(line.lineTotal)}</div>
         </div>
         <div class="sub">${escapeReceiptHtml(line.qtyLabel)} &times; ${line.unitPrice.toFixed(2)}</div>
         ${line.note ? `<div class="note">${escapeReceiptHtml(line.note)}</div>` : ""}
@@ -107,14 +136,14 @@ function buildReceiptHtml(data: ReceiptData): string {
     : "Cash";
   const payRows: string[] = [`<div class="method">Paid by ${escapeReceiptHtml(methodLabel)}</div>`];
   if (isCredit) {
-    if (data.amountPaid != null) payRows.push(`<div class="row"><span>Paid</span><span>${receiptMoney(Number(data.amountPaid))}</span></div>`);
+    if (data.amountPaid != null) payRows.push(`<div class="row"><span>Paid</span><span>${money(Number(data.amountPaid))}</span></div>`);
     if (data.receivedVia) payRows.push(`<div class="row"><span>Received via</span><span>${escapeReceiptHtml(String(data.receivedVia).toUpperCase())}</span></div>`);
-    if (data.balance != null) payRows.push(`<div class="row due"><span>Balance due</span><span>${receiptMoney(Number(data.balance))}</span></div>`);
+    if (data.balance != null) payRows.push(`<div class="row due"><span>Balance due</span><span>${money(Number(data.balance))}</span></div>`);
   } else {
     const cash = data.cashPaid != null ? Number(data.cashPaid) : data.total;
     const change = data.change != null ? Number(data.change) : Math.max(0, cash - data.total);
-    payRows.push(`<div class="row"><span>Tendered</span><span>${receiptMoney(cash)}</span></div>`);
-    payRows.push(`<div class="row"><span>Change</span><span>${receiptMoney(change)}</span></div>`);
+    payRows.push(`<div class="row"><span>Tendered</span><span>${money(cash)}</span></div>`);
+    payRows.push(`<div class="row"><span>Change</span><span>${money(change)}</span></div>`);
   }
 
   return `<!DOCTYPE html>
@@ -173,15 +202,13 @@ function buildReceiptHtml(data: ReceiptData): string {
     <div class="divider"></div>
     <div class="items">${itemsRows}</div>
     <div class="divider"></div>
-    ${!hasTax ? `<div class="totals">
-      <div class="row"><span>Subtotal</span><span>${receiptMoney(data.subtotal)}</span></div>
-      ${discount > 0 ? `<div class="row"><span>Discount</span><span>- ${receiptMoney(discount)}</span></div>` : ""}
-    </div>` : ""}
-    <div class="grandbar"><span class="lbl">TOTAL</span><span class="val">${receiptMoney(data.total)}</span></div>
-    ${hasTax ? `<div class="taxbreak">
-      <div class="tb-head">Tax included in total</div>
-      ${taxLines.map((t) => `<div class="row"><span>${escapeReceiptHtml(t.label)}</span><span>${receiptMoney(t.amount)}</span></div>`).join("")}
-    </div>` : ""}
+    <div class="totals">
+      <div class="row"><span>Subtotal</span><span>${money(data.subtotal)}</span></div>
+      ${discount > 0 ? `<div class="row"><span>Discount</span><span>- ${money(discount)}</span></div>` : ""}
+      ${hasTax ? `<div class="row"><span>Amount before tax</span><span>${money(data.amountBeforeTax)}</span></div>` : ""}
+      ${taxLines.map((tax) => `<div class="row"><span>${escapeReceiptHtml(tax.label)} <small>(included)</small></span><span>${money(tax.amount)}</span></div>`).join("")}
+    </div>
+    <div class="grandbar"><span class="lbl">TOTAL</span><span class="val">${money(data.total)}</span></div>
     <div class="pay">${payRows.join("")}</div>
     <div class="footer">
       <div class="thanks">Thank you for your purchase</div>
@@ -625,17 +652,31 @@ export default function Sales() {
   // Active taxes for the tax-inclusive receipt breakdown, refreshed when the
   // owner changes them in Settings.
   const [salesTaxes, setSalesTaxes] = useState<TaxLine[]>([]);
+  const [salesCurrency, setSalesCurrency] = useState(RECEIPT_CURRENCY);
   useEffect(() => {
-    fetchSystemSettingsCached((fresh) => setSalesTaxes(fresh.taxes ?? []))
-      .then((s) => setSalesTaxes(s.taxes ?? []))
+    fetchSystemSettingsCached((fresh) => {
+      setSalesTaxes(fresh.taxes ?? []);
+      setSalesCurrency(fresh.currency_code || RECEIPT_CURRENCY);
+    })
+      .then((settings) => {
+        setSalesTaxes(settings.taxes ?? []);
+        setSalesCurrency(settings.currency_code || RECEIPT_CURRENCY);
+      })
       .catch(() => {});
     const onSettingsChanged = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { taxes?: TaxLine[] } | undefined;
+      const detail = (e as CustomEvent).detail as { taxes?: TaxLine[]; currency_code?: string } | undefined;
       if (detail?.taxes) setSalesTaxes(detail.taxes);
+      if (detail?.currency_code) setSalesCurrency(detail.currency_code);
     };
     window.addEventListener("systemSettingsChanged", onSettingsChanged as EventListener);
     return () => window.removeEventListener("systemSettingsChanged", onSettingsChanged as EventListener);
   }, []);
+
+  const pendingReceiptTotals = useMemo(() => {
+    const total = pendingSales.reduce((sum, sale) => sum + (Number(sale.total_price) || 0), 0);
+    const discount = pendingSales.reduce((sum, sale) => sum + (Number(sale.discount_amount) || 0), 0);
+    return computeInclusiveReceiptTotals(total + discount, discount, total, salesTaxes);
+  }, [pendingSales, salesTaxes]);
 
   const printReceipt = () => {
     if (pendingSales.length === 0) return;
@@ -677,21 +718,22 @@ export default function Sales() {
     // Order discount: lines carry their share (total is already discounted);
     // the receipt shows original subtotal, the discount, then the total paid.
     const discountTotal = pendingSales.reduce((sum, sale) => sum + (Number(sale.discount_amount) || 0), 0);
+    const receiptTotals = computeInclusiveReceiptTotals(total + discountTotal, discountTotal, total, salesTaxes);
 
     const html = buildReceiptHtml({
       businessName,
       logo: getStoredBusinessLogo(),
-      // The server-assigned receipt number isn't available at instant-print time;
-      // reprints from Recent Sales show it. Use the time as a reference here.
-      receiptNumber: undefined,
+      receiptNumber: pendingSales[0]?.client_sale_id?.split(":")[0].slice(-8).toUpperCase(),
       dateTime: new Date().toLocaleString(),
       cashier: salesPerson,
       customer: customerName,
       lines,
-      subtotal: total + discountTotal,
-      discount: discountTotal > 0 ? discountTotal : undefined,
-      taxLines: computeInclusiveTaxLines(total, salesTaxes),
-      total,
+      currencyCode: salesCurrency,
+      subtotal: receiptTotals.subtotal,
+      discount: receiptTotals.discount > 0 ? receiptTotals.discount : undefined,
+      amountBeforeTax: receiptTotals.amountBeforeTax,
+      taxLines: receiptTotals.taxLines,
+      total: receiptTotals.total,
       paymentMethod,
       amountPaid: isCredit ? totalPaid : undefined,
       balance: isCredit ? remainingBalance : undefined,
@@ -717,6 +759,11 @@ export default function Sales() {
     const paymentMethod = String(transaction.payment_method || "cash");
     const isCredit = paymentMethod.toLowerCase() === "credit";
     const remainingBalance = Math.max(0, total - totalPaid);
+    const discountTotal = salesSorted.reduce((sum, sale) => sum + (Number(sale.discount_amount) || 0), 0);
+    const savedTaxSnapshot = salesSorted.find((sale) => Array.isArray(sale.tax_snapshot))?.tax_snapshot;
+    const receiptTaxes = savedTaxSnapshot ?? salesTaxes;
+    const receiptCurrency = salesSorted.find((sale) => sale.currency_code)?.currency_code || salesCurrency;
+    const receiptTotals = computeInclusiveReceiptTotals(total + discountTotal, discountTotal, total, receiptTaxes);
 
     const lines: ReceiptLineItem[] = salesSorted.map((sale) => {
       const product = productById.get(sale.product_id);
@@ -736,7 +783,7 @@ export default function Sales() {
         name,
         qtyLabel: formatSaleQuantityLabel(sale),
         unitPrice: Number(sale.unit_price) || 0,
-        lineTotal: Number(sale.total_price) || 0,
+        lineTotal: (Number(sale.total_price) || 0) + (Number(sale.discount_amount) || 0),
         note,
       };
     });
@@ -749,9 +796,12 @@ export default function Sales() {
       cashier: transaction.created_by_name || salesPerson,
       customer: transaction.customer_name,
       lines,
-      subtotal: total,
-      taxLines: computeInclusiveTaxLines(total, salesTaxes),
-      total,
+      currencyCode: receiptCurrency,
+      subtotal: receiptTotals.subtotal,
+      discount: receiptTotals.discount > 0 ? receiptTotals.discount : undefined,
+      amountBeforeTax: receiptTotals.amountBeforeTax,
+      taxLines: receiptTotals.taxLines,
+      total: receiptTotals.total,
       paymentMethod,
       amountPaid: isCredit ? totalPaid : undefined,
       balance: isCredit ? remainingBalance : remainingBalance > 0 ? remainingBalance : undefined,
@@ -1752,22 +1802,38 @@ export default function Sales() {
                 color: "#334155",
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span>Payment</span>
-                  <strong style={{ textTransform: "uppercase" }}>{pendingSales[0].payment_method}</strong>
+                  <span>Subtotal</span>
+                  <strong>{receiptMoney(pendingReceiptTotals.subtotal, salesCurrency)}</strong>
                 </div>
-                {pendingSales.some((sale) => (sale.discount_amount ?? 0) > 0) && (
+                {pendingReceiptTotals.discount > 0 && (
                   <div style={{ display: "flex", justifyContent: "space-between", color: "#dc2626" }}>
                     <span>Discount</span>
-                    <strong>
-                      −GHS {pendingSales.reduce((sum, sale) => sum + (Number(sale.discount_amount) || 0), 0).toFixed(2)}
-                    </strong>
+                    <strong>− {receiptMoney(pendingReceiptTotals.discount, salesCurrency)}</strong>
                   </div>
+                )}
+                {pendingReceiptTotals.taxLines.length > 0 && (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span>Amount before tax</span>
+                      <strong>{receiptMoney(pendingReceiptTotals.amountBeforeTax, salesCurrency)}</strong>
+                    </div>
+                    {pendingReceiptTotals.taxLines.map((tax) => (
+                      <div key={tax.label} style={{ display: "flex", justifyContent: "space-between", color: "#64748b" }}>
+                        <span>{tax.label} <small>(included)</small></span>
+                        <strong>{receiptMoney(tax.amount, salesCurrency)}</strong>
+                      </div>
+                    ))}
+                  </>
                 )}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4 }}>
                   <span style={{ fontSize: 13, letterSpacing: "0.5px", color: "#475569" }}>TOTAL</span>
                   <strong style={{ fontSize: 28, color: "#0f172a", lineHeight: 1 }}>
-                    GHS {pendingSales.reduce((sum, sale) => sum + sale.total_price, 0).toFixed(2)}
+                    {receiptMoney(pendingReceiptTotals.total, salesCurrency)}
                   </strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #e2e8f0", paddingTop: 6, marginTop: 2 }}>
+                  <span>Payment method</span>
+                  <strong style={{ textTransform: "uppercase" }}>{pendingSales[0].payment_method}</strong>
                 </div>
               </div>
 

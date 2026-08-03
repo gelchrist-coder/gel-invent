@@ -143,6 +143,9 @@ export type Sale = {
   pack_quantity?: number | null;
   unit_price: number;
   total_price: number;
+  discount_amount?: number | null;
+  tax_snapshot?: Array<{ name: string; rate: number; enabled: boolean }> | null;
+  currency_code?: string | null;
   customer_name?: string | null;
   customer_phone?: string | null;
   payment_method: string;
@@ -189,8 +192,8 @@ export type NewSale = {
   // Which price tier was charged (frontend-only; unit_price already reflects
   // it). Lets "repeat sale" restore the wholesale choice.
   price_tier?: "retail" | "wholesale";
-  // Portion of the order discount carried by this line (frontend-only;
-  // total_price is already discounted). Used for the receipt breakdown.
+  // Portion of the order discount carried by this line. total_price is already
+  // discounted; the backend persists this for reprints and emailed receipts.
   discount_amount?: number;
   unit_price: number;
   total_price: number;

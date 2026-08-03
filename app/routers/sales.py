@@ -1,11 +1,11 @@
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from html import escape
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,8 +18,63 @@ from app.utils.tenant import get_tenant_user_ids
 from app.utils.branch import get_active_branch_id
 from app.utils.expiry import get_batch_balances, writeoff_expired_batches
 from app.utils.email import send_email, smtp_configured
+from app.routers.settings import _read_taxes
 
 router = APIRouter(prefix="/sales", tags=["sales"])
+
+
+def _receipt_settings_snapshot(db: Session, current_user: models.User) -> tuple[list[dict], str]:
+    owner_user_id = current_user.created_by or current_user.id
+    settings = db.scalar(select(models.SystemSettings).where(models.SystemSettings.owner_user_id == owner_user_id))
+    currency_code = str(getattr(settings, "currency_code", None) or "GHS").strip().upper()[:3] or "GHS"
+    active_taxes = [
+        {
+            "name": str(tax.get("name") or "Tax").strip()[:40],
+            "rate": float(tax.get("rate") or 0),
+            "enabled": True,
+        }
+        for tax in _read_taxes(db, owner_user_id)
+        if bool(tax.get("enabled")) and float(tax.get("rate") or 0) > 0
+    ]
+    return active_taxes, currency_code
+
+
+MONEY_QUANTUM = Decimal("0.01")
+
+
+def _money(value: Decimal | int | float | None) -> Decimal:
+    return Decimal(value or 0).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _inclusive_receipt_totals(
+    *,
+    subtotal: Decimal,
+    discount: Decimal,
+    total: Decimal,
+    taxes: list[dict],
+) -> tuple[Decimal, Decimal, Decimal, list[dict], Decimal]:
+    final_total = _money(max(Decimal("0"), Decimal(total or 0)))
+    discount_amount = _money(max(Decimal("0"), Decimal(discount or 0)))
+    subtotal_amount = _money(max(final_total + discount_amount, Decimal(subtotal or 0)))
+    active_taxes = [
+        tax for tax in taxes
+        if bool(tax.get("enabled", True)) and Decimal(str(tax.get("rate") or 0)) > 0
+    ]
+    if not active_taxes or final_total <= 0:
+        return subtotal_amount, discount_amount, final_total, [], final_total
+
+    sum_rates = sum((Decimal(str(tax.get("rate") or 0)) for tax in active_taxes), Decimal("0"))
+    raw_net = final_total / (Decimal("1") + sum_rates / Decimal("100"))
+    amount_before_tax = _money(raw_net)
+    tax_total = _money(final_total - amount_before_tax)
+    allocated = Decimal("0")
+    tax_lines: list[dict] = []
+    for index, tax in enumerate(active_taxes):
+        rate = Decimal(str(tax.get("rate") or 0))
+        amount = _money(tax_total - allocated) if index == len(active_taxes) - 1 else _money(raw_net * rate / Decimal("100"))
+        allocated = _money(allocated + amount)
+        tax_lines.append({"name": str(tax.get("name") or "Tax"), "rate": rate, "amount": amount})
+    return subtotal_amount, discount_amount, amount_before_tax, tax_lines, final_total
 
 WALK_IN_CUSTOMER_NAMES = {
     "walk in",
@@ -450,6 +505,7 @@ def create_sale(
     """
     ensure_permission(current_user, "process_sales")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
+    tax_snapshot, currency_code = _receipt_settings_snapshot(db, current_user)
 
     # Auto-writeoff expired batches for this product before checking availability.
     writeoff_expired_batches(
@@ -555,6 +611,9 @@ def create_sale(
         pack_quantity=payload.pack_quantity,
         unit_price=payload.unit_price,
         total_price=payload.total_price,
+        discount_amount=payload.discount_amount,
+        tax_snapshot=tax_snapshot,
+        currency_code=currency_code,
         customer_name=normalized_customer_name,
         customer_phone=customer_phone,
         payment_method=payload.payment_method,
@@ -833,6 +892,20 @@ def send_sale_receipt_email(
 
     sales_sorted = sorted(sales, key=lambda s: (s.created_at, s.id))
     total_amount = sum(Decimal(s.total_price or 0) for s in sales_sorted)
+    discount_amount = sum(Decimal(s.discount_amount or 0) for s in sales_sorted)
+    subtotal_amount = total_amount + discount_amount
+    saved_tax_snapshot = next((s.tax_snapshot for s in sales_sorted if s.tax_snapshot is not None), None)
+    if saved_tax_snapshot is None:
+        saved_tax_snapshot, current_currency = _receipt_settings_snapshot(db, current_user)
+    else:
+        current_currency = "GHS"
+    currency_code = next((str(s.currency_code).upper() for s in sales_sorted if s.currency_code), current_currency)
+    subtotal_amount, discount_amount, amount_before_tax, receipt_tax_lines, total_amount = _inclusive_receipt_totals(
+        subtotal=subtotal_amount,
+        discount=discount_amount,
+        total=total_amount,
+        taxes=saved_tax_snapshot,
+    )
     amount_paid = sum(Decimal(s.amount_paid or 0) for s in sales_sorted)
     customer_name = (
         (payload.customer_name or "").strip()
@@ -849,21 +922,46 @@ def send_sale_receipt_email(
     for sale in sales_sorted:
         product_name = product_name_by_id.get(int(sale.product_id), f"Product #{sale.product_id}")
         quantity = Decimal(sale.quantity or 0)
+        sale_unit_type = str(sale.sale_unit_type or "piece").strip()
+        if sale_unit_type.lower() != "piece" and sale.pack_quantity:
+            display_quantity = Decimal(sale.pack_quantity)
+            quantity_label = f"{format(display_quantity.normalize(), 'f')} {sale_unit_type}"
+        else:
+            display_quantity = quantity
+            quantity_label = format(display_quantity.normalize(), "f")
         unit_price = Decimal(sale.unit_price or 0)
-        line_total = Decimal(sale.total_price or 0)
+        line_total = Decimal(sale.total_price or 0) + Decimal(sale.discount_amount or 0)
         lines.append(
-            f"- {product_name}: {quantity} x GHS {unit_price:.2f} = GHS {line_total:.2f}"
+            f"- {product_name}: {quantity_label} x {currency_code} {unit_price:.2f} = {currency_code} {line_total:.2f}"
         )
         item_rows_html.append(
             "<tr>"
             f"<td style='padding:10px;border-bottom:1px solid #edf2f7'>{escape(product_name)}</td>"
-            f"<td style='padding:10px;border-bottom:1px solid #edf2f7;text-align:right'>{quantity}</td>"
-            f"<td style='padding:10px;border-bottom:1px solid #edf2f7;text-align:right'>GHS {unit_price:.2f}</td>"
-            f"<td style='padding:10px;border-bottom:1px solid #edf2f7;text-align:right;font-weight:700'>GHS {line_total:.2f}</td>"
+            f"<td style='padding:10px;border-bottom:1px solid #edf2f7;text-align:right'>{escape(quantity_label)}</td>"
+            f"<td style='padding:10px;border-bottom:1px solid #edf2f7;text-align:right'>{currency_code} {unit_price:.2f}</td>"
+            f"<td style='padding:10px;border-bottom:1px solid #edf2f7;text-align:right;font-weight:700'>{currency_code} {line_total:.2f}</td>"
             "</tr>"
         )
 
     business_name = (current_user.business_name or "Gel Invent Business").strip()
+    logo_html = ""
+    try:
+        # business_logo is installed as a backwards-compatible runtime column,
+        # but intentionally is not mapped on SystemSettings.
+        with db.get_bind().connect() as connection:
+            logo_row = connection.execute(
+                text("SELECT business_logo FROM system_settings WHERE owner_user_id = :owner_user_id"),
+                {"owner_user_id": current_user.created_by or current_user.id},
+            ).first()
+        logo_src = str(logo_row[0]).strip() if logo_row and logo_row[0] else ""
+        if logo_src.startswith("data:image/"):
+            logo_html = (
+                f'<img src="{escape(logo_src, quote=True)}" alt="{escape(business_name, quote=True)} logo" '
+                'style="display:block;max-width:160px;max-height:70px;margin:10px 0 4px;object-fit:contain" />'
+            )
+    except Exception:
+        # A logo is optional and must never prevent sending a valid receipt.
+        logo_html = ""
     watermark_html = (
         "<tr><td style='padding:0 24px'>"
         "<div style='font-size:32px;opacity:.08;letter-spacing:4px;text-align:center;margin:6px 0 -6px'>Gel Invent</div>"
@@ -884,16 +982,23 @@ def send_sale_receipt_email(
         "Items:",
         *lines,
         "",
+        f"Subtotal: {currency_code} {subtotal_amount:.2f}",
+        *([f"Discount: - {currency_code} {discount_amount:.2f}"] if discount_amount > 0 else []),
+        *([f"Amount before tax: {currency_code} {amount_before_tax:.2f}"] if receipt_tax_lines else []),
+        *[
+            f"{tax['name']} ({tax['rate']}%, included): {currency_code} {tax['amount']:.2f}"
+            for tax in receipt_tax_lines
+        ],
+        f"Total: {currency_code} {total_amount:.2f}",
         f"Payment Method: {payment_method}",
-        f"Total: GHS {total_amount:.2f}",
     ]
 
     if amount_paid > 0:
-        body_lines.append(f"Amount Paid: GHS {amount_paid:.2f}")
+        body_lines.append(f"Amount Paid: {currency_code} {amount_paid:.2f}")
 
     if payment_method == "CREDIT" and amount_paid > 0:
         balance = total_amount - amount_paid
-        body_lines.append(f"Balance: GHS {balance:.2f}")
+        body_lines.append(f"Balance: {currency_code} {balance:.2f}")
 
     body_lines.extend([
         "",
@@ -905,20 +1010,43 @@ def send_sale_receipt_email(
     outstanding_balance = total_amount - amount_paid if amount_paid > 0 else total_amount
     summary_extra_text = ""
     summary_extra_html = ""
+    receipt_summary_html = (
+        f"<tr><td style='padding:6px 0;color:#475569'>Subtotal</td>"
+        f"<td style='padding:6px 0;text-align:right;font-weight:600'>{currency_code} {subtotal_amount:.2f}</td></tr>"
+    )
+    if discount_amount > 0:
+        receipt_summary_html += (
+            f"<tr><td style='padding:6px 0;color:#b91c1c'>Discount</td>"
+            f"<td style='padding:6px 0;text-align:right;font-weight:600;color:#b91c1c'>- {currency_code} {discount_amount:.2f}</td></tr>"
+        )
+    if receipt_tax_lines:
+        receipt_summary_html += (
+            f"<tr><td style='padding:6px 0;color:#475569'>Amount before tax</td>"
+            f"<td style='padding:6px 0;text-align:right;font-weight:600'>{currency_code} {amount_before_tax:.2f}</td></tr>"
+        )
+        for tax in receipt_tax_lines:
+            receipt_summary_html += (
+                f"<tr><td style='padding:6px 0;color:#64748b'>{escape(str(tax['name']))} ({tax['rate']}%, included)</td>"
+                f"<td style='padding:6px 0;text-align:right;color:#64748b'>{currency_code} {tax['amount']:.2f}</td></tr>"
+            )
+    receipt_summary_html += (
+        f"<tr><td style='padding:10px 0 6px;border-top:1px solid #cbd5e1;font-size:16px;font-weight:800'>Total</td>"
+        f"<td style='padding:10px 0 6px;border-top:1px solid #cbd5e1;text-align:right;font-size:22px;font-weight:800'>{currency_code} {total_amount:.2f}</td></tr>"
+    )
 
     if amount_paid > 0:
         summary_extra_html += (
             f"<tr><td style='padding:6px 0;color:#475569'>Amount Paid</td>"
-            f"<td style='padding:6px 0;text-align:right;font-weight:600'>GHS {amount_paid:.2f}</td></tr>"
+            f"<td style='padding:6px 0;text-align:right;font-weight:600'>{currency_code} {amount_paid:.2f}</td></tr>"
         )
         if payment_method in {"CREDIT", "PARTIAL"}:
             summary_extra_html += (
                 f"<tr><td style='padding:6px 0;color:#475569'>Balance</td>"
-                f"<td style='padding:6px 0;text-align:right;font-weight:700;color:#b45309'>GHS {outstanding_balance:.2f}</td></tr>"
+                f"<td style='padding:6px 0;text-align:right;font-weight:700;color:#b45309'>{currency_code} {outstanding_balance:.2f}</td></tr>"
             )
 
     if payment_method in {"CREDIT", "PARTIAL"}:
-        summary_extra_text = f"Outstanding: GHS {outstanding_balance:.2f}"
+        summary_extra_text = f"Outstanding: {currency_code} {outstanding_balance:.2f}"
 
     receipt_html = f"""
 <!DOCTYPE html>
@@ -968,10 +1096,7 @@ def send_sale_receipt_email(
             <tr>
                 <td style=\"padding:12px 24px 18px\">
                     <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"font-size:14px\">
-                        <tr>
-                            <td style=\"padding:6px 0;color:#475569\">Total</td>
-                            <td style=\"padding:6px 0;text-align:right;font-size:22px;font-weight:800;color:#0f172a\">GHS {total_amount:.2f}</td>
-                        </tr>
+                        {receipt_summary_html}
                         {summary_extra_html}
                     </table>
                     <div style=\"margin-top:12px;padding:12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;color:#334155;font-size:13px\">

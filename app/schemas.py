@@ -308,6 +308,7 @@ class SaleBase(BaseModel):
     pack_quantity: int | None = Field(default=None, ge=1)
     unit_price: Decimal = Field(..., ge=0, decimal_places=2)
     total_price: Decimal = Field(..., ge=0, decimal_places=2)
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2)
     customer_name: str | None = Field(default=None, max_length=255)
     customer_phone: str | None = Field(default=None, max_length=40)
     payment_method: str = Field(default="cash", max_length=50)
@@ -356,6 +357,8 @@ class SaleRead(SaleBase):
     client_sale_id: str | None = None
     amount_paid: Decimal | None = None
     partial_payment_method: str | None = None
+    tax_snapshot: list[dict[str, object]] | None = None
+    currency_code: str = "GHS"
     supplied_quantity: Decimal | None = None
     supplied_at: datetime | None = None
     created_at: datetime
