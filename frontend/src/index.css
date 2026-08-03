@@ -1540,6 +1540,17 @@ label {
 .warehouse-actions-card { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
 .warehouse-actions-card h3 { margin: 0; white-space: nowrap; }
 .warehouse-action-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.warehouse-skeleton-heading { display: grid; gap: 8px; }
+.warehouse-selector-skeleton { display: grid; gap: 7px; cursor: default; }
+.warehouse-hero-skeleton > div { display: grid; gap: 8px; }
+.warehouse-hero-skeleton .skeleton { background-color: rgba(255, 255, 255, .16); background-image: linear-gradient(90deg, rgba(255, 255, 255, .12) 0, rgba(255, 255, 255, .28) 80px, rgba(255, 255, 255, .12) 160px); }
+.warehouse-tabs-skeleton { align-items: center; }
+.warehouse-actions-skeleton { min-height: 62px; }
+.warehouse-table-skeleton { display: grid; min-width: 0; overflow: hidden; }
+.warehouse-skeleton-table-head,
+.warehouse-skeleton-table-row { display: grid; grid-template-columns: 1.5fr .85fr repeat(4, .75fr); align-items: center; gap: 14px; padding: 12px 13px; }
+.warehouse-skeleton-table-head { background: #f8fafc; }
+.warehouse-skeleton-table-row { border-top: 1px solid #e2e8f0; min-height: 45px; }
 .warehouse-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
 .warehouse-action-panel { display: grid; gap: 12px; align-content: start; }
 .warehouse-transfer-form > .button { justify-self: start; }
@@ -1577,6 +1588,10 @@ label {
   .warehouse-actions-card { display: grid; gap: 10px; }
   .warehouse-action-buttons { justify-content: stretch; }
   .warehouse-action-buttons .button { flex: 1 1 100%; }
+  .warehouse-actions-skeleton .warehouse-action-buttons { display: grid; }
+  .warehouse-actions-skeleton .warehouse-action-buttons .skeleton { width: 100% !important; }
+  .warehouse-skeleton-table-head { display: none; }
+  .warehouse-skeleton-table-row { grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px 12px; min-height: 94px; }
   .warehouse-tabs { margin-inline: -2px; }
   .warehouse-form-grid { grid-template-columns: 1fr; }
   .warehouse-modal { padding: 8px; align-items: flex-end; }

@@ -15,6 +15,7 @@ import {
 } from "../api";
 import ProductForm from "../components/ProductForm";
 import PurchasingPanel from "../components/PurchasingPanel";
+import { Skeleton } from "../components/Skeleton";
 import { useExpiryTracking } from "../settings";
 import { Branch, FulfillmentOrder, FulfillmentStatus, NewProduct, Product, Warehouse, WarehouseMovement, WarehouseStock } from "../types";
 import { hasUserPermission, readStoredUser } from "../user-storage";
@@ -27,6 +28,59 @@ const inputStyle = {
   borderRadius: 8,
   background: "#fff",
 } as const;
+
+function WarehousePageSkeleton() {
+  return (
+    <div className="app-shell warehouse-page warehouse-page-skeleton" aria-busy="true" aria-label="Loading warehouse operations">
+      <div className="page-header warehouse-skeleton-heading">
+        <Skeleton width={230} height={30} />
+        <Skeleton width="min(520px, 82vw)" height={14} />
+      </div>
+
+      <div className="warehouse-selector" aria-hidden="true">
+        <div className="warehouse-selector__item warehouse-selector-skeleton"><Skeleton width="62%" height={14} /><Skeleton width="78%" height={11} /></div>
+        <div className="warehouse-selector__item warehouse-selector-skeleton"><Skeleton width="58%" height={14} /><Skeleton width="72%" height={11} /></div>
+      </div>
+
+      <div className="card warehouse-hero warehouse-hero-skeleton" aria-hidden="true">
+        <div><Skeleton width={150} height={10} /><Skeleton width={245} height={27} /><Skeleton width={130} height={13} /></div>
+        <Skeleton width={58} height={28} radius={999} />
+      </div>
+
+      <div className="warehouse-kpis" aria-hidden="true">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div className="card" key={index}>
+            <Skeleton width="52%" height={10} />
+            <Skeleton width={index === 2 ? "72%" : "38%"} height={21} />
+            <Skeleton width="66%" height={10} />
+          </div>
+        ))}
+      </div>
+
+      <div className="warehouse-tabs warehouse-tabs-skeleton" aria-hidden="true">
+        {Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} width={index === 4 ? 78 : 66} height={32} />)}
+      </div>
+
+      <div className="card warehouse-actions-card warehouse-actions-skeleton" aria-hidden="true">
+        <Skeleton width={105} height={18} />
+        <div className="warehouse-action-buttons">
+          <Skeleton width={170} height={36} />
+          <Skeleton width={155} height={36} />
+          <Skeleton width={185} height={36} />
+        </div>
+      </div>
+
+      <div className="card warehouse-table-wrap warehouse-table-skeleton" aria-hidden="true">
+        <div className="warehouse-skeleton-table-head">{Array.from({ length: 6 }).map((_, index) => <Skeleton key={index} width={index === 0 ? "58%" : "72%"} height={10} />)}</div>
+        {Array.from({ length: 4 }).map((_, rowIndex) => (
+          <div className="warehouse-skeleton-table-row" key={rowIndex}>
+            {Array.from({ length: 6 }).map((_, cellIndex) => <Skeleton key={cellIndex} width={cellIndex === 0 ? "72%" : "56%"} height={12} />)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Warehouses() {
   const currentUser = readStoredUser();
@@ -148,6 +202,7 @@ export default function Warehouses() {
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectWarehouse = async (warehouseId: number) => {
+    setLoading(true);
     setSelectedWarehouseId(warehouseId);
     setActiveTab("overview");
     setError(null);
@@ -155,6 +210,8 @@ export default function Warehouses() {
       await loadStock(warehouseId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load warehouse stock");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -266,7 +323,7 @@ export default function Warehouses() {
     } finally { setBusy(false); }
   };
 
-  if (loading) return <div className="card" style={{ margin: 16, padding: 20 }}>Loading warehouses...</div>;
+  if (loading) return <WarehousePageSkeleton />;
 
   const tabs = [
     { id: "overview" as const, label: "Overview" },
