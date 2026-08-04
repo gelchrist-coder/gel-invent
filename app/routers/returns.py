@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
-from ..database import get_db
+from ..database import ensure_sale_return_item_schema, get_db
 from ..auth import get_current_active_user
 from app.permissions import ensure_permission
 from ..utils.branch import get_active_branch_id
@@ -152,6 +152,7 @@ def create_return(
     - Add stock back to inventory (if restock=True)
     - If original sale was credit, reduce creditor's debt
     """
+    ensure_sale_return_item_schema()
     ensure_permission(current_user, "process_returns")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     
@@ -257,6 +258,7 @@ def list_returns(
     limit: int = 100,
 ):
     """List all returns for the current branch."""
+    ensure_sale_return_item_schema()
     ensure_permission(current_user, "process_returns")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     
@@ -286,6 +288,7 @@ def get_returns_for_sale(
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     """Get all returns for a specific sale."""
+    ensure_sale_return_item_schema()
     ensure_permission(current_user, "process_returns")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     
@@ -326,6 +329,7 @@ def get_returns_summary(
     active_branch_id: int = Depends(get_active_branch_id),
 ):
     """Get summary of returns (total count, total refund amount)."""
+    ensure_sale_return_item_schema()
     ensure_permission(current_user, "process_returns")
     tenant_user_ids = get_tenant_user_ids(current_user, db)
     

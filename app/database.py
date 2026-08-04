@@ -71,6 +71,8 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 
 _critical_schema_ready = False
 _critical_schema_lock = threading.Lock()
+_sale_return_item_schema_ready = False
+_sale_return_item_schema_lock = threading.Lock()
 
 _WAREHOUSE_PURCHASE_COLUMNS: dict[str, dict[str, str]] = {
     "purchases": {
@@ -146,37 +148,49 @@ def ensure_sales_receipt_schema() -> None:
 
 def ensure_sale_return_item_schema() -> None:
     """Install exact-item fields required by the customer return ledger."""
+    global _sale_return_item_schema_ready
+    if _sale_return_item_schema_ready:
+        return
+
     required_columns = {
-        "variant_id": "INTEGER REFERENCES product_variants(id) ON DELETE SET NULL",
+        # The runtime guard only needs the column to make ORM reads safe. The
+        # versioned migration adds the foreign-key constraint; avoiding it here
+        # keeps this repair independent of product extension migration order.
+        "variant_id": "INTEGER",
         "item_condition": "VARCHAR(30) DEFAULT 'resellable'",
     }
-    with engine.begin() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = 'public' AND table_name = 'sale_returns'"
-            )
-        ).all()
-        present = {str(row.column_name) for row in rows}
-        for column_name, column_type in required_columns.items():
-            if column_name not in present:
-                conn.execute(
-                    text(f"ALTER TABLE sale_returns ADD COLUMN IF NOT EXISTS {column_name} {column_type}")
+    with _sale_return_item_schema_lock:
+        if _sale_return_item_schema_ready:
+            return
+
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'sale_returns'"
                 )
-        conn.execute(
-            text(
-                "UPDATE sale_returns AS sale_return SET variant_id = sale.variant_id "
-                "FROM sales AS sale WHERE sale_return.sale_id = sale.id "
-                "AND sale_return.variant_id IS NULL AND sale.variant_id IS NOT NULL"
+            ).all()
+            present = {str(row.column_name) for row in rows}
+            for column_name, column_type in required_columns.items():
+                if column_name not in present:
+                    conn.execute(
+                        text(f"ALTER TABLE sale_returns ADD COLUMN IF NOT EXISTS {column_name} {column_type}")
+                    )
+            conn.execute(
+                text(
+                    "UPDATE sale_returns AS sale_return SET variant_id = sale.variant_id "
+                    "FROM sales AS sale WHERE sale_return.sale_id = sale.id "
+                    "AND sale_return.variant_id IS NULL AND sale.variant_id IS NOT NULL"
+                )
             )
-        )
-        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sale_returns_variant_id ON sale_returns (variant_id)"))
-        conn.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS idx_sale_returns_item_condition "
-                "ON sale_returns (branch_id, item_condition, created_at DESC)"
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sale_returns_variant_id ON sale_returns (variant_id)"))
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_sale_returns_item_condition "
+                    "ON sale_returns (branch_id, item_condition, created_at DESC)"
+                )
             )
-        )
+        _sale_return_item_schema_ready = True
 
 
 def ensure_critical_schema() -> None:

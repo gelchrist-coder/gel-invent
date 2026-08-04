@@ -6,7 +6,6 @@ import {
   isTemporaryServerDelayError,
   warmBackend,
 } from "../api";
-import RevenueAnalysis from "./RevenueAnalysis";
 import { useExpiryTracking } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
 
@@ -241,7 +240,7 @@ function HorizontalBarChart({
   );
 }
 
-type ReportTab = "sales" | "inventory" | "creditors" | "revenue";
+type ReportTab = "sales" | "inventory" | "creditors";
 
 type Props = {
   initialTab?: ReportTab;
@@ -251,11 +250,8 @@ type Props = {
 export default function Reports({ initialTab = "sales" }: Props) {
   const currentUser = readStoredUser();
   const canViewReports = hasUserPermission("view_reports", currentUser);
-  const canViewRevenue = hasUserPermission("view_revenue", currentUser);
   const usesExpiryTracking = useExpiryTracking();
-  const availableTabs = canViewRevenue
-    ? (["sales", "inventory", "creditors", "revenue"] as const)
-    : (["sales", "inventory", "creditors"] as const);
+  const availableTabs = ["sales", "inventory", "creditors"] as const;
 
   const [activeTab, setActiveTab] = useState<ReportTab>(initialTab);
   const [salesData, setSalesData] = useState<SalesDashboard | null>(null);
@@ -332,8 +328,8 @@ export default function Reports({ initialTab = "sales" }: Props) {
   }, [canViewReports, loadData]);
 
   useEffect(() => {
-    setActiveTab(initialTab === "revenue" && !canViewRevenue ? "sales" : initialTab);
-  }, [canViewRevenue, initialTab]);
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   // Clear cached data when branch changes so fresh data is loaded
   useEffect(() => {
@@ -574,8 +570,6 @@ export default function Reports({ initialTab = "sales" }: Props) {
           </div>
         </div>
       )}
-
-      {activeTab === "revenue" && <RevenueAnalysis embedded />}
 
       {/* Inventory Status */}
       {activeTab === "inventory" && inventoryData && (

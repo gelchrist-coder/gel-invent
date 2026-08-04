@@ -6,7 +6,7 @@ from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
-from ..database import get_db
+from ..database import ensure_sale_return_item_schema, get_db
 from ..models import Sale, Product, StockMovement, User, CreditTransaction, Creditor, SaleReturn
 from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
@@ -42,6 +42,9 @@ def get_revenue_analytics(
     
     (Owner/Admin only)
     """
+    # Revenue includes refunds, so make the return ledger readable even when a
+    # serverless deployment did not run the mounted FastAPI startup lifecycle.
+    ensure_sale_return_item_schema()
     ensure_permission(current_user, "view_revenue", "Only Admin and Manager can access revenue analytics")
     
     # Get tenant user IDs for multi-tenant filtering
