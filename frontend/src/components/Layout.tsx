@@ -1,7 +1,7 @@
 import { ReactNode, useState, useEffect } from "react";
 
 import TopBar from "./TopBar";
-import { Branch } from "../types";
+import { Branch, Warehouse } from "../types";
 import appLogo from "../asset/logo.png";
 import { FrontendPermission, hasUserPermission } from "../user-storage";
 import { useCapability } from "../settings";
@@ -144,6 +144,9 @@ type Props = {
   branches?: Branch[];
   activeBranchId?: number | null;
   onChangeBranch?: (branchId: number) => void;
+  warehouses?: Warehouse[];
+  activeWarehouseId?: number | null;
+  onChangeWarehouse?: (warehouseId: number) => void;
 };
 
 export default function Layout({
@@ -163,6 +166,9 @@ export default function Layout({
   branches,
   activeBranchId,
   onChangeBranch,
+  warehouses,
+  activeWarehouseId,
+  onChangeWarehouse,
 }: Props) {
   const warehouseEnabled = useCapability("warehouse_management");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -224,6 +230,12 @@ export default function Layout({
     visibleBranches && visibleBranches.length > 0
       ? visibleBranches.find((b) => b.id === (activeBranchId ?? firstBranchId))?.name ?? visibleBranches[0].name
       : undefined;
+  const visibleWarehouses = (warehouses ?? []).filter(
+    (warehouse) => warehouse.is_active || warehouse.id === activeWarehouseId,
+  );
+  const activeWarehouseName = visibleWarehouses.find(
+    (warehouse) => warehouse.id === (activeWarehouseId ?? visibleWarehouses[0]?.id),
+  )?.name ?? visibleWarehouses[0]?.name;
 
   // On desktop: collapsed by default, expands on hover
   const isExpanded = isMobile || sidebarHovered;
@@ -332,8 +344,30 @@ export default function Layout({
           )}
         </div>
 
+        {/* Warehouse and branch contexts stay separate. Warehouse Operations
+            shows its own location selector; all branch pages keep Branch. */}
+        {isExpanded && activeView === "warehouses" && visibleWarehouses.length > 0 && (
+          <div style={{ padding: "0 16px", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 6, letterSpacing: 0.2 }}>Warehouse</div>
+            {onChangeWarehouse && visibleWarehouses.length > 1 ? (
+              <select
+                value={activeWarehouseId ?? visibleWarehouses[0]?.id}
+                onChange={(event) => onChangeWarehouse(Number(event.target.value))}
+                style={{ width: "100%", height: 36, borderRadius: 8, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.1)", padding: "0 10px", fontSize: 13, color: "#fff" }}
+                aria-label="Select warehouse"
+              >
+                {visibleWarehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id} style={{ color: "#0b1021" }}>{warehouse.name}</option>)}
+              </select>
+            ) : (
+              <div style={{ width: "100%", minHeight: 36, borderRadius: 8, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.08)", padding: "8px 10px", fontSize: 13, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center" }} title={activeWarehouseName}>
+                {activeWarehouseName ?? "Warehouse"}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Branch Selector / Indicator (Sidebar) */}
-        {isExpanded && visibleBranches && visibleBranches.length > 0 && (
+        {isExpanded && activeView !== "warehouses" && visibleBranches && visibleBranches.length > 0 && (
           <div style={{ padding: "0 16px", marginBottom: 16 }}>
             <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 6, letterSpacing: 0.2 }}>Branch</div>
 
@@ -546,6 +580,10 @@ export default function Layout({
             branches={branches}
             activeBranchId={activeBranchId}
             onChangeBranch={onChangeBranch}
+            activeView={activeView}
+            warehouses={visibleWarehouses}
+            activeWarehouseId={activeWarehouseId}
+            onChangeWarehouse={onChangeWarehouse}
             isMobile={isMobile}
           />
         )}

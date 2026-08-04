@@ -29,17 +29,17 @@ const inputStyle = {
   background: "#fff",
 } as const;
 
+type WarehousesProps = {
+  activeWarehouseId?: number | null;
+  onChangeWarehouse?: (warehouseId: number) => void;
+};
+
 function WarehousePageSkeleton() {
   return (
     <div className="app-shell warehouse-page warehouse-page-skeleton" aria-busy="true" aria-label="Loading warehouse operations">
       <div className="page-header warehouse-skeleton-heading">
         <Skeleton width={230} height={30} />
         <Skeleton width="min(520px, 82vw)" height={14} />
-      </div>
-
-      <div className="warehouse-selector" aria-hidden="true">
-        <div className="warehouse-selector__item warehouse-selector-skeleton"><Skeleton width="62%" height={14} /><Skeleton width="78%" height={11} /></div>
-        <div className="warehouse-selector__item warehouse-selector-skeleton"><Skeleton width="58%" height={14} /><Skeleton width="72%" height={11} /></div>
       </div>
 
       <div className="card warehouse-hero warehouse-hero-skeleton" aria-hidden="true">
@@ -82,7 +82,7 @@ function WarehousePageSkeleton() {
   );
 }
 
-export default function Warehouses() {
+export default function Warehouses({ activeWarehouseId, onChangeWarehouse }: WarehousesProps) {
   const currentUser = readStoredUser();
   const usesExpiryTracking = useExpiryTracking();
   const canManage = hasUserPermission("manage_warehouses", currentUser);
@@ -90,7 +90,12 @@ export default function Warehouses() {
   const canViewBranchStock = hasUserPermission("view_inventory", currentUser) && hasUserPermission("view_catalog", currentUser);
   const isWarehouseUser = currentUser?.role === "Warehouse";
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | null>(null);
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | null>(() => {
+    if (activeWarehouseId != null) return activeWarehouseId;
+    if (typeof currentUser?.warehouse_id === "number") return currentUser.warehouse_id;
+    const stored = Number(localStorage.getItem("activeWarehouseId"));
+    return Number.isFinite(stored) && stored > 0 ? stored : null;
+  });
   const [stock, setStock] = useState<WarehouseStock[]>([]);
   const [orders, setOrders] = useState<FulfillmentOrder[]>([]);
   const [movements, setMovements] = useState<WarehouseMovement[]>([]);
@@ -186,10 +191,15 @@ export default function Warehouses() {
         ? localStorage.getItem("activeBranchId") || String(branchRows[0]?.id ?? "")
         : String(branchRows[0]?.id ?? "");
       setTransfer((current) => current.branchId ? current : { ...current, branchId: activeBranchId });
-      const nextId = selectedWarehouseId && warehouseRows.some((row) => row.id === selectedWarehouseId)
-        ? selectedWarehouseId
+      const preferredWarehouseId = activeWarehouseId ?? selectedWarehouseId;
+      const nextId = preferredWarehouseId && warehouseRows.some((row) => row.id === preferredWarehouseId)
+        ? preferredWarehouseId
         : warehouseRows.find((row) => row.is_active)?.id ?? warehouseRows[0]?.id ?? null;
       setSelectedWarehouseId(nextId);
+      if (nextId != null && nextId !== activeWarehouseId) {
+        localStorage.setItem("activeWarehouseId", String(nextId));
+        onChangeWarehouse?.(nextId);
+      }
       if (nextId) await loadStock(nextId);
       else setStock([]);
     } catch (cause) {
@@ -197,14 +207,24 @@ export default function Warehouses() {
     } finally {
       setLoading(false);
     }
-  }, [canViewBranchStock, loadStock, selectedWarehouseId]);
+  }, [activeWarehouseId, canViewBranchStock, loadStock, onChangeWarehouse, selectedWarehouseId]);
 
   useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectWarehouse = async (warehouseId: number) => {
     setLoading(true);
     setSelectedWarehouseId(warehouseId);
+    localStorage.setItem("activeWarehouseId", String(warehouseId));
+    if (warehouseId !== activeWarehouseId) onChangeWarehouse?.(warehouseId);
     setActiveTab("overview");
+    setStock([]);
+    setOrders([]);
+    setMovements([]);
+    setReceipt({ itemId: "", quantity: "", reference: "", batchNumber: "", expiryDate: "", unitCost: "", notes: "" });
+    setTransfer((current) => ({ ...current, productId: "", itemId: "", quantity: "", notes: "" }));
+    setOrderDraft({ customerName: "", phone: "", email: "", address: "", externalId: "" });
+    setLineDraft({ itemId: "", quantity: "" });
+    setOrderLines([]);
     setError(null);
     try {
       await loadStock(warehouseId);
@@ -214,6 +234,13 @@ export default function Warehouses() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (loading || activeWarehouseId == null || activeWarehouseId === selectedWarehouseId) return;
+    void selectWarehouse(activeWarehouseId);
+    // selectWarehouse intentionally runs only when the global warehouse changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWarehouseId]);
 
   const handleAddWarehouseProduct = async (payload: NewProduct) => {
     if (!selectedWarehouseId) return;
@@ -365,12 +392,6 @@ export default function Warehouses() {
 
       {warehouses.length === 0 ? <div className="card warehouse-empty">No warehouses are configured. The business owner can create one in Settings.</div> : (
         <>
-          <div className="warehouse-selector" role="tablist" aria-label="Warehouses">
-            {warehouses.map((warehouse) => <button key={warehouse.id} type="button" onClick={() => void selectWarehouse(warehouse.id)} className={selectedWarehouseId === warehouse.id ? "warehouse-selector__item active" : "warehouse-selector__item"}>
-              <strong>{warehouse.name}</strong><span>{warehouse.total_skus} SKUs · {Number(warehouse.total_units).toLocaleString()} units</span>
-            </button>)}
-          </div>
-
           {selectedWarehouse ? <>
             <div className="card warehouse-hero">
               <div><span className="warehouse-eyebrow">CENTRAL STOCK LOCATION</span><h2>{selectedWarehouse.name}</h2><p>{selectedWarehouse.address || "No address saved"}</p></div>

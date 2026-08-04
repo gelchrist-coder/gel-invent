@@ -1,14 +1,14 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ErrorInfo, type ReactNode } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 
-import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, updateProduct, getCachedProducts, clearDataCache, isTemporaryServerDelayError, warmBackend } from "./api";
+import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, fetchWarehouses, updateProduct, getCachedProducts, clearDataCache, isTemporaryServerDelayError, warmBackend } from "./api";
 import Layout from "./components/Layout";
 import { PageSkeleton } from "./components/Skeleton";
 import { getSalesOutboxCount } from "./offline/storage";
 import { syncSalesOutboxOnce } from "./offline/sync";
 import { useAppCategories } from "./categories";
 import { updateMyCategories } from "./api";
-import { Branch, NewProduct, Product, ProductUpdate, Supplier } from "./types";
+import { Branch, NewProduct, Product, ProductUpdate, Supplier, Warehouse } from "./types";
 import { useExpiryTracking } from "./settings";
 import { FrontendPermission, getDisplayBusinessName, getEffectiveUserRole, hasUserPermission, readStoredUser, setStoredBusinessLogo, StoredUser } from "./user-storage";
 import { fetchBusinessLogo } from "./api";
@@ -239,9 +239,18 @@ export default function App() {
   const [userRole, setUserRole] = useState(() => readStoredUser()?.role || "Admin");
   const [currentUserId, setCurrentUserId] = useState<number | null>(() => readStoredUser()?.id ?? null);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [supplierDirectory, setSupplierDirectory] = useState<Supplier[]>([]);
   const [activeBranchId, setActiveBranchId] = useState<number | null>(() => {
     const raw = localStorage.getItem("activeBranchId");
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  });
+  const [activeWarehouseId, setActiveWarehouseId] = useState<number | null>(() => {
+    const assignedWarehouseId = readStoredUser()?.warehouse_id;
+    if (typeof assignedWarehouseId === "number") return assignedWarehouseId;
+    const raw = localStorage.getItem("activeWarehouseId");
     if (!raw) return null;
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? parsed : null;
@@ -264,6 +273,7 @@ export default function App() {
   const canViewProcurement = hasUserPermission("view_procurement", accessUser);
   const canViewReports = hasUserPermission("view_reports", accessUser);
   const canViewRevenue = hasUserPermission("view_revenue", accessUser);
+  const canViewWarehouses = hasUserPermission("view_warehouses", accessUser);
   const isWarehouseUser = storedUser?.role === "Warehouse";
 
   const showExpiryStatusFilter = usesExpiryTracking && products.length > 0 && products.some((p) => !!p.expiry_date);
@@ -394,13 +404,16 @@ export default function App() {
     localStorage.removeItem("user");
     localStorage.removeItem("token");
     localStorage.removeItem("activeBranchId");
+    localStorage.removeItem("activeWarehouseId");
     setUserName("User");
     setBusinessName("Business");
     setUserRole("Admin");
     setCurrentUserId(null);
     setBranches([]);
+    setWarehouses([]);
     setSupplierDirectory([]);
     setActiveBranchId(null);
+    setActiveWarehouseId(null);
     setOutboxCount(0);
   };
 
@@ -439,6 +452,10 @@ export default function App() {
       setBusinessName(getDisplayBusinessName(initialUser));
       setUserRole(initialUser.role || "Admin");
       setCurrentUserId(initialUser.id || null);
+      if (typeof initialUser.warehouse_id === "number") {
+        setActiveWarehouseId(initialUser.warehouse_id);
+        localStorage.setItem("activeWarehouseId", String(initialUser.warehouse_id));
+      }
       if (!hasUserPermission("manage_branches", initialUser)) {
         const bid = typeof initialUser.branch_id === "number" ? initialUser.branch_id : null;
         setActiveBranchId(bid);
@@ -458,6 +475,11 @@ export default function App() {
           setUserRole(getEffectiveUserRole(me));
           setCurrentUserId(me.id || null);
           setActiveView(getDefaultEmployeeView(me));
+
+          if (typeof me.warehouse_id === "number") {
+            setActiveWarehouseId(me.warehouse_id);
+            localStorage.setItem("activeWarehouseId", String(me.warehouse_id));
+          }
 
           // Employees are locked to their assigned branch.
           if (!hasUserPermission("manage_branches", me)) {
@@ -603,6 +625,51 @@ export default function App() {
     window.addEventListener("branchesChanged", handler as EventListener);
     return () => window.removeEventListener("branchesChanged", handler as EventListener);
   }, [isAuthenticated, activeBranchId, isWarehouseUser]);
+
+  // Warehouses have their own persistent operating context. This stays
+  // independent from activeBranchId so warehouse work cannot redirect sales.
+  useEffect(() => {
+    if (!isAuthenticated || !canViewWarehouses) {
+      setWarehouses([]);
+      setActiveWarehouseId(null);
+      localStorage.removeItem("activeWarehouseId");
+      return;
+    }
+
+    const applyWarehouses = (rows: Warehouse[]) => {
+      setWarehouses(rows);
+      const assignedId = readStoredUser()?.warehouse_id;
+      const selectableRows = rows.filter((warehouse) => warehouse.is_active || warehouse.id === assignedId);
+      const storedId = Number(localStorage.getItem("activeWarehouseId"));
+      const persistedId = Number.isFinite(storedId) && storedId > 0 ? storedId : activeWarehouseId;
+      const nextId = isWarehouseUser && typeof assignedId === "number"
+        ? assignedId
+        : selectableRows.some((warehouse) => warehouse.id === persistedId)
+          ? persistedId
+          : selectableRows[0]?.id ?? null;
+
+      setActiveWarehouseId(nextId);
+      if (nextId != null) localStorage.setItem("activeWarehouseId", String(nextId));
+      else localStorage.removeItem("activeWarehouseId");
+    };
+
+    fetchWarehouses()
+      .then(applyWarehouses)
+      .catch((error) => {
+        if (import.meta.env.DEV) {
+          console.warn("Warehouse context load failed; preserving the current selection.", error);
+        }
+      });
+
+    const handleWarehousesChanged = () => {
+      fetchWarehouses().then(applyWarehouses).catch(() => {});
+    };
+    window.addEventListener("warehousesChanged", handleWarehousesChanged);
+    return () => window.removeEventListener("warehousesChanged", handleWarehousesChanged);
+    // Selection is deliberately excluded so changing warehouses does not refetch
+    // the directory; the active page reacts to the updated context prop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canViewWarehouses, isAuthenticated, isWarehouseUser]);
 
   // Warm caches in background so page switches feel instant.
   useEffect(() => {
@@ -856,6 +923,11 @@ export default function App() {
       setUserRole(user.role || "Admin");
       setCurrentUserId(user.id ?? null);
 
+      if (typeof user.warehouse_id === "number") {
+        setActiveWarehouseId(user.warehouse_id);
+        localStorage.setItem("activeWarehouseId", String(user.warehouse_id));
+      }
+
       if (!hasUserPermission("manage_branches", user)) {
         const bid = typeof user.branch_id === "number" ? user.branch_id : null;
         setActiveBranchId(bid);
@@ -897,6 +969,15 @@ export default function App() {
 
     // Notify other components that the active branch changed
     window.dispatchEvent(new CustomEvent("activeBranchChanged", { detail: branchId }));
+  };
+
+  const handleChangeWarehouse = (warehouseId: number) => {
+    if (isWarehouseUser || warehouseId === activeWarehouseId) return;
+    const warehouse = warehouses.find((row) => row.id === warehouseId && row.is_active);
+    if (!warehouse) return;
+    setActiveWarehouseId(warehouseId);
+    localStorage.setItem("activeWarehouseId", String(warehouseId));
+    window.dispatchEvent(new CustomEvent("activeWarehouseChanged", { detail: warehouseId }));
   };
 
   useEffect(() => {
@@ -1397,7 +1478,7 @@ export default function App() {
       case "purchases":
         return <Purchases />;
       case "warehouses":
-        return <Warehouses />;
+        return <Warehouses activeWarehouseId={activeWarehouseId} onChangeWarehouse={handleChangeWarehouse} />;
       case "sales":
         return <Sales />;
       case "invoice":
@@ -1440,6 +1521,9 @@ export default function App() {
         branches={branches}
         activeBranchId={activeBranchId}
         onChangeBranch={canManageBranches ? handleChangeBranch : undefined}
+        warehouses={warehouses}
+        activeWarehouseId={activeWarehouseId}
+        onChangeWarehouse={!isWarehouseUser ? handleChangeWarehouse : undefined}
       >
         <Suspense fallback={<LazyViewFallback />}>
           {renderView(activeView)}

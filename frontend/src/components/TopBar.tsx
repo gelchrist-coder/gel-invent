@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 
-import { Branch } from "../types";
+import { Branch, Warehouse } from "../types";
 import { getStoredBusinessLogo } from "../user-storage";
 
 
@@ -18,6 +18,10 @@ type Props = {
   branches?: Branch[];
   activeBranchId?: number | null;
   onChangeBranch?: (branchId: number) => void;
+  activeView?: string;
+  warehouses?: Warehouse[];
+  activeWarehouseId?: number | null;
+  onChangeWarehouse?: (warehouseId: number) => void;
   isMobile?: boolean;
 };
 
@@ -35,12 +39,17 @@ export default function TopBar({
   branches,
   activeBranchId,
   onChangeBranch,
+  activeView,
+  warehouses,
+  activeWarehouseId,
+  onChangeWarehouse,
   isMobile = false,
 }: Props) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [businessLogo, setBusinessLogo] = useState<string | null>(() => getStoredBusinessLogo());
   const dropdownRef = useRef<HTMLDivElement>(null);
   const visibleBranches = branches ?? [];
+  const visibleWarehouses = warehouses ?? [];
 
   // Keep the header logo in sync when it's uploaded/removed in Settings.
   useEffect(() => {
@@ -110,7 +119,27 @@ export default function TopBar({
       {/* Left spacer keeps the desktop 3-column grid balanced. On mobile the
           bottom tab bar's "More" replaces the old hamburger, so it's dropped. */}
       {!isMobile && (
-        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 12, justifyContent: "flex-start" }} />
+        <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 12, justifyContent: "flex-start" }}>
+          {activeView === "warehouses" && visibleWarehouses.length > 0 ? (
+            <label style={{ display: "grid", gap: 3, minWidth: 190 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, color: "#64748b", letterSpacing: ".08em", textTransform: "uppercase" }}>Active warehouse</span>
+              {onChangeWarehouse && visibleWarehouses.length > 1 ? (
+                <select
+                  value={activeWarehouseId ?? visibleWarehouses[0]?.id}
+                  onChange={(event) => onChangeWarehouse(Number(event.target.value))}
+                  aria-label="Select active warehouse"
+                  style={{ height: 34, maxWidth: 240, borderRadius: 9, border: "1px solid #cbd5e1", background: "#f8fafc", color: "#0f172a", padding: "0 30px 0 10px", fontSize: 13, fontWeight: 700 }}
+                >
+                  {visibleWarehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
+                </select>
+              ) : (
+                <span style={{ minHeight: 34, maxWidth: 240, borderRadius: 9, border: "1px solid #dbe5f2", background: "#f8fafc", color: "#0f172a", padding: "7px 10px", fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {visibleWarehouses.find((warehouse) => warehouse.id === activeWarehouseId)?.name ?? visibleWarehouses[0]?.name}
+                </span>
+              )}
+            </label>
+          ) : null}
+        </div>
       )}
 
       {/* Center - Business Name (desktop) / left-aligned brand (mobile) */}

@@ -445,6 +445,7 @@ export default function Profile() {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
       localStorage.removeItem("activeBranchId");
+      localStorage.removeItem("activeWarehouseId");
       window.dispatchEvent(new CustomEvent("userChanged", { detail: null }));
     } catch (error) {
       setDeleteAccountError(error instanceof Error ? error.message : "Failed to delete account");
