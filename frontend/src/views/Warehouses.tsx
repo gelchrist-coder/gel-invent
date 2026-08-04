@@ -106,7 +106,8 @@ export default function Warehouses({ activeWarehouseId, onChangeWarehouse }: War
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "stock" | "purchases" | "transfers" | "orders" | "movements">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "stock" | "purchases" | "returns" | "transfers" | "orders" | "movements">("overview");
+  const [pendingReturnPurchaseId, setPendingReturnPurchaseId] = useState<number | null>(null);
   const [receipt, setReceipt] = useState({ itemId: "", quantity: "", reference: "", batchNumber: "", expiryDate: "", unitCost: "", notes: "" });
   const [transfer, setTransfer] = useState({
     direction: (isWarehouseUser ? "warehouse_to_branch" : "branch_to_warehouse") as "branch_to_warehouse" | "warehouse_to_branch",
@@ -225,6 +226,7 @@ export default function Warehouses({ activeWarehouseId, onChangeWarehouse }: War
     setOrderDraft({ customerName: "", phone: "", email: "", address: "", externalId: "" });
     setLineDraft({ itemId: "", quantity: "" });
     setOrderLines([]);
+    setPendingReturnPurchaseId(null);
     setError(null);
     try {
       await loadStock(warehouseId);
@@ -355,7 +357,10 @@ export default function Warehouses({ activeWarehouseId, onChangeWarehouse }: War
   const tabs = [
     { id: "overview" as const, label: "Overview" },
     { id: "stock" as const, label: "Stock" },
-    ...(canPurchase && selectedWarehouse?.is_active ? [{ id: "purchases" as const, label: "Purchases" }] : []),
+    ...(canPurchase && selectedWarehouse?.is_active ? [
+      { id: "purchases" as const, label: "Purchases" },
+      { id: "returns" as const, label: "Return Outwards" },
+    ] : []),
     { id: "transfers" as const, label: "Transfers" },
     { id: "orders" as const, label: "Fulfilment" },
     { id: "movements" as const, label: "History" },
@@ -422,7 +427,9 @@ export default function Warehouses({ activeWarehouseId, onChangeWarehouse }: War
               {stockTable}
             </div> : null}
 
-            {activeTab === "purchases" && canPurchase && selectedWarehouse.is_active ? <PurchasingPanel key={`warehouse-purchases-${selectedWarehouse.id}`} products={warehouseProducts} warehouseId={selectedWarehouse.id} destinationLabel={`${selectedWarehouse.name} Warehouse`} usesExpiryTracking={usesExpiryTracking} onPurchaseRecorded={() => loadStock(selectedWarehouse.id)} mode="purchasing" /> : null}
+            {activeTab === "purchases" && canPurchase && selectedWarehouse.is_active ? <PurchasingPanel key={`warehouse-purchases-${selectedWarehouse.id}`} products={warehouseProducts} warehouseId={selectedWarehouse.id} destinationLabel={`${selectedWarehouse.name} Warehouse`} usesExpiryTracking={usesExpiryTracking} onPurchaseRecorded={() => loadStock(selectedWarehouse.id)} mode="purchasing" onOpenReturnsView={(purchaseId) => { setPendingReturnPurchaseId(purchaseId); setActiveTab("returns"); }} /> : null}
+
+            {activeTab === "returns" && canPurchase && selectedWarehouse.is_active ? <PurchasingPanel key={`warehouse-returns-${selectedWarehouse.id}`} products={warehouseProducts} warehouseId={selectedWarehouse.id} destinationLabel={`${selectedWarehouse.name} Warehouse`} usesExpiryTracking={usesExpiryTracking} onPurchaseRecorded={() => loadStock(selectedWarehouse.id)} mode="returns" initialReturnPurchaseId={pendingReturnPurchaseId} onInitialReturnPurchaseIdHandled={() => setPendingReturnPurchaseId(null)} /> : null}
 
             {activeTab === "transfers" ? <form className="card warehouse-action-panel warehouse-transfer-form" onSubmit={handleTransfer}><div><span className="warehouse-eyebrow">CONTROLLED MOVEMENT</span><h3>Transfer stock</h3><p>Every transfer creates matching warehouse and branch audit entries.</p></div><div className="warehouse-form-grid"><label>Direction<select style={inputStyle} value={transfer.direction} onChange={(e) => setTransfer({ ...transfer, direction: e.target.value as typeof transfer.direction })}>{canViewBranchStock ? <option value="branch_to_warehouse">Branch → Warehouse</option> : null}<option value="warehouse_to_branch">Warehouse → Branch</option></select></label><label>Branch<select style={inputStyle} value={transfer.branchId} onChange={(e) => setTransfer({ ...transfer, branchId: e.target.value })} required><option value="">Choose branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>{transfer.direction === "branch_to_warehouse" ? <label>Branch product<select style={inputStyle} value={transfer.productId} onChange={(e) => setTransfer({ ...transfer, productId: e.target.value })} required><option value="">Choose product</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name} · {Number(product.current_stock || 0)} available</option>)}</select></label> : <label>Warehouse product<select style={inputStyle} value={transfer.itemId} onChange={(e) => setTransfer({ ...transfer, itemId: e.target.value })} required><option value="">Choose stock</option>{stock.filter((item) => Number(item.available_quantity) > 0).map((item) => <option key={item.item_id} value={item.item_id}>{item.name} · {Number(item.available_quantity)} available</option>)}</select></label>}<label>Quantity<input style={inputStyle} type="number" min="0.01" step="0.01" value={transfer.quantity} onChange={(e) => setTransfer({ ...transfer, quantity: e.target.value })} required /></label><label>Note<input style={inputStyle} value={transfer.notes} onChange={(e) => setTransfer({ ...transfer, notes: e.target.value })} placeholder="Optional" /></label></div><button className="button" disabled={busy}>Complete Transfer</button></form> : null}
 
