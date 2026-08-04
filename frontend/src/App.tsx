@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ErrorInfo, type ReactNode } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 
-import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSuppliersCached, fetchWarehouses, updateProduct, getCachedProducts, clearDataCache, isTemporaryServerDelayError, warmBackend } from "./api";
+import { createProduct, createSupplier, deleteProduct, fetchBranchesCached, fetchInventoryAnalytics, fetchMe, fetchProductsCached, fetchSalesCached, fetchMonitoringSalesCached, fetchSalesDashboard, fetchSuppliersCached, fetchWarehouses, updateProduct, getCachedProducts, clearDataCache, isTemporaryServerDelayError, warmBackend } from "./api";
 import Layout from "./components/Layout";
 import { PageSkeleton } from "./components/Skeleton";
 import { getSalesOutboxCount } from "./offline/storage";
@@ -247,6 +247,11 @@ export default function App() {
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? parsed : null;
   });
+  const [adminLocationScope, setAdminLocationScope] = useState<"all" | "branch">(() => {
+    const user = readStoredUser();
+    if (!hasUserPermission("manage_branches", user)) return "branch";
+    return localStorage.getItem("adminLocationScope") === "branch" ? "branch" : "all";
+  });
   const [activeWarehouseId, setActiveWarehouseId] = useState<number | null>(() => {
     const assignedWarehouseId = readStoredUser()?.warehouse_id;
     if (typeof assignedWarehouseId === "number") return assignedWarehouseId;
@@ -260,7 +265,7 @@ export default function App() {
 
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
-  const prefetchedBranchRef = useRef<number | null>(null);
+  const prefetchedBranchRef = useRef<string | null>(null);
   const syncInFlightRef = useRef(false);
   const supplierSyncInFlightRef = useRef(false);
   const storedUser = readStoredUser();
@@ -405,6 +410,7 @@ export default function App() {
     localStorage.removeItem("token");
     localStorage.removeItem("activeBranchId");
     localStorage.removeItem("activeWarehouseId");
+    localStorage.removeItem("adminLocationScope");
     setUserName("User");
     setBusinessName("Business");
     setUserRole("Admin");
@@ -414,6 +420,7 @@ export default function App() {
     setSupplierDirectory([]);
     setActiveBranchId(null);
     setActiveWarehouseId(null);
+    setAdminLocationScope("branch");
     setOutboxCount(0);
   };
 
@@ -460,6 +467,12 @@ export default function App() {
         const bid = typeof initialUser.branch_id === "number" ? initialUser.branch_id : null;
         setActiveBranchId(bid);
         if (bid != null) localStorage.setItem("activeBranchId", String(bid));
+        localStorage.removeItem("adminLocationScope");
+        setAdminLocationScope("branch");
+      } else {
+        const scope = localStorage.getItem("adminLocationScope") === "branch" ? "branch" : "all";
+        localStorage.setItem("adminLocationScope", scope);
+        setAdminLocationScope(scope);
       }
     }
 
@@ -487,6 +500,12 @@ export default function App() {
             setActiveBranchId(bid);
             if (bid != null) localStorage.setItem("activeBranchId", String(bid));
             else localStorage.removeItem("activeBranchId");
+            localStorage.removeItem("adminLocationScope");
+            setAdminLocationScope("branch");
+          } else {
+            const scope = localStorage.getItem("adminLocationScope") === "branch" ? "branch" : "all";
+            localStorage.setItem("adminLocationScope", scope);
+            setAdminLocationScope(scope);
           }
         })
         .catch((err: unknown) => {
@@ -687,16 +706,18 @@ export default function App() {
 
     if (isWarehouseUser) return;
 
-    if (prefetchedBranchRef.current === activeBranchId) return;
-    prefetchedBranchRef.current = activeBranchId;
+    const prefetchScopeKey = `${activeBranchId ?? "none"}:${adminLocationScope}`;
+    if (prefetchedBranchRef.current === prefetchScopeKey) return;
+    prefetchedBranchRef.current = prefetchScopeKey;
 
     fetchSalesCached().catch(() => {});
+    fetchMonitoringSalesCached().catch(() => {});
     fetchInventoryAnalytics().catch(() => {});
 
     if (canViewReports) {
       fetchSalesDashboard().catch(() => {});
     }
-  }, [canViewReports, isAuthenticated, activeBranchId, isWarehouseUser]);
+  }, [canViewReports, isAuthenticated, activeBranchId, adminLocationScope, isWarehouseUser]);
 
   useEffect(() => {
     const handleOutboxChanged = () => {
@@ -897,7 +918,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [canViewProcurement, isAuthenticated, activeBranchId]);
+  }, [canViewProcurement, isAuthenticated, activeBranchId, adminLocationScope]);
 
   useEffect(() => {
     if (!showAddProduct || !isAuthenticated || !canViewProcurement) {
@@ -932,6 +953,12 @@ export default function App() {
         const bid = typeof user.branch_id === "number" ? user.branch_id : null;
         setActiveBranchId(bid);
         if (bid != null) localStorage.setItem("activeBranchId", String(bid));
+        localStorage.removeItem("adminLocationScope");
+        setAdminLocationScope("branch");
+      } else {
+        const scope = localStorage.getItem("adminLocationScope") === "branch" ? "branch" : "all";
+        localStorage.setItem("adminLocationScope", scope);
+        setAdminLocationScope(scope);
       }
     }
 
@@ -969,6 +996,32 @@ export default function App() {
 
     // Notify other components that the active branch changed
     window.dispatchEvent(new CustomEvent("activeBranchChanged", { detail: branchId }));
+  };
+
+  const handleChangeMonitoringLocation = (location: "all" | number) => {
+    if (location === "all") {
+      if (adminLocationScope === "all") return;
+      setAdminLocationScope("all");
+      localStorage.setItem("adminLocationScope", "all");
+      clearDataCache();
+      setSupplierDirectory([]);
+      window.dispatchEvent(new CustomEvent("locationScopeChanged", { detail: "all" }));
+      return;
+    }
+
+    const branchChanged = location !== activeBranchId;
+    setAdminLocationScope("branch");
+    localStorage.setItem("adminLocationScope", "branch");
+    if (branchChanged) {
+      setActiveBranchId(location);
+      localStorage.setItem("activeBranchId", String(location));
+      setProducts([]);
+      setSelectedId(null);
+      window.dispatchEvent(new CustomEvent("activeBranchChanged", { detail: location }));
+    }
+    clearDataCache();
+    setSupplierDirectory([]);
+    window.dispatchEvent(new CustomEvent("locationScopeChanged", { detail: "branch" }));
   };
 
   const handleChangeWarehouse = (warehouseId: number) => {
@@ -1521,6 +1574,8 @@ export default function App() {
         branches={branches}
         activeBranchId={activeBranchId}
         onChangeBranch={canManageBranches ? handleChangeBranch : undefined}
+        adminLocationScope={adminLocationScope}
+        onChangeMonitoringLocation={canManageBranches ? handleChangeMonitoringLocation : undefined}
         warehouses={warehouses}
         activeWarehouseId={activeWarehouseId}
         onChangeWarehouse={!isWarehouseUser ? handleChangeWarehouse : undefined}

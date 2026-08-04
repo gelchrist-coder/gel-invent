@@ -118,3 +118,28 @@ def get_active_branch_id(
         current_user=current_user,
         header_branch_id=x_branch_id,
     )
+
+
+def get_reporting_branch_id(
+    x_location_scope: Optional[str] = Header(default=None, alias="X-Location-Scope"),
+    x_branch_id: Optional[int] = Header(default=None, alias="X-Branch-Id"),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user),
+) -> int | None:
+    """Resolve a read-only monitoring scope.
+
+    The tenant owner may request ``all`` to aggregate the tenant records
+    supported by a monitoring endpoint. Employees are always resolved to their
+    assigned branch even if a client tries to send the company-wide header.
+    Write endpoints continue to use ``get_active_branch_id`` and therefore
+    always receive a concrete branch.
+    """
+    normalized_scope = str(x_location_scope or "").strip().lower()
+    if normalized_scope == "all" and is_admin(current_user):
+        return None
+
+    return resolve_active_branch_id(
+        db=db,
+        current_user=current_user,
+        header_branch_id=x_branch_id,
+    )

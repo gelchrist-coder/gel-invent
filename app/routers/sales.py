@@ -5,7 +5,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, or_, select, text, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -15,7 +15,7 @@ from .. import models
 from ..schemas import SaleBatchOptionRead, SaleCreate, SaleRead, SaleSupplyRequest
 from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
-from app.utils.branch import get_active_branch_id
+from app.utils.branch import get_active_branch_id, get_reporting_branch_id
 from app.utils.expiry import get_batch_balances, writeoff_expired_batches
 from app.utils.email import send_email, smtp_configured
 from app.routers.settings import _read_taxes
@@ -252,7 +252,7 @@ def _attach_deducted_batches(
     db: Session,
     sales: list[models.Sale],
     tenant_user_ids: list[int],
-    branch_id: int,
+    branch_id: int | None,
 ) -> None:
     sale_ids = sorted({int(sale.id) for sale in sales})
     if not sale_ids:
@@ -267,7 +267,7 @@ def _attach_deducted_batches(
         )
         .where(
             models.StockMovement.sale_id.in_(sale_ids),
-            models.StockMovement.branch_id == branch_id,
+            true() if branch_id is None else models.StockMovement.branch_id == branch_id,
             models.StockMovement.user_id.in_(tenant_user_ids),
             models.StockMovement.change < 0,
         )
@@ -1161,7 +1161,7 @@ def send_sale_receipt_email(
 def list_sales(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
+    active_branch_id: int | None = Depends(get_reporting_branch_id),
     awaiting_supply: bool = False,
     collect_later: bool = False,
     limit: int = 1000,
@@ -1186,7 +1186,10 @@ def list_sales(
     page_offset = max(0, int(offset))
     query = (
         select(models.Sale)
-        .where(models.Sale.user_id.in_(tenant_user_ids), models.Sale.branch_id == active_branch_id)
+        .where(
+            models.Sale.user_id.in_(tenant_user_ids),
+            true() if active_branch_id is None else models.Sale.branch_id == active_branch_id,
+        )
         # id tiebreaker keeps paging stable when several sales share a timestamp
         # (bulk checkout writes the whole cart in the same second).
         .order_by(models.Sale.created_at.desc(), models.Sale.id.desc())

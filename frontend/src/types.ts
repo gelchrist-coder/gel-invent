@@ -363,6 +363,8 @@ export type SupplierPayment = {
   order_number?: string | null;
   purchase_invoice_number?: string | null;
   product_name?: string | null;
+  destination_type?: "branch" | "warehouse" | null;
+  destination_name?: string | null;
   amount: number;
   payment_method: string;
   payment_date?: string | null;
@@ -383,6 +385,8 @@ export type PurchaseReturn = {
   order_number?: string | null;
   purchase_invoice_number?: string | null;
   product_name?: string | null;
+  destination_type?: "branch" | "warehouse" | null;
+  destination_name?: string | null;
   quantity_returned: number;
   unit_cost_price: number;
   total_cost_returned: number;
@@ -397,6 +401,7 @@ export type SupplierDetail = {
   supplier: Supplier;
   purchases: Purchase[];
   payments: SupplierPayment[];
+  returns: PurchaseReturn[];
 };
 
 export type NewSupplierPayment = {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { fetchMorningSummary, fetchProductsCached, fetchSalesCached, fetchSalesDashboard, fetchSystemSettingsCached, getCachedProducts } from "../api";
+import { fetchMorningSummary, fetchProductsCached, fetchMonitoringSalesCached, fetchSalesDashboard, fetchSystemSettingsCached, getCachedProducts } from "../api";
 import { Product } from "../types";
 import { useExpiryTracking } from "../settings";
 import { hasUserPermission, readStoredUser } from "../user-storage";
@@ -305,6 +305,7 @@ export default function Dashboard({ onNavigate }: Props) {
   const currentUser = readStoredUser();
   const canViewReports = hasUserPermission("view_reports", currentUser);
   const canViewMorningSummary = hasUserPermission("manage_branches", currentUser);
+  const isCompanyWide = canViewMorningSummary && localStorage.getItem("adminLocationScope") === "all";
   const token = localStorage.getItem("token");
 
   const loadDashboardData = useCallback(async () => {
@@ -328,7 +329,7 @@ export default function Dashboard({ onNavigate }: Props) {
           setExpiryWarningDays(fresh.expiry_warning_days);
         }),
         canViewReports ? fetchSalesDashboard(rangeStartDate) : Promise.resolve(null),
-        canViewReports ? fetchSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])) : Promise.resolve([]),
+        canViewReports ? fetchMonitoringSalesCached((fresh) => setSalesForTrend(fresh as TrendSale[])) : Promise.resolve([]),
         canViewMorningSummary ? fetchMorningSummary() : Promise.resolve(null),
       ]);
 
@@ -418,10 +419,12 @@ export default function Dashboard({ onNavigate }: Props) {
       void loadDashboardData();
     };
     window.addEventListener("activeBranchChanged", handler as EventListener);
+    window.addEventListener("locationScopeChanged", handler as EventListener);
     // Recover the dashboard after a network change once connectivity returns.
     window.addEventListener("appReconnected", handler as EventListener);
     return () => {
       window.removeEventListener("activeBranchChanged", handler as EventListener);
+      window.removeEventListener("locationScopeChanged", handler as EventListener);
       window.removeEventListener("appReconnected", handler as EventListener);
     };
   }, [loadDashboardData]);
@@ -615,15 +618,23 @@ export default function Dashboard({ onNavigate }: Props) {
   const topRevenueMax = Math.max(...topProductsBars.map((p) => p.revenue), 1);
 
   // Stock alerts - will be based on real stock movements when implemented
-  const lowStockItems: LowStockItem[] = products
-    .filter((p) => Math.max(0, Number(p.current_stock ?? 0)) < lowStockThreshold)
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      sku: p.sku,
-      currentStock: Math.max(0, Number(p.current_stock ?? 0)),
-      minStock: lowStockThreshold,
-    }));
+  const lowStockItems: LowStockItem[] = isCompanyWide && morningSummary
+    ? morningSummary.low_stock.items.map((item) => ({
+      id: item.id ?? item.product_id ?? item.sku ?? item.name,
+      name: item.name,
+      sku: item.sku || "—",
+      currentStock: Math.max(0, Number(item.current_stock ?? 0)),
+      minStock: morningSummary.low_stock.threshold,
+    }))
+    : products
+      .filter((p) => Math.max(0, Number(p.current_stock ?? 0)) < lowStockThreshold)
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        sku: p.sku,
+        currentStock: Math.max(0, Number(p.current_stock ?? 0)),
+        minStock: lowStockThreshold,
+      }));
 
   const lowStockActionItems = useMemo(
     () => lowStockItems
@@ -645,10 +656,10 @@ export default function Dashboard({ onNavigate }: Props) {
   );
 
   // Calculate expired and expiring soon products (only if expiry tracking is enabled)
-  const expiredProducts = usesExpiryTracking ? products.filter(
+  const expiredProducts = usesExpiryTracking && !isCompanyWide ? products.filter(
     (p) => p.expiry_date && new Date(p.expiry_date) < new Date()
   ) : [];
-  const expiringSoonProducts = usesExpiryTracking ? products.filter(
+  const expiringSoonProducts = usesExpiryTracking && !isCompanyWide ? products.filter(
     (p) =>
       p.expiry_date &&
       new Date(p.expiry_date) >= new Date() &&
@@ -690,9 +701,14 @@ export default function Dashboard({ onNavigate }: Props) {
         },
         {
           label: "Stock Alerts",
-          value: String(lowStockItems.length + expiredProducts.length + expiringSoonProducts.length),
+          value: String(
+            lowStockItems.length
+            + (isCompanyWide ? Number(morningSummary?.expiring_products.count || 0) : expiredProducts.length + expiringSoonProducts.length)
+          ),
           accent: "#b45309",
-          helper: `${lowStockItems.length} low stock, ${expiredProducts.length} expired`,
+          helper: isCompanyWide
+            ? `${lowStockItems.length} low stock, ${morningSummary?.expiring_products.count || 0} expiring`
+            : `${lowStockItems.length} low stock, ${expiredProducts.length} expired`,
         },
       ];
     }
@@ -731,6 +747,8 @@ export default function Dashboard({ onNavigate }: Props) {
     expiredProducts.length,
     lowStockItems.length,
     lowStockThreshold,
+    isCompanyWide,
+    morningSummary?.expiring_products.count,
     products.length,
     rangeLabel,
     salesInSelectedRange.length,

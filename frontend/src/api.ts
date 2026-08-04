@@ -16,6 +16,7 @@ import {
   SaleBatchOption,
   StockMovement,
   Supplier,
+  SupplierDetail,
   SupplierPayment,
   Warehouse,
   WarehouseMovement,
@@ -358,7 +359,12 @@ async function ensureBackendWarm(): Promise<void> {
 
 function getCacheKey(key: string): string {
   const branchId = localStorage.getItem("activeBranchId");
-  return `${key}:${branchId || "default"}`;
+  const locationScope = localStorage.getItem("adminLocationScope") || "branch";
+  return `${key}:${branchId || "default"}:${locationScope}`;
+}
+
+function getCurrentCacheScope(): string {
+  return `${localStorage.getItem("activeBranchId") || "default"}:${localStorage.getItem("adminLocationScope") || "branch"}`;
 }
 
 function getCached<T>(key: string): T | null {
@@ -366,16 +372,14 @@ function getCached<T>(key: string): T | null {
   const entry = dataCache.get(cacheKey) as CacheEntry<T> | undefined;
   if (!entry) return null;
   
-  const branchId = localStorage.getItem("activeBranchId");
-  if (entry.branchId !== branchId) return null;
+  if (entry.branchId !== getCurrentCacheScope()) return null;
   
   return entry.data;
 }
 
 function setCache<T>(key: string, data: T): void {
   const cacheKey = getCacheKey(key);
-  const branchId = localStorage.getItem("activeBranchId");
-  dataCache.set(cacheKey, { data, timestamp: Date.now(), branchId });
+  dataCache.set(cacheKey, { data, timestamp: Date.now(), branchId: getCurrentCacheScope() });
 }
 
 function isCacheFresh(key: string): boolean {
@@ -409,6 +413,12 @@ function invalidatePurchasingCaches(options?: { includeProducts?: boolean }): vo
   }
 }
 
+function invalidateSalesReportingCaches(): void {
+  for (const prefix of ["sales", "monitoringSales", "salesDashboard", "morningSummary", "revenue"]) {
+    invalidateCachePrefix(prefix);
+  }
+}
+
 // Get cached data synchronously (for instant UI population)
 export function getCachedProducts(): Product[] | null {
   return getCached<Product[]>("products");
@@ -420,6 +430,9 @@ export function getCachedSales(): Sale[] | null {
 
 // Clear cache when branch changes
 window.addEventListener("activeBranchChanged", () => {
+  dataCache.clear();
+});
+window.addEventListener("locationScopeChanged", () => {
   dataCache.clear();
 });
 // ============ END DATA CACHE ============
@@ -716,6 +729,12 @@ export function buildAuthHeaders(extra?: Record<string, string>): Record<string,
   return headers;
 }
 
+function monitoringHeaders(): Record<string, string> {
+  return localStorage.getItem("adminLocationScope") === "all"
+    ? { "X-Location-Scope": "all" }
+    : {};
+}
+
 async function jsonRequest<T>(path: string, options?: RequestInit): Promise<T> {
   return jsonRequestWithBehavior(path, options);
 }
@@ -728,7 +747,8 @@ async function jsonRequestWithBehavior<T>(
   const token = localStorage.getItem("token");
   const activeBranchId = localStorage.getItem("activeBranchId");
   const method = (options?.method || "GET").toUpperCase();
-  const inflightKey = `${method}:${path}:${activeBranchId || "default"}`;
+  const requestedLocationScope = new Headers(options?.headers).get("X-Location-Scope") || "branch";
+  const inflightKey = `${method}:${path}:${activeBranchId || "default"}:${requestedLocationScope}`;
 
   if (method === "GET") {
     const pending = inflightGetRequests.get(inflightKey);
@@ -1273,15 +1293,32 @@ export async function fetchSalesCached(onUpdate?: (sales: Sale[]) => void): Prom
   return data;
 }
 
+export async function fetchMonitoringSalesCached(onUpdate?: (sales: Sale[]) => void): Promise<Sale[]> {
+  const cacheKey = "monitoringSales";
+  const cached = getCached<Sale[]>(cacheKey);
+  const options: RequestInit = { headers: monitoringHeaders() };
+
+  if (cached) {
+    jsonRequest<Sale[]>(salesPageQuery(), options).then((fresh) => {
+      setCache(cacheKey, fresh);
+      onUpdate?.(fresh);
+    }).catch(() => {});
+    return cached;
+  }
+
+  const data = await jsonRequest<Sale[]>(salesPageQuery(), options);
+  setCache(cacheKey, data);
+  return data;
+}
+
 export async function createSale(payload: NewSale): Promise<Sale> {
   const result = await jsonRequest<Sale>("/sales", {
     method: "POST",
     body: JSON.stringify(payload),
   });
   // Invalidate related caches
-  dataCache.delete(getCacheKey("sales"));
+  invalidateSalesReportingCaches();
   dataCache.delete(getCacheKey("products"));
-  dataCache.delete(getCacheKey("salesDashboard"));
   return result;
 }
 
@@ -1291,9 +1328,8 @@ export async function createSalesBulk(payloads: NewSale[]): Promise<Sale[]> {
     body: JSON.stringify(payloads),
   });
   // Invalidate related caches
-  dataCache.delete(getCacheKey("sales"));
+  invalidateSalesReportingCaches();
   dataCache.delete(getCacheKey("products"));
-  dataCache.delete(getCacheKey("salesDashboard"));
   return result;
 }
 
@@ -1322,8 +1358,7 @@ export async function assignSaleCustomer(
     method: "PATCH",
     body: JSON.stringify(payload),
   });
-  dataCache.delete(getCacheKey("sales"));
-  dataCache.delete(getCacheKey("salesDashboard"));
+  invalidateSalesReportingCaches();
   return result;
 }
 
@@ -1349,18 +1384,16 @@ export async function createSaleForBranch(payload: NewSale, branchIdOverride: st
     body: JSON.stringify(payload),
   });
   // Invalidate related caches
-  dataCache.delete(getCacheKey("sales"));
+  invalidateSalesReportingCaches();
   dataCache.delete(getCacheKey("products"));
-  dataCache.delete(getCacheKey("salesDashboard"));
   return result;
 }
 
 export async function deleteSale(saleId: number): Promise<void> {
   await jsonRequest<void>(`/sales/${saleId}`, { method: "DELETE" });
   // Invalidate related caches
-  dataCache.delete(getCacheKey("sales"));
+  invalidateSalesReportingCaches();
   dataCache.delete(getCacheKey("products"));
-  dataCache.delete(getCacheKey("salesDashboard"));
 }
 
 // Collect-later ("leave in store") sales. By default only those with goods
@@ -1385,9 +1418,8 @@ export async function supplySale(saleId: number, quantity?: number, notes?: stri
     method: "POST",
     body: JSON.stringify(body),
   });
-  dataCache.delete(getCacheKey("sales"));
+  invalidateSalesReportingCaches();
   dataCache.delete(getCacheKey("products"));
-  dataCache.delete(getCacheKey("salesDashboard"));
   return result;
 }
 
@@ -1426,9 +1458,8 @@ export async function createSaleReturn(payload: NewSaleReturn): Promise<SaleRetu
     body: JSON.stringify(payload),
   });
   // Invalidate related caches
-  dataCache.delete(getCacheKey("sales"));
+  invalidateSalesReportingCaches();
   dataCache.delete(getCacheKey("products"));
-  dataCache.delete(getCacheKey("salesDashboard"));
   dataCache.delete(getCacheKey("inventoryAnalytics"));
   return result;
 }
@@ -1486,7 +1517,7 @@ export async function fetchSuppliers(warehouseId?: number | null): Promise<Suppl
   }
 
   const query = warehouseId ? `?warehouse_id=${encodeURIComponent(String(warehouseId))}` : "";
-  const data = await jsonRequest<Supplier[]>(`/inventory/suppliers${query}`);
+  const data = await jsonRequest<Supplier[]>(`/inventory/suppliers${query}`, { headers: monitoringHeaders() });
   setCache(cacheKey, data);
   return data;
 }
@@ -1497,7 +1528,7 @@ export async function fetchSuppliersCached(onUpdate?: (suppliers: Supplier[]) =>
   const cached = getCached<Supplier[]>(cacheKey);
 
   if (cached) {
-    jsonRequest<Supplier[]>(`/inventory/suppliers${query}`)
+    jsonRequest<Supplier[]>(`/inventory/suppliers${query}`, { headers: monitoringHeaders() })
       .then((fresh) => {
         setCache(cacheKey, fresh);
         if (onUpdate) onUpdate(fresh);
@@ -1506,9 +1537,15 @@ export async function fetchSuppliersCached(onUpdate?: (suppliers: Supplier[]) =>
     return cached;
   }
 
-  const data = await jsonRequest<Supplier[]>(`/inventory/suppliers${query}`);
+  const data = await jsonRequest<Supplier[]>(`/inventory/suppliers${query}`, { headers: monitoringHeaders() });
   setCache(cacheKey, data);
   return data;
+}
+
+export async function fetchSupplierDetail(supplierId: number): Promise<SupplierDetail> {
+  return jsonRequest<SupplierDetail>(`/inventory/suppliers/${supplierId}`, {
+    headers: monitoringHeaders(),
+  });
 }
 
 export async function createSupplier(payload: NewSupplier): Promise<Supplier> {
@@ -1833,7 +1870,7 @@ export async function fetchRevenueAnalytics(period: string = "30d", startDate?: 
   const params = new URLSearchParams({ period });
   if (startDate) params.append("start_date", startDate);
   if (endDate) params.append("end_date", endDate);
-  const data = await jsonRequest<JsonObject>(`/revenue/analytics?${params.toString()}`);
+  const data = await jsonRequest<JsonObject>(`/revenue/analytics?${params.toString()}`, { headers: monitoringHeaders() });
   setCache(cacheKey, data);
   return data;
 }
@@ -1853,7 +1890,7 @@ export async function fetchSalesDashboard(filterDate?: string): Promise<JsonObje
     ? `/reports/sales-dashboard?filter_date=${filterDate}` 
     : "/reports/sales-dashboard";
   
-  const data = await jsonRequestWithBehavior<JsonObject>(url, undefined, {
+  const data = await jsonRequestWithBehavior<JsonObject>(url, { headers: monitoringHeaders() }, {
     timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
   });
   
@@ -1871,7 +1908,7 @@ export async function fetchInventoryStatusReport(): Promise<JsonObject> {
     return cached;
   }
 
-  const data = await jsonRequestWithBehavior<JsonObject>("/reports/inventory-status", undefined, {
+  const data = await jsonRequestWithBehavior<JsonObject>("/reports/inventory-status", { headers: monitoringHeaders() }, {
     timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
   });
   setCache(cacheKey, data);
@@ -1885,7 +1922,7 @@ export async function fetchCreditorsSummaryReport(): Promise<JsonObject> {
     return cached;
   }
 
-  const data = await jsonRequestWithBehavior<JsonObject>("/reports/creditors-summary", undefined, {
+  const data = await jsonRequestWithBehavior<JsonObject>("/reports/creditors-summary", { headers: monitoringHeaders() }, {
     timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
   });
   setCache(cacheKey, data);
@@ -1899,7 +1936,7 @@ export async function fetchMorningSummary(): Promise<JsonObject> {
     return cached;
   }
 
-  const data = await jsonRequestWithBehavior<JsonObject>("/reports/morning-summary", undefined, {
+  const data = await jsonRequestWithBehavior<JsonObject>("/reports/morning-summary", { headers: monitoringHeaders() }, {
     timeoutMs: REPORT_REQUEST_TIMEOUT_MS,
   });
   setCache(cacheKey, data);

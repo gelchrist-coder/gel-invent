@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, true
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_active_user
@@ -10,9 +10,13 @@ from ..database import ensure_sale_return_item_schema, get_db
 from ..models import Sale, Product, StockMovement, User, CreditTransaction, Creditor, SaleReturn
 from app.permissions import ensure_permission
 from app.utils.tenant import get_tenant_user_ids
-from app.utils.branch import get_active_branch_id
+from app.utils.branch import get_reporting_branch_id
 
 router = APIRouter(prefix="/revenue", tags=["revenue"])
+
+
+def _branch_scope(column, branch_id: int | None):
+    return true() if branch_id is None else column == branch_id
 
 
 def _to_naive_datetime(value: datetime | None, fallback: datetime) -> datetime:
@@ -27,7 +31,7 @@ def _to_naive_datetime(value: datetime | None, fallback: datetime) -> datetime:
 def get_revenue_analytics(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
+    active_branch_id: int | None = Depends(get_reporting_branch_id),
     start_date: str | None = Query(None),
     end_date: str | None = Query(None),
     period: str = Query("30d", regex="^(today|7d|30d|90d|all)$"),
@@ -80,7 +84,7 @@ def get_revenue_analytics(
         Sale.created_at >= start,
         Sale.created_at <= end,
         Sale.user_id.in_(tenant_user_ids),
-        Sale.branch_id == active_branch_id,
+        _branch_scope(Sale.branch_id, active_branch_id),
     )
     sales = db.scalars(sales_query).all()
 
@@ -107,9 +111,9 @@ def get_revenue_analytics(
                 StockMovement.sale_id.in_(sale_ids),
                 StockMovement.reason == "Sale",
                 StockMovement.change < 0,
-                StockMovement.branch_id == active_branch_id,
+                _branch_scope(StockMovement.branch_id, active_branch_id),
                 Product.user_id.in_(tenant_user_ids),
-                Product.branch_id == active_branch_id,
+                _branch_scope(Product.branch_id, active_branch_id),
             )
             .group_by(StockMovement.sale_id)
         ).all()
@@ -127,7 +131,7 @@ def get_revenue_analytics(
             )
             .where(
                 CreditTransaction.sale_id.in_(sale_ids),
-                CreditTransaction.branch_id == active_branch_id,
+                _branch_scope(CreditTransaction.branch_id, active_branch_id),
                 CreditTransaction.user_id.in_(tenant_user_ids),
                 # Clamp the "as-of" ledger state to the end of the selected range.
                 CreditTransaction.created_at <= end,
@@ -153,7 +157,7 @@ def get_revenue_analytics(
         StockMovement.change < 0,
         StockMovement.reason.in_(loss_reasons),
         StockMovement.user_id.in_(tenant_user_ids),
-        StockMovement.branch_id == active_branch_id,
+        _branch_scope(StockMovement.branch_id, active_branch_id),
     )
     losses = db.scalars(losses_query).all()
 
@@ -167,7 +171,7 @@ def get_revenue_analytics(
             select(Product).where(
                 Product.id.in_(analytics_product_ids),
                 Product.user_id.in_(tenant_user_ids),
-                Product.branch_id == active_branch_id,
+                _branch_scope(Product.branch_id, active_branch_id),
             )
         ).all()
         products_by_id = {int(p.id): p for p in product_rows}
@@ -219,7 +223,7 @@ def get_revenue_analytics(
             select(SaleReturn).where(
                 SaleReturn.created_at >= range_start,
                 SaleReturn.created_at <= range_end,
-                SaleReturn.branch_id == active_branch_id,
+                _branch_scope(SaleReturn.branch_id, active_branch_id),
                 SaleReturn.user_id.in_(tenant_user_ids),
             )
         ).all()
@@ -230,7 +234,7 @@ def get_revenue_analytics(
             select(Product).where(
                 Product.id.in_(return_product_ids),
                 Product.user_id.in_(tenant_user_ids),
-                Product.branch_id == active_branch_id,
+                _branch_scope(Product.branch_id, active_branch_id),
             )
         ).all() if return_product_ids else []
         return_product_by_id = {int(p.id): p for p in return_products}
@@ -263,7 +267,7 @@ def get_revenue_analytics(
                 StockMovement.reason == "Customer Return",
             ),
             StockMovement.user_id.in_(tenant_user_ids),
-            StockMovement.branch_id == active_branch_id,
+            _branch_scope(StockMovement.branch_id, active_branch_id),
         )
         # Avoid double-counting modern returns already recorded in SaleReturn.
         if sale_return_sale_ids:
@@ -281,7 +285,7 @@ def get_revenue_analytics(
             select(Product).where(
                 Product.id.in_(legacy_product_ids),
                 Product.user_id.in_(tenant_user_ids),
-                Product.branch_id == active_branch_id,
+                _branch_scope(Product.branch_id, active_branch_id),
             )
         ).all() if legacy_product_ids else []
         legacy_product_by_id = {int(p.id): p for p in legacy_products}
@@ -409,7 +413,7 @@ def get_revenue_analytics(
         CreditTransaction.transaction_type == "payment",
         CreditTransaction.created_at >= start,
         CreditTransaction.created_at <= end,
-        CreditTransaction.branch_id == active_branch_id,
+        _branch_scope(CreditTransaction.branch_id, active_branch_id),
         CreditTransaction.user_id.in_(tenant_user_ids),
     )
     if sale_ids:
@@ -485,7 +489,7 @@ def get_revenue_analytics(
     prev_sales_query = select(Sale).where(
         Sale.created_at >= prev_start,
         Sale.created_at < prev_end,
-        Sale.branch_id == active_branch_id,
+        _branch_scope(Sale.branch_id, active_branch_id),
         Sale.user_id.in_(tenant_user_ids),
     )
     prev_sales = db.scalars(prev_sales_query).all()

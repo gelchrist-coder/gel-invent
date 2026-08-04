@@ -85,7 +85,7 @@ def get_batch_balances_bulk(
     *,
     db,
     tenant_user_ids: list[int],
-    branch_id: int,
+    branch_id: int | None,
     product_ids: list[int],
     include_null_expiry: bool = True,
 ) -> dict[int, list[BatchBalance]]:
@@ -100,10 +100,11 @@ def get_batch_balances_bulk(
 
     where = [
         models.StockMovement.product_id.in_(product_ids),
-        models.StockMovement.branch_id == branch_id,
         models.StockMovement.user_id.in_(tenant_user_ids),
         models.StockMovement.batch_number.is_not(None),
     ]
+    if branch_id is not None:
+        where.append(models.StockMovement.branch_id == branch_id)
     if not include_null_expiry:
         where.append(models.StockMovement.expiry_date.is_not(None))
 

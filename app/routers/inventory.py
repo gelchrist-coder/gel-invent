@@ -5,7 +5,7 @@ from io import BytesIO
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, and_, or_, case, update
+from sqlalchemy import select, func, and_, or_, case, update, true
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -14,7 +14,7 @@ from ..models import Product, ProductVariant, StockMovement, Sale, User, SystemS
 from ..auth import get_current_active_user
 from app.permissions import ensure_permission, get_effective_role_name, is_admin
 from app.utils.tenant import get_tenant_user_ids
-from app.utils.branch import get_active_branch_id
+from app.utils.branch import get_active_branch_id, get_reporting_branch_id
 from app.utils.movement_reasons import classify_movement, validate_reason_and_change
 from app.utils.expiry import get_batch_balances, get_batch_balances_bulk, writeoff_expired_batches
 from app.utils.warehouse_stock import get_warehouse_lot_balances
@@ -52,9 +52,11 @@ def _warehouse_scope(
     return warehouse
 
 
-def _location_condition(model, active_branch_id: int, warehouse_id: int | None):
+def _location_condition(model, active_branch_id: int | None, warehouse_id: int | None):
     if warehouse_id is not None:
         return model.warehouse_id == warehouse_id
+    if active_branch_id is None:
+        return true()
     return and_(model.branch_id == active_branch_id, model.warehouse_id.is_(None))
 
 
@@ -569,7 +571,7 @@ def _attach_supplier_financials(
     suppliers: list[Supplier],
     db: Session,
     tenant_user_ids: list[int],
-    active_branch_id: int,
+    active_branch_id: int | None,
     warehouse_id: int | None = None,
 ) -> None:
     if not suppliers:
@@ -613,7 +615,7 @@ def _attach_supplier_financials(
     ).all()
 
     summary_by_id: dict[int, dict[str, Decimal | int]] = {}
-    summary_by_name: dict[str, dict[str, Decimal | int]] = {}
+    legacy_summary_by_name: dict[str, dict[str, Decimal | int]] = {}
     for row in purchase_summary_rows:
         summary = {
             "total_purchased": _to_money(row.total_purchased),
@@ -623,8 +625,8 @@ def _attach_supplier_financials(
         }
         if row.supplier_id is not None:
             summary_by_id[int(row.supplier_id)] = summary
-        if row.supplier_key:
-            summary_by_name[str(row.supplier_key)] = summary
+        elif row.supplier_key:
+            legacy_summary_by_name[str(row.supplier_key)] = summary
 
     last_payment_date_by_supplier_id = {
         int(row.supplier_id): row.last_payment_date
@@ -633,11 +635,24 @@ def _attach_supplier_financials(
     }
 
     for supplier in suppliers:
-        summary = summary_by_id.get(supplier.id) or summary_by_name.get(supplier.name.strip().lower())
-        supplier.total_purchased = summary["total_purchased"] if summary else MONEY_ZERO
-        supplier.total_paid = summary["total_paid"] if summary else MONEY_ZERO
-        supplier.outstanding_balance = summary["outstanding_balance"] if summary else MONEY_ZERO
-        supplier.unpaid_purchases_count = int(summary["unpaid_purchases_count"]) if summary else 0
+        linked = summary_by_id.get(supplier.id)
+        legacy = legacy_summary_by_name.get(supplier.name.strip().lower())
+        supplier.total_purchased = _to_money(
+            (linked["total_purchased"] if linked else MONEY_ZERO)
+            + (legacy["total_purchased"] if legacy else MONEY_ZERO)
+        )
+        supplier.total_paid = _to_money(
+            (linked["total_paid"] if linked else MONEY_ZERO)
+            + (legacy["total_paid"] if legacy else MONEY_ZERO)
+        )
+        supplier.outstanding_balance = _to_money(
+            (linked["outstanding_balance"] if linked else MONEY_ZERO)
+            + (legacy["outstanding_balance"] if legacy else MONEY_ZERO)
+        )
+        supplier.unpaid_purchases_count = (
+            int(linked["unpaid_purchases_count"] if linked else 0)
+            + int(legacy["unpaid_purchases_count"] if legacy else 0)
+        )
         supplier.last_payment_date = last_payment_date_by_supplier_id.get(supplier.id)
 
 
@@ -665,6 +680,14 @@ def _attach_supplier_payment_metadata(payments: list[SupplierPayment], db: Sessi
     suppliers = db.scalars(select(Supplier).where(Supplier.id.in_(supplier_ids))).all() if supplier_ids else []
     supplier_name_by_id = {supplier.id: supplier.name for supplier in suppliers}
 
+    payment_location_rows = list(payments) + purchases + order_purchases
+    branch_ids = sorted({int(row.branch_id) for row in payment_location_rows if row.branch_id is not None})
+    warehouse_ids = sorted({int(row.warehouse_id) for row in payment_location_rows if row.warehouse_id is not None})
+    branches = db.execute(select(Branch.id, Branch.name).where(Branch.id.in_(branch_ids))).all() if branch_ids else []
+    warehouses = db.execute(select(Warehouse.id, Warehouse.name).where(Warehouse.id.in_(warehouse_ids))).all() if warehouse_ids else []
+    branch_name_by_id = {int(row.id): row.name for row in branches}
+    warehouse_name_by_id = {int(row.id): row.name for row in warehouses}
+
     for payment in payments:
         payment.created_by_name = creator_name_by_id.get(payment.user_id)
         purchase = purchase_by_id.get(payment.purchase_id) if payment.purchase_id is not None else None
@@ -679,6 +702,14 @@ def _attach_supplier_payment_metadata(payments: list[SupplierPayment], db: Sessi
         else:
             payment.product_name = None
         payment.supplier_name = supplier_name_by_id.get(payment.supplier_id or -1) or (reference_purchase.supplier_name if reference_purchase else "Supplier")
+        warehouse_id = payment.warehouse_id if payment.warehouse_id is not None else (reference_purchase.warehouse_id if reference_purchase else None)
+        branch_id = payment.branch_id if payment.branch_id is not None else (reference_purchase.branch_id if reference_purchase else None)
+        payment.destination_type = "warehouse" if warehouse_id is not None else "branch"
+        payment.destination_name = (
+            warehouse_name_by_id.get(int(warehouse_id))
+            if warehouse_id is not None
+            else branch_name_by_id.get(int(branch_id)) if branch_id is not None else None
+        )
 
 
 def _attach_purchase_return_metadata(returns: list[PurchaseReturn], db: Session) -> None:
@@ -697,6 +728,14 @@ def _attach_purchase_return_metadata(returns: list[PurchaseReturn], db: Session)
     suppliers = db.scalars(select(Supplier).where(Supplier.id.in_(supplier_ids))).all() if supplier_ids else []
     supplier_name_by_id = {supplier.id: supplier.name for supplier in suppliers}
 
+    return_location_rows = list(returns) + purchases
+    branch_ids = sorted({int(row.branch_id) for row in return_location_rows if row.branch_id is not None})
+    warehouse_ids = sorted({int(row.warehouse_id) for row in return_location_rows if row.warehouse_id is not None})
+    branches = db.execute(select(Branch.id, Branch.name).where(Branch.id.in_(branch_ids))).all() if branch_ids else []
+    warehouses = db.execute(select(Warehouse.id, Warehouse.name).where(Warehouse.id.in_(warehouse_ids))).all() if warehouse_ids else []
+    branch_name_by_id = {int(row.id): row.name for row in branches}
+    warehouse_name_by_id = {int(row.id): row.name for row in warehouses}
+
     for purchase_return in returns:
         purchase = purchase_by_id.get(purchase_return.purchase_id)
         purchase_return.created_by_name = creator_name_by_id.get(purchase_return.user_id)
@@ -706,6 +745,14 @@ def _attach_purchase_return_metadata(returns: list[PurchaseReturn], db: Session)
         purchase_return.supplier_name = (
             supplier_name_by_id.get(purchase_return.supplier_id or -1)
             or (purchase.supplier_name if purchase else "Supplier")
+        )
+        warehouse_id = purchase_return.warehouse_id if purchase_return.warehouse_id is not None else (purchase.warehouse_id if purchase else None)
+        branch_id = purchase_return.branch_id if purchase_return.branch_id is not None else (purchase.branch_id if purchase else None)
+        purchase_return.destination_type = "warehouse" if warehouse_id is not None else "branch"
+        purchase_return.destination_name = (
+            warehouse_name_by_id.get(int(warehouse_id))
+            if warehouse_id is not None
+            else branch_name_by_id.get(int(branch_id)) if branch_id is not None else None
         )
 
 
@@ -784,7 +831,7 @@ def list_suppliers(
     warehouse_id: int | None = Query(default=None, gt=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
+    active_branch_id: int | None = Depends(get_reporting_branch_id),
 ):
     ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
     _warehouse_scope(db, current_user, warehouse_id)
@@ -833,10 +880,11 @@ def get_supplier_detail(
     supplier_id: int,
     purchase_limit: int = Query(default=50, ge=1, le=300),
     payment_limit: int = Query(default=50, ge=1, le=300),
+    return_limit: int = Query(default=50, ge=1, le=300),
     warehouse_id: int | None = Query(default=None, gt=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
+    active_branch_id: int | None = Depends(get_reporting_branch_id),
 ):
     ensure_permission(current_user, "view_procurement", "Only Admin and Manager can view purchasing data")
     _warehouse_scope(db, current_user, warehouse_id)
@@ -884,7 +932,39 @@ def get_supplier_detail(
     payments = db.scalars(payment_stmt).all()
     _attach_supplier_payment_metadata(payments, db)
 
-    return schemas.SupplierDetailRead(supplier=supplier, purchases=purchases, payments=payments)
+    return_stmt = (
+        select(PurchaseReturn)
+        .where(
+            PurchaseReturn.user_id.in_(tenant_user_ids),
+            _location_condition(PurchaseReturn, active_branch_id, warehouse_id),
+            PurchaseReturn.supplier_id == supplier.id,
+        )
+        .order_by(PurchaseReturn.return_date.desc(), PurchaseReturn.created_at.desc())
+        .limit(return_limit)
+    )
+    if purchase_ids:
+        return_stmt = (
+            select(PurchaseReturn)
+            .where(
+                PurchaseReturn.user_id.in_(tenant_user_ids),
+                _location_condition(PurchaseReturn, active_branch_id, warehouse_id),
+                or_(
+                    PurchaseReturn.supplier_id == supplier.id,
+                    PurchaseReturn.purchase_id.in_(purchase_ids),
+                ),
+            )
+            .order_by(PurchaseReturn.return_date.desc(), PurchaseReturn.created_at.desc())
+            .limit(return_limit)
+        )
+    purchase_returns = db.scalars(return_stmt).all()
+    _attach_purchase_return_metadata(purchase_returns, db)
+
+    return schemas.SupplierDetailRead(
+        supplier=supplier,
+        purchases=purchases,
+        payments=payments,
+        returns=purchase_returns,
+    )
 
 
 @router.put("/suppliers/{supplier_id}", response_model=schemas.SupplierRead)

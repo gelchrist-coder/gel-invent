@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, true
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -10,7 +10,7 @@ from ..models import Sale, Product, StockMovement, Creditor, CreditTransaction, 
 from ..auth import get_current_active_user
 from app.permissions import ensure_permission, is_admin
 from app.utils.tenant import get_tenant_user_ids
-from app.utils.branch import get_active_branch_id
+from app.utils.branch import get_reporting_branch_id
 from app.utils.expiry import get_batch_balances_bulk
 from app.utils.capabilities import get_effective_capabilities_for_user
 
@@ -56,6 +56,10 @@ def _get_tenant_owner_id(user: User) -> int:
     return user.created_by or user.id
 
 
+def _branch_scope(column, branch_id: int | None):
+    return true() if branch_id is None else column == branch_id
+
+
 def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
     settings = db.query(SystemSettings).filter(SystemSettings.owner_user_id == owner_user_id).first()
     if settings:
@@ -76,7 +80,7 @@ def _get_or_create_settings(db: Session, owner_user_id: int) -> SystemSettings:
 def get_morning_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
+    active_branch_id: int | None = Depends(get_reporting_branch_id),
 ):
     """Owner morning command center with daily operational priorities."""
     ensure_permission(current_user, "view_reports", "Only Admin and Manager can access reports")
@@ -104,7 +108,7 @@ def get_morning_summary(
                 Sale.created_at >= yesterday_start,
                 Sale.created_at < today_start,
                 Sale.user_id.in_(tenant_user_ids),
-                Sale.branch_id == active_branch_id,
+                _branch_scope(Sale.branch_id, active_branch_id),
             )
         )
         .order_by(Sale.id.desc())
@@ -130,12 +134,12 @@ def get_morning_summary(
             StockMovement,
             and_(
                 StockMovement.product_id == Product.id,
-                StockMovement.branch_id == active_branch_id,
+                _branch_scope(StockMovement.branch_id, active_branch_id),
             ),
         )
         .where(
             Product.user_id.in_(tenant_user_ids),
-            Product.branch_id == active_branch_id,
+            _branch_scope(Product.branch_id, active_branch_id),
         )
         .group_by(Product.id)
     ).all()
@@ -216,7 +220,7 @@ def get_morning_summary(
                 Sale.created_at >= yesterday_start,
                 Sale.created_at < today_start,
                 Sale.user_id.in_(tenant_user_ids),
-                Sale.branch_id == active_branch_id,
+                _branch_scope(Sale.branch_id, active_branch_id),
             )
         )
         .group_by(Sale.product_id)
@@ -230,7 +234,7 @@ def get_morning_summary(
         select(Product).where(
             Product.id.in_(valid_best_seller_ids),
             Product.user_id.in_(tenant_user_ids),
-            Product.branch_id == active_branch_id,
+            _branch_scope(Product.branch_id, active_branch_id),
         )
     ).all() if valid_best_seller_ids else []
     best_seller_name_by_id = {int(product.id): product.name for product in best_seller_products}
@@ -257,7 +261,7 @@ def get_morning_summary(
                 Sale.created_at >= slow_mover_start,
                 Sale.created_at < today_start,
                 Sale.user_id.in_(tenant_user_ids),
-                Sale.branch_id == active_branch_id,
+                _branch_scope(Sale.branch_id, active_branch_id),
             )
         )
         .group_by(Sale.product_id)
@@ -297,7 +301,7 @@ def get_morning_summary(
         .where(
             and_(
                 Purchase.user_id.in_(tenant_user_ids),
-                Purchase.branch_id == active_branch_id,
+                _branch_scope(Purchase.branch_id, active_branch_id),
                 Purchase.amount_due > 0,
                 or_(Purchase.due_date.is_(None), Purchase.due_date <= today_start.date()),
             )
@@ -312,19 +316,20 @@ def get_morning_summary(
         .where(
             and_(
                 Creditor.user_id.in_(tenant_user_ids),
-                Creditor.branch_id == active_branch_id,
+                _branch_scope(Creditor.branch_id, active_branch_id),
                 Creditor.total_debt > 0,
             )
         )
     ).first()
 
+    branch_directory_query = select(Branch).where(
+        Branch.owner_user_id == owner_user_id,
+        Branch.is_active.is_(True),
+    )
+    if active_branch_id is not None:
+        branch_directory_query = branch_directory_query.where(Branch.id == active_branch_id)
     branches = db.scalars(
-        select(Branch)
-        .where(
-            Branch.owner_user_id == owner_user_id,
-            Branch.is_active.is_(True),
-        )
-        .order_by(Branch.created_at.asc(), Branch.id.asc())
+        branch_directory_query.order_by(Branch.created_at.asc(), Branch.id.asc())
     ).all()
     branch_name_by_id = {int(branch.id): branch.name for branch in branches}
     branch_ids = list(branch_name_by_id.keys())
@@ -413,7 +418,7 @@ def get_morning_summary(
 def get_sales_dashboard(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
+    active_branch_id: int | None = Depends(get_reporting_branch_id),
     filter_date: str | None = None,
 ):
     """
@@ -451,7 +456,7 @@ def get_sales_dashboard(
             Sale.customer_name,
             Sale.created_at,
         )
-        .where(and_(Sale.created_at >= month_start, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
+        .where(and_(Sale.created_at >= month_start, Sale.user_id.in_(tenant_user_ids), _branch_scope(Sale.branch_id, active_branch_id)))
         .order_by(Sale.created_at.desc(), Sale.id.desc())
     ).all()
 
@@ -521,7 +526,7 @@ def get_sales_dashboard(
             Sale.created_at >= top_products_start,
             Sale.created_at <= top_products_end,
             Sale.user_id.in_(tenant_user_ids),
-            Sale.branch_id == active_branch_id,
+            _branch_scope(Sale.branch_id, active_branch_id),
         ))
         .group_by(Sale.product_id)
         .order_by(func.sum(Sale.quantity).desc())
@@ -538,7 +543,7 @@ def get_sales_dashboard(
         select(Product).where(
             Product.id.in_(top_product_ids),
             Product.user_id.in_(tenant_user_ids),
-            Product.branch_id == active_branch_id,
+            _branch_scope(Product.branch_id, active_branch_id),
         )
     ).all() if top_product_ids else []
     top_product_by_id = {int(product.id): product for product in top_product_records}
@@ -562,10 +567,10 @@ def get_sales_dashboard(
             and_(
                 Product.id == Sale.product_id,
                 Product.user_id.in_(tenant_user_ids),
-                Product.branch_id == active_branch_id,
+                _branch_scope(Product.branch_id, active_branch_id),
             ),
         )
-        .where(Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id)
+        .where(Sale.user_id.in_(tenant_user_ids), _branch_scope(Sale.branch_id, active_branch_id))
         .order_by(Sale.created_at.desc(), Sale.id.desc())
         .limit(80)
     ).all()
@@ -636,7 +641,7 @@ def get_sales_dashboard(
 def get_inventory_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
+    active_branch_id: int | None = Depends(get_reporting_branch_id),
 ):
     """
     Get current inventory status with stock levels and alerts (Owner/Admin only).
@@ -653,6 +658,7 @@ def get_inventory_status(
     # Get all products with their current stock
     products_query = select(
         Product.id,
+        Product.branch_id,
         Product.sku,
         Product.name,
         Product.category,
@@ -661,11 +667,16 @@ def get_inventory_status(
         Product.selling_price,
         Product.expiry_date,
         func.coalesce(func.sum(StockMovement.change), 0).label("current_stock")
-    ).outerjoin(StockMovement, and_(StockMovement.product_id == Product.id, StockMovement.branch_id == active_branch_id))\
-     .where(Product.user_id.in_(tenant_user_ids), Product.branch_id == active_branch_id)\
+    ).outerjoin(StockMovement, and_(StockMovement.product_id == Product.id, _branch_scope(StockMovement.branch_id, active_branch_id)))\
+     .where(Product.user_id.in_(tenant_user_ids), _branch_scope(Product.branch_id, active_branch_id))\
      .group_by(Product.id)
     
     products = db.execute(products_query).all()
+    product_branch_ids = sorted({int(product.branch_id) for product in products if product.branch_id is not None})
+    product_branch_rows = db.execute(
+        select(Branch.id, Branch.name).where(Branch.id.in_(product_branch_ids))
+    ).all() if product_branch_ids else []
+    product_branch_name_by_id = {int(row.id): row.name for row in product_branch_rows}
 
     def clamp_stock(value: object) -> float:
         try:
@@ -723,6 +734,7 @@ def get_inventory_status(
                 "id": p.id,
                 "sku": p.sku,
                 "name": p.name,
+                "branch_name": product_branch_name_by_id.get(int(p.branch_id)) if p.branch_id is not None else None,
                 "current_stock": clamp_stock(p.current_stock),
                 "unit": p.unit
             }
@@ -733,6 +745,7 @@ def get_inventory_status(
                 "id": p.id,
                 "sku": p.sku,
                 "name": p.name,
+                "branch_name": product_branch_name_by_id.get(int(p.branch_id)) if p.branch_id is not None else None,
                 "unit": p.unit
             }
             for p in out_of_stock[:20]
@@ -742,6 +755,7 @@ def get_inventory_status(
                 "id": p.id,
                 "sku": p.sku,
                 "name": p.name,
+                "branch_name": product_branch_name_by_id.get(int(p.branch_id)) if p.branch_id is not None else None,
                 "current_stock": clamp_stock(p.current_stock),
                 "expiry_date": p.expiry_date.isoformat(),
                 "days_until_expiry": (p.expiry_date - datetime.now().date()).days
@@ -763,7 +777,7 @@ def get_inventory_status(
 def get_creditors_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
+    active_branch_id: int | None = Depends(get_reporting_branch_id),
 ):
     """
     Get summary of all creditors with outstanding debts (Owner/Admin only).
@@ -776,7 +790,7 @@ def get_creditors_summary(
     # Get all creditors with transaction details
     creditors = db.scalars(
         select(Creditor)
-        .where(Creditor.user_id.in_(tenant_user_ids), Creditor.branch_id == active_branch_id)
+        .where(Creditor.user_id.in_(tenant_user_ids), _branch_scope(Creditor.branch_id, active_branch_id))
         .order_by(Creditor.total_debt.desc())
     ).all()
     
@@ -788,6 +802,7 @@ def get_creditors_summary(
     recent_transactions = db.execute(
         select(
             CreditTransaction.id,
+            CreditTransaction.branch_id,
             CreditTransaction.creditor_id,
             Creditor.name.label("creditor_name"),
             CreditTransaction.amount,
@@ -797,12 +812,20 @@ def get_creditors_summary(
         ).join(Creditor, Creditor.id == CreditTransaction.creditor_id)
         .where(
             Creditor.user_id.in_(tenant_user_ids),
-            Creditor.branch_id == active_branch_id,
-            CreditTransaction.branch_id == active_branch_id,
+            _branch_scope(Creditor.branch_id, active_branch_id),
+            _branch_scope(CreditTransaction.branch_id, active_branch_id),
         )
         .order_by(CreditTransaction.created_at.desc())
         .limit(20)
     ).all()
+
+    creditor_branch_ids = sorted({int(creditor.branch_id) for creditor in creditors if creditor.branch_id is not None})
+    transaction_branch_ids = {int(row.branch_id) for row in recent_transactions if row.branch_id is not None}
+    report_branch_ids = sorted(set(creditor_branch_ids) | transaction_branch_ids)
+    report_branch_rows = db.execute(
+        select(Branch.id, Branch.name).where(Branch.id.in_(report_branch_ids))
+    ).all() if report_branch_ids else []
+    report_branch_name_by_id = {int(row.id): row.name for row in report_branch_rows}
     
     # Top debtors
     top_debtors = sorted(creditors_with_debt, key=lambda c: c.total_debt, reverse=True)[:10]
@@ -820,6 +843,7 @@ def get_creditors_summary(
                 "name": c.name,
                 "phone": c.phone,
                 "email": c.email,
+                "branch_name": report_branch_name_by_id.get(int(c.branch_id)) if c.branch_id is not None else None,
                 "total_debt": float(c.total_debt),
                 "created_at": c.created_at.isoformat()
             }
@@ -830,6 +854,7 @@ def get_creditors_summary(
                 "id": t.id,
                 "creditor_id": t.creditor_id,
                 "creditor_name": t.creditor_name,
+                "branch_name": report_branch_name_by_id.get(int(t.branch_id)) if t.branch_id is not None else None,
                 "amount": float(t.amount),
                 "type": t.transaction_type,
                 "notes": t.notes,
@@ -842,6 +867,7 @@ def get_creditors_summary(
                 "id": c.id,
                 "name": c.name,
                 "phone": c.phone,
+                "branch_name": report_branch_name_by_id.get(int(c.branch_id)) if c.branch_id is not None else None,
                 "total_debt": float(c.total_debt)
             }
             for c in creditors_with_debt
@@ -855,7 +881,7 @@ def get_sales_by_period(
     end_date: str = Query(..., description="End date (YYYY-MM-DD)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    active_branch_id: int = Depends(get_active_branch_id),
+    active_branch_id: int | None = Depends(get_reporting_branch_id),
 ):
     """
     Get detailed sales report for a specific period (Owner/Admin only).
@@ -871,7 +897,7 @@ def get_sales_by_period(
     # Sales in period
     sales = db.scalars(
         select(Sale)
-        .where(and_(Sale.created_at >= start, Sale.created_at <= end, Sale.user_id.in_(tenant_user_ids), Sale.branch_id == active_branch_id))
+        .where(and_(Sale.created_at >= start, Sale.created_at <= end, Sale.user_id.in_(tenant_user_ids), _branch_scope(Sale.branch_id, active_branch_id)))
         .order_by(Sale.created_at.desc())
     ).all()
     

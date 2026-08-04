@@ -134,6 +134,7 @@ class SupplierDetailRead(BaseModel):
     supplier: SupplierRead
     purchases: list["PurchaseRead"]
     payments: list["SupplierPaymentRead"]
+    returns: list["PurchaseReturnRead"]
 
 
 class PurchaseReturnCreate(BaseModel):
@@ -266,6 +267,8 @@ class SupplierPaymentRead(BaseModel):
     order_number: str | None = None
     purchase_invoice_number: str | None = None
     product_name: str | None = None
+    destination_type: str | None = None
+    destination_name: str | None = None
     amount: Decimal
     payment_method: str
     payment_date: date | None = None
@@ -288,6 +291,8 @@ class PurchaseReturnRead(BaseModel):
     order_number: str | None = None
     purchase_invoice_number: str | None = None
     product_name: str | None = None
+    destination_type: str | None = None
+    destination_name: str | None = None
     quantity_returned: Decimal
     unit_cost_price: Decimal
     total_cost_returned: Decimal

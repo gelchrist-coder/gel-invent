@@ -18,6 +18,8 @@ type Props = {
   branches?: Branch[];
   activeBranchId?: number | null;
   onChangeBranch?: (branchId: number) => void;
+  adminLocationScope?: "all" | "branch";
+  onChangeMonitoringLocation?: (location: "all" | number) => void;
   activeView?: string;
   warehouses?: Warehouse[];
   activeWarehouseId?: number | null;
@@ -39,6 +41,8 @@ export default function TopBar({
   branches,
   activeBranchId,
   onChangeBranch,
+  adminLocationScope = "branch",
+  onChangeMonitoringLocation,
   activeView,
   warehouses,
   activeWarehouseId,
@@ -50,6 +54,7 @@ export default function TopBar({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const visibleBranches = branches ?? [];
   const visibleWarehouses = warehouses ?? [];
+  const isMonitoringView = new Set(["dashboard", "reports", "revenue", "suppliers"]).has(activeView ?? "");
 
   // Keep the header logo in sync when it's uploaded/removed in Settings.
   useEffect(() => {
@@ -340,7 +345,7 @@ export default function TopBar({
                 zIndex: 1000,
               }}
             >
-              {visibleBranches.length > 1 && onChangeBranch ? (
+              {visibleBranches.length > 0 && (onChangeBranch || onChangeMonitoringLocation) ? (
                 <div
                   style={{
                     marginBottom: 8,
@@ -350,12 +355,18 @@ export default function TopBar({
                     background: "#f8fafc",
                   }}
                 >
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, letterSpacing: "0.4px" }}>BRANCH</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, letterSpacing: "0.4px" }}>
+                    {isMonitoringView && onChangeMonitoringLocation ? "COMPANY VIEW" : "BRANCH"}
+                  </div>
                   <select
-                    value={activeBranchId ?? visibleBranches[0]?.id}
+                    value={isMonitoringView && adminLocationScope === "all" ? "all" : String(activeBranchId ?? visibleBranches[0]?.id)}
                     onChange={(e) => {
-                      const nextId = Number(e.target.value);
-                      if (Number.isFinite(nextId)) onChangeBranch(nextId);
+                      if (isMonitoringView && onChangeMonitoringLocation) {
+                        onChangeMonitoringLocation(e.target.value === "all" ? "all" : Number(e.target.value));
+                      } else {
+                        const nextId = Number(e.target.value);
+                        if (Number.isFinite(nextId)) onChangeBranch?.(nextId);
+                      }
                       setShowDropdown(false);
                     }}
                     style={{
@@ -370,6 +381,7 @@ export default function TopBar({
                       padding: "0 10px",
                     }}
                   >
+                    {isMonitoringView && onChangeMonitoringLocation ? <option value="all">All locations</option> : null}
                     {visibleBranches.map((b) => (
                       <option key={b.id} value={b.id}>
                         {b.name}

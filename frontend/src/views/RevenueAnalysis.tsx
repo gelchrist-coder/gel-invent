@@ -95,7 +95,11 @@ export default function RevenueAnalysis({ embedded = false }: RevenueAnalysisPro
     };
 
     window.addEventListener("activeBranchChanged", handleBranchChange);
-    return () => window.removeEventListener("activeBranchChanged", handleBranchChange);
+    window.addEventListener("locationScopeChanged", handleBranchChange);
+    return () => {
+      window.removeEventListener("activeBranchChanged", handleBranchChange);
+      window.removeEventListener("locationScopeChanged", handleBranchChange);
+    };
   }, [canViewRevenue, loadData]);
 
   if (!canViewRevenue) {

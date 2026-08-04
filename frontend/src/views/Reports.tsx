@@ -114,12 +114,13 @@ interface InventoryStatus {
     total_selling_value: number;
     potential_profit: number;
   };
-  low_stock: Array<{ id: number; sku: string; name: string; current_stock: number; unit: string }>;
-  out_of_stock: Array<{ id: number; sku: string; name: string; unit: string }>;
+  low_stock: Array<{ id: number; sku: string; name: string; branch_name?: string | null; current_stock: number; unit: string }>;
+  out_of_stock: Array<{ id: number; sku: string; name: string; branch_name?: string | null; unit: string }>;
   expiring_soon: Array<{
     id: number;
     sku: string;
     name: string;
+    branch_name?: string | null;
     current_stock: number;
     expiry_date: string;
     days_until_expiry: number;
@@ -140,12 +141,14 @@ interface CreditorsSummary {
     phone: string | null;
     email: string | null;
     total_debt: number;
+    branch_name?: string | null;
     created_at: string;
   }>;
   recent_transactions: Array<{
     id: number;
     creditor_id: number;
     creditor_name: string;
+    branch_name?: string | null;
     amount: number;
     type: string;
     notes: string | null;
@@ -156,6 +159,7 @@ interface CreditorsSummary {
     name: string;
     phone: string | null;
     total_debt: number;
+    branch_name?: string | null;
   }>;
 }
 
@@ -341,7 +345,11 @@ export default function Reports({ initialTab = "sales" }: Props) {
     };
 
     window.addEventListener("activeBranchChanged", handleBranchChange);
-    return () => window.removeEventListener("activeBranchChanged", handleBranchChange);
+    window.addEventListener("locationScopeChanged", handleBranchChange);
+    return () => {
+      window.removeEventListener("activeBranchChanged", handleBranchChange);
+      window.removeEventListener("locationScopeChanged", handleBranchChange);
+    };
   }, []);
 
   const formatCurrency = (amount: number) => `GHS ${amount.toFixed(2)}`;
@@ -686,6 +694,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
                   inventoryData.low_stock.map((item) => (
                     <div key={item.id} style={{ padding: "8px 0", borderBottom: "1px solid #f3f4f6" }}>
                       <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{item.name}</p>
+                      {item.branch_name ? <p style={{ margin: "3px 0 0", fontSize: 11, color: "#64748b" }}>{item.branch_name}</p> : null}
                       <p style={{ margin: "4px 0 0", fontSize: 12, color: "#d97706" }}>
                         Stock: {item.current_stock} {item.unit}
                       </p>
@@ -706,6 +715,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
                   inventoryData.expiring_soon.map((item) => (
                     <div key={item.id} style={{ padding: "8px 0", borderBottom: "1px solid #f3f4f6" }}>
                       <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{item.name}</p>
+                      {item.branch_name ? <p style={{ margin: "3px 0 0", fontSize: 11, color: "#64748b" }}>{item.branch_name}</p> : null}
                       <p style={{ margin: "4px 0 0", fontSize: 12, color: "#ea580c" }}>
                         Expires: {formatDate(item.expiry_date)} ({item.days_until_expiry} days)
                       </p>
@@ -789,7 +799,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
               items={creditorsData.top_debtors.slice(0, 8).map((debtor, index) => ({
                 label: debtor.name,
                 value: debtor.total_debt,
-                subLabel: debtor.phone || "No phone",
+                subLabel: [debtor.branch_name, debtor.phone || "No phone"].filter(Boolean).join(" · "),
                 color: index % 2 === 0 ? "linear-gradient(90deg, #dc2626, #f87171)" : "linear-gradient(90deg, #ea580c, #fb923c)",
               }))}
               formatValue={formatCurrency}
@@ -806,6 +816,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
                     <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
                       <th style={{ textAlign: "left", padding: "8px 0", fontSize: 13, color: "#6b7280" }}>Name</th>
                       <th style={{ textAlign: "left", padding: "8px 0", fontSize: 13, color: "#6b7280" }}>Phone</th>
+                      <th style={{ textAlign: "left", padding: "8px 0", fontSize: 13, color: "#6b7280" }}>Branch</th>
                       <th style={{ textAlign: "right", padding: "8px 0", fontSize: 13, color: "#6b7280" }}>Debt</th>
                     </tr>
                   </thead>
@@ -814,6 +825,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
                       <tr key={debtor.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
                         <td style={{ padding: "12px 0", fontWeight: 600 }}>{debtor.name}</td>
                         <td style={{ padding: "12px 0", color: "#6b7280" }}>{debtor.phone || "N/A"}</td>
+                        <td style={{ padding: "12px 0", color: "#475569" }}>{debtor.branch_name || "—"}</td>
                         <td style={{ textAlign: "right", padding: "12px 0", fontWeight: 600, color: "#dc2626" }}>
                           {formatCurrency(debtor.total_debt)}
                         </td>
@@ -847,7 +859,7 @@ export default function Reports({ initialTab = "sales" }: Props) {
                         </span>
                       </div>
                       <p style={{ margin: "4px 0", fontSize: 12, color: "#6b7280" }}>
-                        {txn.notes || "No notes"}
+                        {[txn.branch_name, txn.notes || "No notes"].filter(Boolean).join(" · ")}
                       </p>
                       <p style={{ margin: "4px 0 0", fontSize: 11, color: "#9ca3af" }}>
                         {formatDate(txn.created_at)}

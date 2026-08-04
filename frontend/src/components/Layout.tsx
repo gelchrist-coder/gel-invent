@@ -126,6 +126,7 @@ const NAV_GROUPS: Array<{ id: NavItem["group"]; label: string }> = [
 
 const SIDEBAR_EXPANDED_WIDTH = 210;
 const SIDEBAR_COLLAPSED_WIDTH = 60;
+const MONITORING_VIEW_IDS = new Set(["dashboard", "reports", "revenue", "suppliers"]);
 
 type Props = {
   activeView: string;
@@ -144,6 +145,8 @@ type Props = {
   branches?: Branch[];
   activeBranchId?: number | null;
   onChangeBranch?: (branchId: number) => void;
+  adminLocationScope?: "all" | "branch";
+  onChangeMonitoringLocation?: (location: "all" | number) => void;
   warehouses?: Warehouse[];
   activeWarehouseId?: number | null;
   onChangeWarehouse?: (warehouseId: number) => void;
@@ -166,6 +169,8 @@ export default function Layout({
   branches,
   activeBranchId,
   onChangeBranch,
+  adminLocationScope = "branch",
+  onChangeMonitoringLocation,
   warehouses,
   activeWarehouseId,
   onChangeWarehouse,
@@ -211,6 +216,7 @@ export default function Layout({
   // Filter navigation items based on user role
   const accessUser = { role: userRole, permissions: userPermissions };
   const canManageBranches = hasUserPermission("manage_branches", accessUser);
+  const isMonitoringView = MONITORING_VIEW_IDS.has(activeView);
   const isWarehouseUser = userRole.trim().toLowerCase() === "warehouse";
   const visibleNavItems = NAV_ITEMS.filter(
     (item) => (item.id !== "dashboard" || userRole === "Admin" || userRole === "Manager")
@@ -369,9 +375,26 @@ export default function Layout({
         {/* Branch Selector / Indicator (Sidebar) */}
         {isExpanded && activeView !== "warehouses" && visibleBranches && visibleBranches.length > 0 && (
           <div style={{ padding: "0 16px", marginBottom: 16 }}>
-            <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 6, letterSpacing: 0.2 }}>Branch</div>
+            <div style={{ fontSize: 11, opacity: 0.65, marginBottom: 6, letterSpacing: 0.2 }}>
+              {isMonitoringView && canManageBranches ? "Company view" : "Branch"}
+            </div>
 
-            {canManageBranches && onChangeBranch && visibleBranches.length > 1 ? (
+            {canManageBranches && isMonitoringView && onChangeMonitoringLocation ? (
+              <select
+                value={adminLocationScope === "all" ? "all" : String(activeBranchId ?? visibleBranches[0]?.id)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  onChangeMonitoringLocation(value === "all" ? "all" : Number(value));
+                }}
+                style={{ width: "100%", height: 36, borderRadius: 8, border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.1)", padding: "0 10px", fontSize: 13, color: "#fff" }}
+                aria-label="Select company monitoring location"
+              >
+                <option value="all" style={{ color: "#0b1021" }}>All locations</option>
+                {visibleBranches.map((branch) => (
+                  <option key={branch.id} value={branch.id} style={{ color: "#0b1021" }}>{branch.name}</option>
+                ))}
+              </select>
+            ) : canManageBranches && onChangeBranch && visibleBranches.length > 1 ? (
               <select
                 value={activeBranchId ?? visibleBranches[0]?.id}
                 onChange={(e) => onChangeBranch?.(Number(e.target.value))}
@@ -580,6 +603,8 @@ export default function Layout({
             branches={branches}
             activeBranchId={activeBranchId}
             onChangeBranch={onChangeBranch}
+            adminLocationScope={adminLocationScope}
+            onChangeMonitoringLocation={onChangeMonitoringLocation}
             activeView={activeView}
             warehouses={visibleWarehouses}
             activeWarehouseId={activeWarehouseId}
