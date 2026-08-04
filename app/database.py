@@ -144,6 +144,41 @@ def ensure_sales_receipt_schema() -> None:
                 )
 
 
+def ensure_sale_return_item_schema() -> None:
+    """Install exact-item fields required by the customer return ledger."""
+    required_columns = {
+        "variant_id": "INTEGER REFERENCES product_variants(id) ON DELETE SET NULL",
+        "item_condition": "VARCHAR(30) DEFAULT 'resellable'",
+    }
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'sale_returns'"
+            )
+        ).all()
+        present = {str(row.column_name) for row in rows}
+        for column_name, column_type in required_columns.items():
+            if column_name not in present:
+                conn.execute(
+                    text(f"ALTER TABLE sale_returns ADD COLUMN IF NOT EXISTS {column_name} {column_type}")
+                )
+        conn.execute(
+            text(
+                "UPDATE sale_returns AS sale_return SET variant_id = sale.variant_id "
+                "FROM sales AS sale WHERE sale_return.sale_id = sale.id "
+                "AND sale_return.variant_id IS NULL AND sale.variant_id IS NOT NULL"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sale_returns_variant_id ON sale_returns (variant_id)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_sale_returns_item_condition "
+                "ON sale_returns (branch_id, item_condition, created_at DESC)"
+            )
+        )
+
+
 def ensure_critical_schema() -> None:
     """Best-effort runtime schema guard for columns queried on every request.
 
@@ -161,6 +196,7 @@ def ensure_critical_schema() -> None:
         try:
             ensure_warehouse_purchase_schema()
             ensure_sales_receipt_schema()
+            ensure_sale_return_item_schema()
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))

@@ -589,14 +589,20 @@ class SaleReturn(Base):
     branch_id: Mapped[int | None] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), index=True, default=None)
     sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id", ondelete="CASCADE"), index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    variant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_variants.id", ondelete="SET NULL"), index=True, default=None
+    )
     quantity_returned: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     refund_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     # How refund was handled: cash, credit_to_account, exchange, store_credit
     refund_method: Mapped[str] = mapped_column(String(50), default="cash")
     reason: Mapped[str | None] = mapped_column(String(500), default=None)
+    # Physical condition of the exact sale line being returned.
+    item_condition: Mapped[str] = mapped_column(String(30), default="resellable")
     # If items are restockable (good condition)
     restock: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     sale: Mapped[Sale] = relationship()
     product: Mapped[Product] = relationship()
+    variant: Mapped[ProductVariant | None] = relationship()

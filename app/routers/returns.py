@@ -22,6 +22,119 @@ from ..utils.tenant import get_tenant_user_ids
 
 router = APIRouter(prefix="/returns", tags=["returns"])
 
+RETURN_ITEM_CONDITIONS = {"resellable", "damaged", "expired", "defective"}
+
+
+def _condition_from_values(condition: str | None, reason: str | None) -> str:
+    resolved = (condition or "resellable").strip().lower()
+    reason_text = (reason or "").lower()
+    # Historical records and older clients encoded the condition in `reason`.
+    # Keep those records safe and display them accurately after the migration.
+    if resolved == "resellable":
+        for loss_condition in ("damaged", "expired", "defective"):
+            if loss_condition in reason_text:
+                return loss_condition
+    return resolved if resolved in RETURN_ITEM_CONDITIONS else "resellable"
+
+
+def _resolve_item_condition(payload: schemas.SaleReturnCreate) -> str:
+    return _condition_from_values(payload.item_condition, payload.reason)
+
+
+def _restore_exact_sale_item_stock(
+    *,
+    db: Session,
+    sale: models.Sale,
+    tenant_user_ids: list[int],
+    actor_user_id: int,
+    branch_id: int,
+    quantity: Decimal,
+    already_returned: Decimal,
+) -> None:
+    """Restore a resellable return to the sold variant and original batches.
+
+    A sale can draw from several batches. Earlier returns (including damaged
+    units that were not restocked) consume the same ordered sale allocation so
+    later returns map to the correct remaining batch segment.
+    """
+    deductions = db.scalars(
+        select(models.StockMovement)
+        .where(
+            models.StockMovement.sale_id == sale.id,
+            models.StockMovement.branch_id == branch_id,
+            models.StockMovement.user_id.in_(tenant_user_ids),
+            models.StockMovement.change < 0,
+        )
+        .order_by(models.StockMovement.created_at.asc(), models.StockMovement.id.asc())
+    ).all()
+
+    skip = Decimal(already_returned)
+    remaining = Decimal(quantity)
+    for deduction in deductions:
+        deducted_quantity = -Decimal(deduction.change)
+        if skip >= deducted_quantity:
+            skip -= deducted_quantity
+            continue
+
+        available_in_segment = deducted_quantity - skip
+        skip = Decimal(0)
+        restored_quantity = min(remaining, available_in_segment)
+        if restored_quantity <= 0:
+            continue
+        db.add(models.StockMovement(
+            user_id=actor_user_id,
+            branch_id=branch_id,
+            product_id=sale.product_id,
+            variant_id=sale.variant_id,
+            sale_id=sale.id,
+            change=restored_quantity,
+            reason="Customer Return - Resellable",
+            location=deduction.location or "Main Store",
+            batch_number=deduction.batch_number,
+            expiry_date=deduction.expiry_date,
+            unit_cost_price=deduction.unit_cost_price,
+            unit_selling_price=deduction.unit_selling_price or sale.unit_price,
+        ))
+        remaining -= restored_quantity
+        if remaining <= 0:
+            break
+
+    # Legacy sale movements may not carry sale_id/batch linkage. Restore any
+    # unmatched amount to the exact product variant without inventing a batch.
+    if remaining > 0:
+        db.add(models.StockMovement(
+            user_id=actor_user_id,
+            branch_id=branch_id,
+            product_id=sale.product_id,
+            variant_id=sale.variant_id,
+            sale_id=sale.id,
+            change=remaining,
+            reason="Customer Return - Resellable",
+            location="Main Store",
+            unit_selling_price=sale.unit_price,
+        ))
+
+
+def _sale_return_read(db: Session, sale_return: models.SaleReturn, created_by_name: str | None) -> schemas.SaleReturnRead:
+    product = db.get(models.Product, sale_return.product_id)
+    variant = db.get(models.ProductVariant, sale_return.variant_id) if sale_return.variant_id else None
+    return schemas.SaleReturnRead(
+        id=sale_return.id,
+        sale_id=sale_return.sale_id,
+        product_id=sale_return.product_id,
+        variant_id=sale_return.variant_id,
+        variant_label=variant.label if variant else None,
+        product_name=product.name if product else None,
+        quantity_returned=sale_return.quantity_returned,
+        refund_amount=sale_return.refund_amount,
+        refund_method=sale_return.refund_method,
+        reason=sale_return.reason,
+        item_condition=_condition_from_values(sale_return.item_condition, sale_return.reason),
+        restock=sale_return.restock,
+        created_at=sale_return.created_at,
+        created_by_name=created_by_name,
+    )
+
 
 @router.post("", response_model=schemas.SaleReturnRead)
 def create_return(
@@ -65,7 +178,8 @@ def create_return(
     ) or Decimal(0)
     
     # Validate return quantity
-    remaining_returnable = sale.quantity - already_returned
+    supplied_quantity = sale.supplied_quantity if sale.supplied_quantity is not None else sale.quantity
+    remaining_returnable = supplied_quantity - already_returned
     if payload.quantity_returned > remaining_returnable:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -73,31 +187,34 @@ def create_return(
         )
     
     # Create the return record
+    item_condition = _resolve_item_condition(payload)
+    should_restock = bool(payload.restock and item_condition == "resellable")
     sale_return = models.SaleReturn(
         user_id=current_user.id,
         branch_id=active_branch_id,
         sale_id=payload.sale_id,
         product_id=sale.product_id,
+        variant_id=sale.variant_id,
         quantity_returned=payload.quantity_returned,
         refund_amount=payload.refund_amount,
         refund_method=payload.refund_method,
         reason=payload.reason,
-        restock=payload.restock,
+        item_condition=item_condition,
+        restock=should_restock,
     )
     db.add(sale_return)
     
     # Add stock back to inventory if restocking
-    if payload.restock:
-        movement = models.StockMovement(
-            user_id=current_user.id,
+    if should_restock:
+        _restore_exact_sale_item_stock(
+            db=db,
+            sale=sale,
+            tenant_user_ids=tenant_user_ids,
+            actor_user_id=current_user.id,
             branch_id=active_branch_id,
-            product_id=sale.product_id,
-            sale_id=sale.id,
-            change=payload.quantity_returned,  # Positive = adding back to stock
-            reason="Customer Return",
-            location="Main Store",
+            quantity=payload.quantity_returned,
+            already_returned=already_returned,
         )
-        db.add(movement)
     
     # If original sale was credit, reduce the creditor's debt
     if sale.payment_method == "credit" and payload.refund_method == "credit_to_account":
@@ -129,22 +246,7 @@ def create_return(
     db.commit()
     db.refresh(sale_return)
     
-    # Get product name for response
-    product = db.get(models.Product, sale.product_id)
-    
-    return schemas.SaleReturnRead(
-        id=sale_return.id,
-        sale_id=sale_return.sale_id,
-        product_id=sale_return.product_id,
-        product_name=product.name if product else None,
-        quantity_returned=sale_return.quantity_returned,
-        refund_amount=sale_return.refund_amount,
-        refund_method=sale_return.refund_method,
-        reason=sale_return.reason,
-        restock=sale_return.restock,
-        created_at=sale_return.created_at,
-        created_by_name=current_user.name,
-    )
+    return _sale_return_read(db, sale_return, current_user.name)
 
 
 @router.get("", response_model=list[schemas.SaleReturnRead])
@@ -170,21 +272,8 @@ def list_returns(
     
     result = []
     for r in returns:
-        product = db.get(models.Product, r.product_id)
         creator = db.get(models.User, r.user_id)
-        result.append(schemas.SaleReturnRead(
-            id=r.id,
-            sale_id=r.sale_id,
-            product_id=r.product_id,
-            product_name=product.name if product else None,
-            quantity_returned=r.quantity_returned,
-            refund_amount=r.refund_amount,
-            refund_method=r.refund_method,
-            reason=r.reason,
-            restock=r.restock,
-            created_at=r.created_at,
-            created_by_name=creator.name if creator else None,
-        ))
+        result.append(_sale_return_read(db, r, creator.name if creator else None))
     
     return result
 
@@ -224,21 +313,8 @@ def get_returns_for_sale(
     
     result = []
     for r in returns:
-        product = db.get(models.Product, r.product_id)
         creator = db.get(models.User, r.user_id)
-        result.append(schemas.SaleReturnRead(
-            id=r.id,
-            sale_id=r.sale_id,
-            product_id=r.product_id,
-            product_name=product.name if product else None,
-            quantity_returned=r.quantity_returned,
-            refund_amount=r.refund_amount,
-            refund_method=r.refund_method,
-            reason=r.reason,
-            restock=r.restock,
-            created_at=r.created_at,
-            created_by_name=creator.name if creator else None,
-        ))
+        result.append(_sale_return_read(db, r, creator.name if creator else None))
     
     return result
 

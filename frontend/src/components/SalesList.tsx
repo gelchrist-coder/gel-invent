@@ -276,7 +276,7 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                               >
                                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
                                   <div>
-                                    <div style={{ fontSize: 13, color: "#64748b", fontWeight: 700, marginBottom: 4 }}>Item</div>
+                                    <div style={{ fontSize: 13, color: "#64748b", fontWeight: 700, marginBottom: 4 }}>Receipt item</div>
                                     <div style={{ fontWeight: 700, color: "#111827" }}>{item.productName}</div>
                                   </div>
                                   <div
@@ -326,7 +326,7 @@ export default function SalesList({ sales, products, onDelete, onRefresh, allowD
                                       fontWeight: 600,
                                     }}
                                   >
-                                    Return
+                                    Return This Item
                                   </button>
                                   {allowDelete && (
                                     <button

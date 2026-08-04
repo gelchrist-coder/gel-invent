@@ -10,6 +10,23 @@ type ReturnFormProps = {
 };
 
 type RefundMethod = "cash" | "credit_to_account" | "store_credit" | "no_refund";
+type ItemCondition = "resellable" | "damaged" | "expired" | "defective";
+
+const RETURN_REASONS = [
+  { value: "wrong_item", label: "Wrong Item Delivered" },
+  { value: "wrong_size", label: "Wrong Size/Specification" },
+  { value: "changed_mind", label: "Customer Changed Mind" },
+  { value: "exchange", label: "Exchange for Other Product" },
+  { value: "quality_issue", label: "Quality Issue" },
+  { value: "other", label: "Other" },
+];
+
+const ITEM_CONDITIONS: Array<{ value: ItemCondition; label: string; help: string }> = [
+  { value: "resellable", label: "Good / can be resold", help: "Can be returned to available inventory." },
+  { value: "damaged", label: "Damaged", help: "Recorded as damaged stock and not made available for sale." },
+  { value: "expired", label: "Expired", help: "Recorded as expired stock and not made available for sale." },
+  { value: "defective", label: "Defective", help: "Recorded as defective stock and not made available for sale." },
+];
 
 export default function ReturnForm({ sale, product, onClose, onSuccess }: ReturnFormProps) {
   const [quantityReturned, setQuantityReturned] = useState(1);
@@ -19,35 +36,26 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
   );
   const [reasonCategory, setReasonCategory] = useState("");
   const [reasonDetails, setReasonDetails] = useState("");
+  const [itemCondition, setItemCondition] = useState<ItemCondition>("resellable");
   const [restock, setRestock] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [existingReturns, setExistingReturns] = useState<SaleReturn[]>([]);
   const [loadingReturns, setLoadingReturns] = useState(true);
 
-  // Reason categories - separate restockable and non-restockable
-  const RESTOCKABLE_REASONS = [
-    { value: "wrong_item", label: "Wrong Item Delivered" },
-    { value: "wrong_size", label: "Wrong Size/Specification" },
-    { value: "changed_mind", label: "Customer Changed Mind" },
-    { value: "exchange", label: "Exchange for Other Product" },
-    { value: "other", label: "Other" },
-  ];
-  
-  const NON_RESTOCKABLE_REASONS = [
-    { value: "damaged", label: "Damaged (Record as Loss)" },
-    { value: "expired", label: "Expired (Record as Loss)" },
-    { value: "defective", label: "Defective (Record as Loss)" },
-  ];
-  
-  const REASON_CATEGORIES = [...RESTOCKABLE_REASONS, ...NON_RESTOCKABLE_REASONS];
-  
-  // Check if current reason is a loss reason (non-restockable)
-  const isLossReason = NON_RESTOCKABLE_REASONS.some(r => r.value === reasonCategory);
+  const isLossCondition = itemCondition !== "resellable";
+  const selectedCondition = ITEM_CONDITIONS.find((condition) => condition.value === itemCondition);
+  const variantLabel = sale.variant_id
+    ? product?.variants?.find((variant) => variant.id === sale.variant_id)?.label
+    : undefined;
 
   // Calculate max quantity that can be returned
   const totalReturned = existingReturns.reduce((sum, r) => sum + r.quantity_returned, 0);
-  const maxQuantity = sale.quantity - totalReturned;
+  const suppliedQuantity = sale.supplied_quantity ?? sale.quantity;
+  const maxQuantity = suppliedQuantity - totalReturned;
+  const quantityStep = product?.allows_fractional_sales
+    ? Number(product.quantity_step || 0.01)
+    : 1;
 
   useEffect(() => {
     // Fetch existing returns for this sale
@@ -77,8 +85,8 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (quantityReturned <= 0) {
-      setError("Quantity must be at least 1");
+    if (!Number.isFinite(quantityReturned) || quantityReturned < quantityStep) {
+      setError(`Quantity must be at least ${quantityStep}`);
       return;
     }
     
@@ -87,7 +95,7 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
       return;
     }
 
-    if (refundAmount < 0) {
+    if (!Number.isFinite(refundAmount) || refundAmount < 0) {
       setError("Refund amount cannot be negative");
       return;
     }
@@ -103,15 +111,15 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
     }
 
     // Build the full reason string
-    const selectedReason = REASON_CATEGORIES.find(r => r.value === reasonCategory);
+    const selectedReason = RETURN_REASONS.find(r => r.value === reasonCategory);
     const fullReason = reasonCategory === "other" 
       ? reasonDetails.trim()
       : reasonDetails.trim() 
         ? `${selectedReason?.label}: ${reasonDetails.trim()}`
         : selectedReason?.label || "";
 
-    // For loss reasons, never restock
-    const shouldRestock = isLossReason ? false : restock;
+    // Damaged, expired and defective units must never return to sellable stock.
+    const shouldRestock = !isLossCondition && restock;
 
     setLoading(true);
     setError("");
@@ -123,6 +131,7 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
         refund_amount: refundMethod === "no_refund" ? 0 : refundAmount,
         refund_method: refundMethod === "no_refund" ? "exchange" : refundMethod,
         reason: fullReason,
+        item_condition: itemCondition,
         restock: shouldRestock,
       });
       onSuccess();
@@ -192,7 +201,7 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
         >
           <h3 style={{ margin: "0 0 16px 0", color: "#dc2626" }}>All Items Already Returned</h3>
           <p style={{ margin: "0 0 16px 0", color: "#6b7280" }}>
-            All {sale.quantity} items from this sale have already been returned.
+            All {suppliedQuantity} supplied units from this receipt item have already been returned.
           </p>
           <button
             onClick={onClose}
@@ -240,7 +249,7 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 style={{ margin: "0 0 8px 0" }}>Process Return</h3>
+        <h3 style={{ margin: "0 0 8px 0" }}>Return Sale Item</h3>
         
         {/* Sale Info */}
         <div
@@ -252,10 +261,10 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
           }}
         >
           <p style={{ margin: "0 0 4px 0", fontWeight: 600 }}>
-            {product?.name || `Product #${sale.product_id}`}
+            {product?.name || `Product #${sale.product_id}`}{variantLabel ? ` · ${variantLabel}` : ""}
           </p>
           <p style={{ margin: 0, fontSize: "0.875rem", color: "#6b7280" }}>
-            Original sale: {sale.quantity} × GHS {Number(sale.unit_price).toFixed(2)} = GHS {Number(sale.total_price).toFixed(2)}
+            Receipt item #{sale.id} · Sold: {sale.quantity} × GHS {Number(sale.unit_price).toFixed(2)}
           </p>
           {totalReturned > 0 && (
             <p style={{ margin: "4px 0 0 0", fontSize: "0.875rem", color: "#dc2626" }}>
@@ -286,8 +295,9 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
             </label>
             <input
               type="number"
-              min={1}
+              min={quantityStep}
               max={maxQuantity}
+              step={quantityStep}
               value={quantityReturned}
               onChange={(e) => setQuantityReturned(Math.min(Number(e.target.value), maxQuantity))}
               style={{
@@ -325,6 +335,43 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
 
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", marginBottom: 6, fontWeight: 500 }}>
+              Condition of Returned Item
+            </label>
+            <select
+              value={itemCondition}
+              onChange={(e) => {
+                const nextCondition = e.target.value as ItemCondition;
+                setItemCondition(nextCondition);
+                setRestock(nextCondition === "resellable");
+              }}
+              style={{
+                width: "100%",
+                padding: 10,
+                borderRadius: 4,
+                border: "1px solid #ddd",
+                boxSizing: "border-box",
+              }}
+            >
+              {ITEM_CONDITIONS.map((condition) => (
+                <option key={condition.value} value={condition.value}>
+                  {condition.label}
+                </option>
+              ))}
+            </select>
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: "0.75rem",
+                color: isLossCondition ? "#dc2626" : "#64748b",
+                fontWeight: isLossCondition ? 600 : 400,
+              }}
+            >
+              {selectedCondition?.help} If returned units have different conditions, process each condition separately.
+            </p>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", marginBottom: 6, fontWeight: 500 }}>
               Reason for Return
             </label>
             <select
@@ -338,11 +385,6 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
                 } else if (refundMethod === "no_refund" && newReason !== "exchange") {
                   setRefundMethod(sale.payment_method === "credit" ? "credit_to_account" : "cash");
                 }
-                // Auto-uncheck restock for loss reasons
-                const isLoss = NON_RESTOCKABLE_REASONS.some(r => r.value === newReason);
-                if (isLoss) {
-                  setRestock(false);
-                }
               }}
               style={{
                 width: "100%",
@@ -353,26 +395,12 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
               }}
             >
               <option value="">-- Select a reason --</option>
-              <optgroup label="Restockable Returns">
-                {RESTOCKABLE_REASONS.map((cat) => (
-                  <option key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Loss/Damage (Not Restockable)">
-                {NON_RESTOCKABLE_REASONS.map((cat) => (
-                  <option key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </option>
-                ))}
-              </optgroup>
+              {RETURN_REASONS.map((cat) => (
+                <option key={cat.value} value={cat.value}>
+                  {cat.label}
+                </option>
+              ))}
             </select>
-            {isLossReason && (
-              <p style={{ margin: "6px 0 0 0", fontSize: "0.75rem", color: "#dc2626", fontWeight: 500 }}>
-                This will be recorded as a loss and will NOT be restocked
-              </p>
-            )}
           </div>
 
           {reasonCategory && (
@@ -429,7 +457,7 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
             )}
           </div>
 
-          {!isLossReason && (
+          {!isLossCondition && (
             <div style={{ marginBottom: 20 }}>
               <label
                 style={{
@@ -448,7 +476,7 @@ export default function ReturnForm({ sale, product, onClose, onSuccess }: Return
                 <span>
                   <span style={{ fontWeight: 500 }}>Return items to inventory</span>
                   <span style={{ display: "block", fontSize: "0.75rem", color: "#6b7280" }}>
-                    Uncheck if items cannot be resold
+                    Only use this when the returned item has passed inspection
                   </span>
                 </span>
               </label>

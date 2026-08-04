@@ -400,6 +400,7 @@ class SaleReturnCreate(BaseModel):
     refund_amount: Decimal = Field(..., ge=0, decimal_places=2)
     refund_method: str = Field(default="cash", max_length=50)
     reason: str | None = Field(default=None, max_length=500)
+    item_condition: str = Field(default="resellable", pattern="^(resellable|damaged|expired|defective)$")
     restock: bool = Field(default=True)
 
 
@@ -407,11 +408,14 @@ class SaleReturnRead(BaseModel):
     id: int
     sale_id: int
     product_id: int
+    variant_id: int | None = None
+    variant_label: str | None = None
     product_name: str | None = None
     quantity_returned: Decimal
     refund_amount: Decimal
     refund_method: str
     reason: str | None
+    item_condition: str = "resellable"
     restock: bool
     created_at: datetime
     created_by_name: str | None = None

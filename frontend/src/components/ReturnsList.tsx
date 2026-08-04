@@ -53,9 +53,38 @@ export default function ReturnsList({ products }: ReturnsListProps) {
     }
   };
 
-  const getProductName = (productId: number) => {
-    const product = products.find((p) => p.id === productId);
-    return product?.name || `Product #${productId}`;
+  const getProductName = (saleReturn: SaleReturn) => {
+    const product = products.find((candidate) => candidate.id === saleReturn.product_id);
+    const productName = saleReturn.product_name || product?.name || `Product #${saleReturn.product_id}`;
+    const variantName = saleReturn.variant_label
+      || (saleReturn.variant_id ? product?.variants?.find((variant) => variant.id === saleReturn.variant_id)?.label : null);
+    return variantName ? `${productName} · ${variantName}` : productName;
+  };
+
+  const getConditionBadge = (condition: SaleReturn["item_condition"]) => {
+    const labels: Record<SaleReturn["item_condition"], string> = {
+      resellable: "Good / resellable",
+      damaged: "Damaged",
+      expired: "Expired",
+      defective: "Defective",
+    };
+    const isSellable = condition === "resellable";
+    return (
+      <span
+        style={{
+          display: "inline-block",
+          padding: "3px 8px",
+          borderRadius: 999,
+          fontSize: 11,
+          fontWeight: 700,
+          backgroundColor: isSellable ? "#dcfce7" : "#fee2e2",
+          color: isSellable ? "#166534" : "#b91c1c",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {labels[condition] || "Good / resellable"}
+      </span>
+    );
   };
 
   const formatDate = (dateStr: string) => {
@@ -137,7 +166,7 @@ export default function ReturnsList({ products }: ReturnsListProps) {
       <div>
         <p style={{ margin: "0 0 8px", color: "#dc2626", fontSize: 13 }}>{error}</p>
         <button
-          onClick={loadReturns}
+          onClick={() => void loadReturns()}
           style={{
             padding: "4px 12px",
             fontSize: 12,
@@ -205,6 +234,9 @@ export default function ReturnsList({ products }: ReturnsListProps) {
               <th style={{ padding: "8px 6px", textAlign: "center", fontWeight: 600, color: "#374151" }}>
                 Qty
               </th>
+              <th style={{ padding: "8px 6px", textAlign: "left", fontWeight: 600, color: "#374151" }}>
+                Condition
+              </th>
               <th style={{ padding: "8px 6px", textAlign: "right", fontWeight: 600, color: "#374151" }}>
                 Refund
               </th>
@@ -215,7 +247,7 @@ export default function ReturnsList({ products }: ReturnsListProps) {
                 Reason
               </th>
               <th style={{ padding: "8px 6px", textAlign: "center", fontWeight: 600, color: "#374151" }}>
-                Restocked
+                Stock Action
               </th>
             </tr>
           </thead>
@@ -226,11 +258,12 @@ export default function ReturnsList({ products }: ReturnsListProps) {
                   {formatDate(ret.created_at)}
                 </td>
                 <td style={{ padding: "10px 6px", fontWeight: 500 }}>
-                  {getProductName(ret.product_id)}
+                  {getProductName(ret)}
                 </td>
                 <td style={{ padding: "10px 6px", textAlign: "center" }}>
                   {ret.quantity_returned}
                 </td>
+                <td style={{ padding: "10px 6px" }}>{getConditionBadge(ret.item_condition || "resellable")}</td>
                 <td style={{ padding: "10px 6px", textAlign: "right", fontWeight: 600, color: "#dc2626" }}>
                   GHS {Number(ret.refund_amount).toFixed(2)}
                 </td>
@@ -240,9 +273,11 @@ export default function ReturnsList({ products }: ReturnsListProps) {
                 <td style={{ padding: "10px 6px" }}>{getReasonBadge(ret.reason || "No reason")}</td>
                 <td style={{ padding: "10px 6px", textAlign: "center" }}>
                   {ret.restock ? (
-                    <span style={{ color: "#10b981", fontWeight: 600 }}>Yes</span>
+                    <span style={{ color: "#15803d", fontWeight: 600 }}>Restocked</span>
+                  ) : ret.item_condition && ret.item_condition !== "resellable" ? (
+                    <span style={{ color: "#b91c1c", fontWeight: 600 }}>Excluded from stock</span>
                   ) : (
-                    <span style={{ color: "#ef4444" }}>No</span>
+                    <span style={{ color: "#64748b", fontWeight: 600 }}>Not restocked</span>
                   )}
                 </td>
               </tr>

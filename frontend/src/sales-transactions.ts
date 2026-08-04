@@ -161,7 +161,12 @@ export function groupSalesIntoTransactions(
       : previousLegacySale && canGroupLegacySales(previousLegacySale.sale, sale)
         ? previousLegacySale.key
         : `legacy:${sale.id}`;
-    const productName = productById.get(sale.product_id)?.name || `Product #${sale.product_id}`;
+    const product = productById.get(sale.product_id);
+    const variant = sale.variant_id
+      ? product?.variants?.find((candidate) => candidate.id === sale.variant_id)
+      : undefined;
+    const baseProductName = product?.name || `Product #${sale.product_id}`;
+    const productName = variant?.label ? `${baseProductName} · ${variant.label}` : baseProductName;
     const unitPrice = toFiniteNumber(sale.unit_price);
     const totalPrice = toFiniteNumber(sale.total_price);
     const current = grouped.get(key);

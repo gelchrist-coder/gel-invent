@@ -1397,11 +1397,14 @@ export type SaleReturn = {
   id: number;
   sale_id: number;
   product_id: number;
+  variant_id: number | null;
+  variant_label: string | null;
   product_name: string | null;
   quantity_returned: number;
   refund_amount: number;
   refund_method: string;
   reason: string | null;
+  item_condition: "resellable" | "damaged" | "expired" | "defective";
   restock: boolean;
   created_at: string;
   created_by_name: string | null;
@@ -1413,6 +1416,7 @@ export type NewSaleReturn = {
   refund_amount: number;
   refund_method: string;
   reason?: string;
+  item_condition?: "resellable" | "damaged" | "expired" | "defective";
   restock?: boolean;
 };
 
