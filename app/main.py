@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .database import Base, engine, ensure_critical_schema, ensure_warehouse_purchase_schema
+from .database import Base, engine, ensure_critical_schema, ensure_sales_receipt_schema, ensure_warehouse_purchase_schema
 from .auth import get_current_active_user
 from .permissions import ensure_permission
 from .routers import products, sales, inventory, revenue, creditors, reports, auth, employees, branches, data, settings, returns, warehouses
@@ -613,6 +613,8 @@ async def on_startup() -> None:
     # requests. On serverless, this small guard must finish before requests are
     # accepted; background tasks may be suspended before their transaction ends.
     await asyncio.to_thread(ensure_warehouse_purchase_schema)
+    # Sales history and checkout likewise require all receipt snapshot columns.
+    await asyncio.to_thread(ensure_sales_receipt_schema)
 
     async def _verify_schema() -> None:
         # Always apply critical auth schema changes to avoid request-time failures

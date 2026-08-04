@@ -117,6 +117,33 @@ def ensure_warehouse_purchase_schema() -> None:
             )
 
 
+def ensure_sales_receipt_schema() -> None:
+    """Install receipt-accounting columns before sales requests are served.
+
+    Sale queries select the complete ORM model, so even a history GET fails if
+    one of these columns is absent. The information-schema fast path avoids
+    table locks once the deployment has been upgraded.
+    """
+    required_columns = {
+        "discount_amount": "NUMERIC(10,2) DEFAULT 0",
+        "tax_snapshot": "JSONB",
+        "currency_code": "VARCHAR(3) DEFAULT 'GHS'",
+    }
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'sales'"
+            )
+        ).all()
+        present = {str(row.column_name) for row in rows}
+        for column_name, column_type in required_columns.items():
+            if column_name not in present:
+                conn.execute(
+                    text(f"ALTER TABLE sales ADD COLUMN IF NOT EXISTS {column_name} {column_type}")
+                )
+
+
 def ensure_critical_schema() -> None:
     """Best-effort runtime schema guard for columns queried on every request.
 
@@ -133,13 +160,11 @@ def ensure_critical_schema() -> None:
 
         try:
             ensure_warehouse_purchase_schema()
+            ensure_sales_receipt_schema()
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS supabase_user_id VARCHAR(64)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)"))
                 conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS permission_overrides JSONB"))
-                conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10,2) DEFAULT 0"))
-                conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS tax_snapshot JSONB"))
-                conn.execute(text("ALTER TABLE sales ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
                 conn.execute(text("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency_code VARCHAR(3) DEFAULT 'GHS'"))
                 conn.execute(text("ALTER TABLE system_settings ALTER COLUMN uses_expiry_tracking SET DEFAULT FALSE"))
             _critical_schema_ready = True
